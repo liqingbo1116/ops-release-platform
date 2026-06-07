@@ -1,0 +1,5 @@
+﻿[
+  {"id":"DEP-20260607-009","productName":"产品 A","targetEnvironmentName":"项目 X 生产","source":"BL-20260607-0001","currentStep":"恢复 MinIO","progress":46,"status":"RUNNING"},
+  {"id":"DEP-20260606-018","productName":"产品 A","targetEnvironmentName":"项目 Y 预发","source":"pkg-0606","currentStep":"健康检查","progress":100,"status":"SUCCESS"},
+  {"id":"DEP-20260605-011","productName":"产品 B","targetEnvironmentName":"交付 A 环境","source":"shell 脚本","currentStep":"Nacos 配置","progress":62,"status":"FAILED"}
+]

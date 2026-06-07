@@ -10,12 +10,14 @@
 - 页面路由
 - Layout、导航、顶部栏
 - 10 个核心页面
+- 登录页、用户权限页、更新日志页
 - mock 数据接入
 - 基础筛选、勾选、抽屉、日志展示
+- 路由守卫和 mock 登录态
 
 ## 阶段 2：Go 后端 mock API
 
-目标：后端提供稳定 API，前端从 API 获取数据。
+目标：后端提供稳定 API，前端从 API 获取数据，并提供 mock 登录、权限和更新日志接口。
 
 交付：
 
@@ -24,6 +26,9 @@
 - mock repository
 - 统一响应格式
 - 基础错误码
+- mock auth API
+- 用户、角色、权限 mock API
+- 更新日志 mock API
 
 ## 阶段 3：数据库与任务模型
 
@@ -33,6 +38,7 @@
 
 - 数据库迁移
 - GORM model
+- 用户、角色、权限、更新日志、操作日志模型
 - 发布单、部署任务 CRUD
 - Redis Stream mock Agent worker
 

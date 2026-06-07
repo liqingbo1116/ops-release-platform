@@ -1,5 +1,7 @@
 node_modules/
 dist/
+postgres_data/
+redis_data/
 
 *.log
 

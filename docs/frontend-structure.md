@@ -5,6 +5,7 @@
 ```text
 pages/
   DashboardPage.vue
+  LoginPage.vue
   EnvironmentPage.vue
   AgentPage.vue
   BaselineListPage.vue
@@ -14,6 +15,10 @@ pages/
   ReleaseDetailPage.vue
   DeployListPage.vue
   DeployDetailPage.vue
+  UserListPage.vue
+  RoleListPage.vue
+  EnvironmentPermissionPage.vue
+  ChangelogPage.vue
 ```
 
 ## 组件
@@ -33,6 +38,8 @@ components/
   ServiceDiffTable.vue
   ReleaseRiskPanel.vue
   DeployStepPanel.vue
+  PermissionButton.vue
+  ChangelogTimeline.vue
 ```
 
 ## Store
@@ -44,6 +51,9 @@ stores/
   baselineStore.ts
   releaseStore.ts
   deployStore.ts
+  authStore.ts
+  userStore.ts
+  changelogStore.ts
 ```
 
 ## API Client
@@ -55,6 +65,9 @@ api/
   baselines.ts
   releases.ts
   deployTasks.ts
+  auth.ts
+  users.ts
+  changelog.ts
 ```
 
 ## 交互规则
@@ -65,3 +78,7 @@ api/
 - 所有长表格必须支持横向滚动。
 - 日志面板使用深色终端样式。
 - Agent、环境配置、服务失败详情使用右侧抽屉。
+- 未登录访问业务路由时跳转登录页。
+- 登录后顶部栏展示当前用户、角色和退出入口。
+- 用户、角色、环境权限页面先使用 mock 数据，不接真实 SSO。
+- 更新日志页面按版本号倒序展示，支持版本号、类型和关键词筛选。

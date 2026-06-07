@@ -55,25 +55,66 @@
 - `/api/deploy-tasks`
 - `/api/deploy-tasks/{id}`
 
-## 任务 4：前后端联调
+## 任务 4：登录与权限 mock
+
+```text
+请补充登录与基础权限能力。前端实现登录页、路由守卫、顶部栏用户信息、退出登录、用户管理、角色管理、环境权限配置页面。后端实现 mock 登录、当前用户、用户列表、角色列表、权限列表接口。先使用 mock token，不接真实 SSO，不保存真实密码。
+```
+
+重点：
+
+- 未登录访问业务页面时跳转登录页
+- 登录后能进入工作台
+- 顶部栏展示当前用户和角色
+- 退出登录后清理本地 token
+- 用户、角色、环境权限页面使用 mock 数据
+- 写操作入口按角色做基础按钮级控制
+
+重点接口：
+
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+- `GET /api/users`
+- `GET /api/roles`
+- `GET /api/permissions`
+
+## 任务 5：更新日志页面与 mock API
+
+```text
+请补充更新日志页面，用于记录平台每个小版本上线后的迭代与更新情况。前端在系统管理下增加更新日志菜单和页面，后端提供 mock changelog API。
+```
+
+重点：
+
+- 页面展示版本号、上线时间、更新类型、新增功能、修复问题、已知问题、发布人
+- 支持按版本号、更新类型、关键词筛选
+- 数据先来自 `mocks/changelog.json` 或后端 mock repository
+- 暂不做富文本编辑和审批发布
+
+重点接口：
+
+- `GET /api/changelog`
+
+## 任务 6：前后端联调
 
 ```text
 请把前端 mock JSON 替换为后端 API 调用。保留一个 mock 模式开关，便于没有后端时前端仍可运行。
 ```
 
-## 任务 5：数据库模型
+## 任务 7：数据库模型
 
 ```text
-请根据 docs/domain-model.md 设计 PostgreSQL 表结构和 GORM model，添加数据库迁移。先支持环境、Agent、基线、发布单、部署任务、操作日志。
+请根据 docs/domain-model.md 设计 PostgreSQL 表结构和 GORM model，添加数据库迁移。先支持环境、Agent、基线、发布单、部署任务、用户、角色、权限、更新日志、操作日志。
 ```
 
-## 任务 6：任务与 Agent 模拟
+## 任务 8：任务与 Agent 模拟
 
 ```text
 请使用 Redis Stream 实现平台任务队列和 mock Agent worker。创建发布单或部署任务后，mock worker 按步骤更新任务状态并追加日志。
 ```
 
-## 任务 7：测试和收口
+## 任务 9：测试和收口
 
 ```text
 请根据 docs/acceptance-criteria.md 补充前端关键交互测试和后端 API 测试，确保 MVP 验收项通过。

@@ -1,0 +1,23 @@
+﻿{
+  "id":"REL-20260607-031",
+  "type":"BASELINE_DIFF",
+  "sourceBaselineId":"BL-20260607-0001",
+  "targetEnvironmentName":"项目 X 生产",
+  "status":"PARTIAL_FAILED",
+  "progress":81,
+  "agentName":"agent-project-x",
+  "steps":[
+    {"name":"同步镜像到项目 Harbor","status":"SUCCESS","message":"68 个镜像全部同步完成"},
+    {"name":"更新 K8s 服务镜像 tag","status":"PARTIAL_FAILED","message":"66 个成功，2 个等待重试"},
+    {"name":"HTTP 健康检查","status":"FAILED","message":"web-console 返回 503，order-service 超时"}
+  ],
+  "failures":[
+    {"serviceName":"web-console","reason":"HTTP 503","suggestion":"检查 Nginx upstream、服务端口、ConfigMap 与 Pod 日志"},
+    {"serviceName":"order-service","reason":"健康检查超时","suggestion":"检查启动耗时、数据库连接、readinessProbe 超时时间"}
+  ],
+  "logs":[
+    "[15:38:19] OK image sync completed total=68 failed=0",
+    "[15:43:26] ERROR health check failed web-console status=503",
+    "[15:43:44] ERROR health check timeout order-service timeout=10s"
+  ]
+}
