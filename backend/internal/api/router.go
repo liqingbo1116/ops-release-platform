@@ -6,11 +6,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ops-release-platform/backend/internal/middleware"
 	"ops-release-platform/backend/internal/repository"
 )
 
 func NewRouter() *gin.Engine {
 	router := gin.Default()
+	router.Use(middleware.CORS())
 	router.NoRoute(NoRoute)
 
 	router.GET("/healthz", func(c *gin.Context) {
@@ -29,6 +31,14 @@ func NewRouter() *gin.Engine {
 		log.Fatalf("load mock repository: %v", err)
 	}
 	handler := NewHandler(repo)
+
+	api.POST("/auth/login", handler.Login)
+	api.POST("/auth/logout", handler.Logout)
+	api.GET("/auth/me", handler.Me)
+	api.GET("/users", handler.ListUsers)
+	api.GET("/roles", handler.ListRoles)
+	api.GET("/permissions", handler.ListPermissions)
+	api.GET("/changelog", handler.ListChangelog)
 
 	api.GET("/environments", handler.ListEnvironments)
 	api.POST("/environments/:id/check", handler.CheckEnvironment)

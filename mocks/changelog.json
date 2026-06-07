@@ -1,0 +1,35 @@
+[
+  {
+    "id": "chg-0.3.0",
+    "version": "0.3.0",
+    "releasedAt": "2026-06-07T16:30:00+08:00",
+    "title": "后端 mock API 与登录权限",
+    "type": "FEATURE",
+    "operator": "平台团队",
+    "features": ["新增后端统一响应格式", "新增环境、Agent、基线、发布、部署 mock API", "新增登录、用户、角色、环境权限 mock"],
+    "fixes": ["修复 Go 加载带 BOM mock JSON 的解析问题"],
+    "knownIssues": ["登录 token 仍为 mock，不接真实 SSO"]
+  },
+  {
+    "id": "chg-0.2.0",
+    "version": "0.2.0",
+    "releasedAt": "2026-06-07T15:10:00+08:00",
+    "title": "前端静态页面工程化",
+    "type": "FEATURE",
+    "operator": "平台团队",
+    "features": ["完成 10 个核心页面", "接入 mock JSON", "实现差异筛选、服务勾选、抽屉和日志终端"],
+    "fixes": ["修复不可发布服务仍可被批量选择的问题"],
+    "knownIssues": ["前端尚未切换到后端 API 调用"]
+  },
+  {
+    "id": "chg-0.1.0",
+    "version": "0.1.0",
+    "releasedAt": "2026-06-07T13:40:00+08:00",
+    "title": "初始化工程",
+    "type": "IMPROVEMENT",
+    "operator": "平台团队",
+    "features": ["初始化 Vue 3 + Vite 前端工程", "初始化 Go + Gin 后端工程", "添加 docker-compose 基础服务"],
+    "fixes": [],
+    "knownIssues": ["Docker 需在目标环境安装后验证"]
+  }
+]

@@ -42,5 +42,14 @@ const groups = [
       { label: '部署任务详情', path: '/deploy-tasks/DEP-20260607-009' },
     ],
   },
+  {
+    title: '系统管理',
+    items: [
+      { label: '用户管理', path: '/users' },
+      { label: '角色管理', path: '/roles' },
+      { label: '环境权限', path: '/permissions/environments' },
+      { label: '更新日志', path: '/changelog' },
+    ],
+  },
 ]
 </script>

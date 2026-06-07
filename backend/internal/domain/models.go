@@ -141,3 +141,47 @@ type DeployDetail struct {
 	Steps                 []DeployStep `json:"steps"`
 	Logs                  []string     `json:"logs"`
 }
+
+type CurrentUser struct {
+	ID          string   `json:"id"`
+	Username    string   `json:"username"`
+	DisplayName string   `json:"displayName"`
+	Roles       []string `json:"roles"`
+	Permissions []string `json:"permissions"`
+}
+
+type User struct {
+	ID          string   `json:"id"`
+	Username    string   `json:"username"`
+	DisplayName string   `json:"displayName"`
+	Roles       []string `json:"roles"`
+	Status      string   `json:"status"`
+	LastLoginAt string   `json:"lastLoginAt"`
+}
+
+type Role struct {
+	Code        string   `json:"code"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+}
+
+type EnvironmentPermission struct {
+	EnvironmentID   string   `json:"environmentId"`
+	EnvironmentName string   `json:"environmentName"`
+	RoleCode        string   `json:"roleCode"`
+	Scope           string   `json:"scope"`
+	Actions         []string `json:"actions"`
+}
+
+type ChangelogEntry struct {
+	ID          string   `json:"id"`
+	Version     string   `json:"version"`
+	ReleasedAt  string   `json:"releasedAt"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"`
+	Operator    string   `json:"operator"`
+	Features    []string `json:"features"`
+	Fixes       []string `json:"fixes"`
+	KnownIssues []string `json:"knownIssues"`
+}

@@ -3,7 +3,8 @@ package config
 import "os"
 
 type Config struct {
-	Port string
+	Port        string
+	DatabaseDSN string
 }
 
 func Load() Config {
@@ -13,6 +14,7 @@ func Load() Config {
 	}
 
 	return Config{
-		Port: port,
+		Port:        port,
+		DatabaseDSN: os.Getenv("DATABASE_DSN"),
 	}
 }

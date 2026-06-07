@@ -21,6 +21,11 @@ type MockRepository struct {
 	releaseDetail  domain.ReleaseDetail
 	deployTasks    []domain.DeployTask
 	deployDetail   domain.DeployDetail
+	currentUser    domain.CurrentUser
+	users          []domain.User
+	roles          []domain.Role
+	permissions    []domain.EnvironmentPermission
+	changelog      []domain.ChangelogEntry
 }
 
 func NewMockRepository() (*MockRepository, error) {
@@ -34,6 +39,11 @@ func NewMockRepository() (*MockRepository, error) {
 		func() error { return loadJSON("mockdata/release-detail.json", &repo.releaseDetail) },
 		func() error { return loadJSON("mockdata/deploy-tasks.json", &repo.deployTasks) },
 		func() error { return loadJSON("mockdata/deploy-detail.json", &repo.deployDetail) },
+		func() error { return loadJSON("mockdata/auth-me.json", &repo.currentUser) },
+		func() error { return loadJSON("mockdata/users.json", &repo.users) },
+		func() error { return loadJSON("mockdata/roles.json", &repo.roles) },
+		func() error { return loadJSON("mockdata/permissions.json", &repo.permissions) },
+		func() error { return loadJSON("mockdata/changelog.json", &repo.changelog) },
 	}
 	for _, load := range loaders {
 		if err := load(); err != nil {
@@ -102,6 +112,35 @@ func (r *MockRepository) GetDeployDetail(id string) (domain.DeployDetail, bool) 
 		return domain.DeployDetail{}, false
 	}
 	return r.deployDetail, true
+}
+
+func (r *MockRepository) GetCurrentUser() domain.CurrentUser {
+	return r.currentUser
+}
+
+func (r *MockRepository) ListUsers(query string) []domain.User {
+	return filter(r.users, query, func(item domain.User) string {
+		return item.ID + " " + item.Username + " " + item.DisplayName + " " + strings.Join(item.Roles, " ") + " " + item.Status
+	})
+}
+
+func (r *MockRepository) ListRoles(query string) []domain.Role {
+	return filter(r.roles, query, func(item domain.Role) string {
+		return item.Code + " " + item.Name + " " + item.Description + " " + strings.Join(item.Permissions, " ")
+	})
+}
+
+func (r *MockRepository) ListPermissions(query string) []domain.EnvironmentPermission {
+	return filter(r.permissions, query, func(item domain.EnvironmentPermission) string {
+		return item.EnvironmentID + " " + item.EnvironmentName + " " + item.RoleCode + " " + item.Scope + " " + strings.Join(item.Actions, " ")
+	})
+}
+
+func (r *MockRepository) ListChangelog(query string) []domain.ChangelogEntry {
+	return filter(r.changelog, query, func(item domain.ChangelogEntry) string {
+		return item.ID + " " + item.Version + " " + item.Title + " " + item.Type + " " + item.Operator + " " +
+			strings.Join(item.Features, " ") + " " + strings.Join(item.Fixes, " ") + " " + strings.Join(item.KnownIssues, " ")
+	})
 }
 
 func filter[T any](items []T, query string, text func(T) string) []T {

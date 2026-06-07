@@ -19,6 +19,38 @@ func NewHandler(repo *repository.MockRepository) *Handler {
 	return &Handler{repo: repo}
 }
 
+func (h *Handler) Login(c *gin.Context) {
+	user := h.repo.GetCurrentUser()
+	OK(c, gin.H{
+		"token": "mock-token-admin",
+		"user":  user,
+	})
+}
+
+func (h *Handler) Logout(c *gin.Context) {
+	OK(c, gin.H{"success": true})
+}
+
+func (h *Handler) Me(c *gin.Context) {
+	OK(c, h.repo.GetCurrentUser())
+}
+
+func (h *Handler) ListUsers(c *gin.Context) {
+	OK(c, paginate(h.repo.ListUsers(c.Query("keyword")), c))
+}
+
+func (h *Handler) ListRoles(c *gin.Context) {
+	OK(c, paginate(h.repo.ListRoles(c.Query("keyword")), c))
+}
+
+func (h *Handler) ListPermissions(c *gin.Context) {
+	OK(c, paginate(h.repo.ListPermissions(c.Query("keyword")), c))
+}
+
+func (h *Handler) ListChangelog(c *gin.Context) {
+	OK(c, paginate(h.repo.ListChangelog(c.Query("keyword")), c))
+}
+
 func (h *Handler) ListEnvironments(c *gin.Context) {
 	OK(c, paginate(h.repo.ListEnvironments(c.Query("keyword")), c))
 }

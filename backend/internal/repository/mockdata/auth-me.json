@@ -1,0 +1,7 @@
+{
+  "id": "user-admin",
+  "username": "admin",
+  "displayName": "平台管理员",
+  "roles": ["PLATFORM_ADMIN"],
+  "permissions": ["environment:write", "agent:write", "baseline:write", "release:write", "deploy:write", "user:write", "changelog:write"]
+}

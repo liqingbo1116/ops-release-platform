@@ -361,3 +361,80 @@ body {
   display: grid;
   gap: 10px;
 }
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #eef4ff;
+}
+
+.login-panel {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 28px;
+  padding: 32px;
+  border: 1px solid #d8e2f0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 20px 45px rgb(15 23 42 / 10%);
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-row h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.brand-row p {
+  margin: 0;
+  color: #667085;
+}
+
+.login-button {
+  width: 100%;
+}
+
+.changelog-list {
+  display: grid;
+  gap: 12px;
+}
+
+.changelog-card {
+  border-radius: 8px;
+}
+
+.changelog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.changelog-version {
+  color: #111827;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.changelog-meta {
+  margin-top: 4px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.changelog-section {
+  margin-top: 14px;
+}
+
+.changelog-section ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #344054;
+}
