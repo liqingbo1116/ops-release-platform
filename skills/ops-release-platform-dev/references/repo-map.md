@@ -44,4 +44,5 @@
 - `skills/ops-release-platform-dev`: development runtime, validation, security, and Git workflow entrypoint.
 - `skills/ops-release-platform-todo`: completed work, current local work, backlog, and next-task selection.
 - `skills/ops-release-platform-architecture`: architecture map, module boundaries, data flow, and integration boundary.
+- `skills/ops-release-platform-deployment`: local startup, docker-compose usage, and deployment/runtime topology.
 - Update the relevant skill after major milestones so future sessions can rebuild context quickly.

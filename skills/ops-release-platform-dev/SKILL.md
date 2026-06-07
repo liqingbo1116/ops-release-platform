@@ -19,6 +19,7 @@ Use this skill before making code, docs, deployment, or Git changes in this repo
    - Validation, deployment, and Git workflow: `references/workflows.md`
    - TODO/backlog work is split into `../ops-release-platform-todo/`
    - Architecture decisions are split into `../ops-release-platform-architecture/`
+   - Deployment and local runtime rules are split into `../ops-release-platform-deployment/`
 3. Prefer existing project patterns over new abstractions.
 4. Keep third-party systems behind adapter interfaces. Do not implement real Jenkins, Harbor, Kubernetes, GitLab, ArgoCD, or Nacos integration unless explicitly requested.
 5. Never commit server credentials, `.secrets/`, deployment passwords, SSH connection details, or real external-system credentials.
@@ -30,7 +31,7 @@ Use this skill before making code, docs, deployment, or Git changes in this repo
 - MVP data source: mock JSON or backend mock API unless a task explicitly says to persist real data.
 - Agent behavior: use Redis Stream and mock worker for now.
 - Integration behavior: use mock adapters only; real adapters must preserve the existing interface contracts.
-- Local development runtime: run frontend and backend locally; load remote PostgreSQL and Redis settings from `.secrets/local-dev-env.ps1` before starting the backend.
+- Local development runtime: run frontend with npm and backend with `go run`; do not use docker-compose for frontend/backend during development. See `../ops-release-platform-deployment/`.
 - For user requests like "继续开发", choose the next clear item from `docs/development-plan.md` and current repository state.
 - For user requests like "提交", follow `docs/git-submit-workflow.md` and the extra checks in `references/workflows.md`.
 

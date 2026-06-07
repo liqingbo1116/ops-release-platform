@@ -9,6 +9,7 @@ skills/
   ops-release-platform-dev/
   ops-release-platform-todo/
   ops-release-platform-architecture/
+  ops-release-platform-deployment/
 ```
 
 每个功能一个独立 skill 目录，避免把开发流程、TODO、架构说明混在一个文件里。
@@ -54,13 +55,34 @@ skills/
 
 - `skills/ops-release-platform-architecture/references/architecture.md`
 
+### ops-release-platform-deployment
+
+部署与本地运行规则。适用于：
+
+- 判断前端、后端、PostgreSQL、Redis 应该如何启动。
+- 修改或验证 docker-compose 使用方式。
+- 记录研发阶段运行拓扑。
+
+重点规则：
+
+- 研发阶段前端必须通过 npm 命令启动，例如 `npm run dev`。
+- 研发阶段后端必须通过 Go 命令启动，例如 `go run ./cmd/server`。
+- 研发阶段不要通过 docker-compose 启动前端或后端。
+- PostgreSQL 和 Redis 使用 `.secrets/` 中记录的远程研发服务连接配置。
+- docker-compose 只用于明确的基础设施、部署或语法校验场景。
+
+维护位置：
+
+- `skills/ops-release-platform-deployment/references/deployment.md`
+
 ## 维护规则
 
 1. 重大功能完成或提交后，更新 `ops-release-platform-todo/references/todo.md`。
 2. 架构边界发生变化后，更新 `ops-release-platform-architecture/references/architecture.md`。
 3. 本地启动、验证、提交、安全规则变化后，更新 `ops-release-platform-dev/references/workflows.md`。
-4. 不在任何 skill 或 docs 中记录真实服务器连接信息、密码、token、SSH 端口或数据库连接串。
-5. 真实连接配置只保存在 `.secrets/`，该目录不得提交。
+4. 部署或本地运行拓扑变化后，更新 `ops-release-platform-deployment/references/deployment.md`。
+5. 不在任何 skill 或 docs 中记录真实服务器连接信息、密码、token、SSH 端口或数据库连接串。
+6. 真实连接配置只保存在 `.secrets/`，该目录不得提交。
 
 ## 校验
 
@@ -71,6 +93,7 @@ $env:PYTHONUTF8='1'
 python "$env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py" skills\ops-release-platform-dev
 python "$env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py" skills\ops-release-platform-todo
 python "$env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py" skills\ops-release-platform-architecture
+python "$env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py" skills\ops-release-platform-deployment
 ```
 
 Windows 下设置 `PYTHONUTF8=1` 是为了避免 Python 默认 GBK 读取 UTF-8 中文时失败。

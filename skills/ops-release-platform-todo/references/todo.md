@@ -34,6 +34,7 @@ These items are implemented locally but not committed at the time of this update
   - `ops-release-platform-dev`
   - `ops-release-platform-todo`
   - `ops-release-platform-architecture`
+  - `ops-release-platform-deployment`
 
 ## Next Suggested Tasks
 

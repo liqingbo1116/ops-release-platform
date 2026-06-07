@@ -51,6 +51,13 @@ Remove-Item -Recurse -Force frontend\dist -ErrorAction SilentlyContinue
 
 During development, run frontend and backend locally. PostgreSQL and Redis must be the remote services recorded in the local `.secrets/` files, not local containers.
 
+Strict rule:
+
+- Frontend must be started with npm commands, normally `npm run dev`.
+- Backend must be started with Go commands, normally `go run ./cmd/server`.
+- Do not use docker-compose to start frontend or backend during development.
+- Use `ops-release-platform-deployment` for detailed runtime and deployment rules.
+
 Before starting the backend in PowerShell, load the local secret environment file:
 
 ```powershell

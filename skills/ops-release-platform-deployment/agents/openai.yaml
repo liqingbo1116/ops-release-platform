@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ops Release Deployment"
+  short_description: "Development startup and deployment rules"
+  default_prompt: "Use -release-platform-deployment to run or deploy ops-release-platform correctly."
