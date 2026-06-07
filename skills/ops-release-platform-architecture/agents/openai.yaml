@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ops Release Architecture"
+  short_description: "Architecture map and integration boundaries"
+  default_prompt: "Use -release-platform-architecture to reason about ops-release-platform architecture changes."

@@ -7,11 +7,12 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ops-release-platform/backend/internal/agent"
+	"ops-release-platform/backend/internal/integration"
 	"ops-release-platform/backend/internal/middleware"
 	"ops-release-platform/backend/internal/repository"
 )
 
-func NewRouter(queue *agent.Queue) *gin.Engine {
+func NewRouter(queue *agent.Queue, integrations integration.Suite) *gin.Engine {
 	router := gin.Default()
 	router.Use(middleware.CORS())
 	router.NoRoute(NoRoute)
@@ -31,7 +32,7 @@ func NewRouter(queue *agent.Queue) *gin.Engine {
 	if err != nil {
 		log.Fatalf("load mock repository: %v", err)
 	}
-	handler := NewHandler(repo, queue)
+	handler := NewHandler(repo, queue, integrations)
 
 	api.POST("/auth/login", handler.Login)
 	api.POST("/auth/logout", handler.Logout)

@@ -41,6 +41,14 @@ func NotFound(c *gin.Context, message string) {
 	})
 }
 
+func BadRequest(c *gin.Context, message string) {
+	c.JSON(http.StatusBadRequest, Response{
+		Code:      "VALIDATION_ERROR",
+		Message:   message,
+		RequestID: requestID(),
+	})
+}
+
 func requestID() string {
 	return fmt.Sprintf("req-%s", time.Now().Format("20060102-150405.000000"))
 }

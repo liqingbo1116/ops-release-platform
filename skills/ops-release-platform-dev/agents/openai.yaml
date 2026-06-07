@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ops Release Platform Dev"
+  short_description: "项目开发上下文、状态与提交流程指南"
+  default_prompt: "Use $ops-release-platform-dev to continue development in the ops-release-platform repository."
+
+policy:
+  allow_implicit_invocation: true

@@ -50,6 +50,13 @@ go run ./cmd/server
 
 健康检查：`http://localhost:8080/healthz`
 
+可选环境变量：
+
+- `APP_PORT`：后端监听端口，默认 `8080`
+- `DATABASE_DSN`：PostgreSQL 连接串，不配置时跳过数据库迁移
+- `REDIS_ADDR`：Redis 地址，不配置时不启动 mock Agent worker
+- `INTEGRATION_MODE`：第三方系统 adapter 模式，默认 `mock`；当前只支持 `mock`
+
 ### Docker Compose
 
 ```bash

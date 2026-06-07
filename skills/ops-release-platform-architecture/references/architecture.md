@@ -1,0 +1,78 @@
+# Architecture Reference
+
+Last updated: 2026-06-07
+
+This is a compact architecture guide for Codex sessions. Use project docs as source of truth for detailed requirements.
+
+## Runtime Topology
+
+- Frontend runs locally during development.
+- Backend runs locally during development.
+- PostgreSQL and Redis are remote development services; connection settings live only in `.secrets/`.
+- Production-like local compose still exists, but normal development should not start local PostgreSQL/Redis unless the user explicitly changes the rule.
+
+## Backend Layers
+
+- `cmd/server`: process entrypoint.
+- `internal/app`: assembly layer. Owns config loading results, DB migration trigger, Redis queue setup, integration suite setup, and router startup.
+- `internal/api`: HTTP boundary. Owns Gin routes, handlers, response envelope, request/response behavior, and API tests.
+- `internal/domain`: DTOs and domain-shaped API structs.
+- `internal/repository`: mock repository, embedded mock data, GORM models, migrations.
+- `internal/agent`: Redis Stream queue and mock Agent worker.
+- `internal/integration`: external-system adapter contracts and mock adapters.
+- `internal/config`: environment variables.
+- `internal/middleware`: cross-cutting HTTP middleware.
+
+Introduce `internal/service` when handlers need to coordinate multiple repositories, queues, or adapters with meaningful business rules.
+
+## Frontend Layers
+
+- `src/api`: backend API clients and mock fallback access.
+- `src/stores`: Pinia state containers.
+- `src/router`: route definitions and auth guards.
+- `src/pages`: route-level views.
+- `src/components`: reusable UI components.
+- `src/style.css`: global visual system.
+
+Keep page components responsible for interaction composition; move reusable table/panel behavior into components when repeated.
+
+## Data Flow
+
+1. User acts in Vue page.
+2. Pinia store or API module calls backend REST API.
+3. Gin handler reads mock repository or coordinates queue/adapter.
+4. For release/deploy creation, backend enqueues Redis Stream task when `REDIS_ADDR` is configured.
+5. Mock Agent worker consumes stream, writes task status and logs to Redis keys.
+6. Frontend can poll task status API when task IDs are available.
+
+## External Integration Boundary
+
+Current adapter contracts:
+
+- `JenkinsAdapter`: trigger build, get build status.
+- `RegistryAdapter`: check registry connection, get image, sync image.
+- `KubernetesAdapter`: check cluster connection, list workloads, set image, get rollout status.
+
+Rules:
+
+- No direct SDK calls from handlers.
+- No real Jenkins/Harbor/Kubernetes/Nacos/GitLab/ArgoCD calls unless explicitly requested.
+- Real adapter implementations must preserve interface contracts and must not store credentials in Git.
+
+## Task Queue Boundary
+
+- Redis Stream is the platform-to-Agent task handoff.
+- Mock worker simulates steps and appends logs.
+- API must degrade cleanly when Redis is not configured.
+
+## Database Boundary
+
+- GORM models and migrations live under `backend/internal/repository`.
+- MVP uses PostgreSQL for relational records.
+- Large log bodies can remain mocked or cached for now; do not introduce object storage unless requested.
+
+## Docker Boundary
+
+- Root `docker-compose.yml` describes full stack.
+- Development mode uses local frontend/backend and remote PostgreSQL/Redis from `.secrets/`.
+- Do not place remote server connection details in compose files.

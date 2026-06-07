@@ -18,6 +18,7 @@ services:
       APP_PORT: 8080
       DATABASE_DSN: postgres://ops:ops@postgres:5432/ops_release?sslmode=disable
       REDIS_ADDR: redis:6379
+      INTEGRATION_MODE: mock
     depends_on:
       - postgres
       - redis

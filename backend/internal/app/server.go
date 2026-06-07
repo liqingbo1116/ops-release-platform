@@ -8,6 +8,7 @@ import (
 	"ops-release-platform/backend/internal/agent"
 	"ops-release-platform/backend/internal/api"
 	"ops-release-platform/backend/internal/config"
+	"ops-release-platform/backend/internal/integration"
 	"ops-release-platform/backend/internal/repository"
 )
 
@@ -39,6 +40,11 @@ func (s *Server) Run() error {
 		log.Println("mock agent worker started")
 	}
 
-	router := api.NewRouter(queue)
+	integrations, err := integration.NewSuite(integration.Config{Mode: s.config.IntegrationMode})
+	if err != nil {
+		return fmt.Errorf("integration init failed: %w", err)
+	}
+
+	router := api.NewRouter(queue, integrations)
 	return router.Run(fmt.Sprintf(":%s", s.config.Port))
 }

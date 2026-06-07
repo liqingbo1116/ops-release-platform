@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ops Release Todo"
+  short_description: "Track project backlog and next tasks"
+  default_prompt: "Use -release-platform-todo to update and choose the next ops-release-platform task."

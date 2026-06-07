@@ -9,16 +9,18 @@ import (
 
 	"ops-release-platform/backend/internal/agent"
 	"ops-release-platform/backend/internal/domain"
+	"ops-release-platform/backend/internal/integration"
 	"ops-release-platform/backend/internal/repository"
 )
 
 type Handler struct {
-	repo  *repository.MockRepository
-	queue *agent.Queue
+	repo         *repository.MockRepository
+	queue        *agent.Queue
+	integrations integration.Suite
 }
 
-func NewHandler(repo *repository.MockRepository, queue *agent.Queue) *Handler {
-	return &Handler{repo: repo, queue: queue}
+func NewHandler(repo *repository.MockRepository, queue *agent.Queue, integrations integration.Suite) *Handler {
+	return &Handler{repo: repo, queue: queue, integrations: integrations}
 }
 
 func (h *Handler) Login(c *gin.Context) {
@@ -58,10 +60,29 @@ func (h *Handler) ListEnvironments(c *gin.Context) {
 }
 
 func (h *Handler) CheckEnvironment(c *gin.Context) {
+	environmentID := c.Param("id")
+	checks := make([]integration.IntegrationCheck, 0, 2)
+	if h.integrations.Kubernetes != nil {
+		check, err := h.integrations.Kubernetes.CheckConnection(c.Request.Context(), environmentID)
+		if err != nil {
+			BadRequest(c, "kubernetes check failed")
+			return
+		}
+		checks = append(checks, check)
+	}
+	if h.integrations.Registry != nil {
+		check, err := h.integrations.Registry.CheckConnection(c.Request.Context(), environmentID)
+		if err != nil {
+			BadRequest(c, "registry check failed")
+			return
+		}
+		checks = append(checks, check)
+	}
 	OK(c, gin.H{
-		"environmentId": c.Param("id"),
+		"environmentId": environmentID,
 		"status":        "HEALTHY",
 		"checkedAt":     time.Now().Format(time.RFC3339),
+		"checks":        checks,
 	})
 }
 
