@@ -5,6 +5,7 @@ import "os"
 type Config struct {
 	Port        string
 	DatabaseDSN string
+	RedisAddr   string
 }
 
 func Load() Config {
@@ -16,5 +17,6 @@ func Load() Config {
 	return Config{
 		Port:        port,
 		DatabaseDSN: os.Getenv("DATABASE_DSN"),
+		RedisAddr:   os.Getenv("REDIS_ADDR"),
 	}
 }

@@ -7,16 +7,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ops-release-platform/backend/internal/agent"
 	"ops-release-platform/backend/internal/domain"
 	"ops-release-platform/backend/internal/repository"
 )
 
 type Handler struct {
-	repo *repository.MockRepository
+	repo  *repository.MockRepository
+	queue *agent.Queue
 }
 
-func NewHandler(repo *repository.MockRepository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(repo *repository.MockRepository, queue *agent.Queue) *Handler {
+	return &Handler{repo: repo, queue: queue}
 }
 
 func (h *Handler) Login(c *gin.Context) {
@@ -115,8 +117,10 @@ func (h *Handler) CompareBaseline(c *gin.Context) {
 }
 
 func (h *Handler) CreateRelease(c *gin.Context) {
+	id := "REL-20260607-MOCK"
+	h.enqueue(c, id, "release", "create")
 	Created(c, gin.H{
-		"id":        "REL-20260607-MOCK",
+		"id":        id,
 		"status":    "PENDING_CONFIRM",
 		"createdAt": time.Now().Format(time.RFC3339),
 	})
@@ -152,8 +156,10 @@ func (h *Handler) ListDeployTasks(c *gin.Context) {
 }
 
 func (h *Handler) CreateDeployTask(c *gin.Context) {
+	id := "DEP-20260607-MOCK"
+	h.enqueue(c, id, "deploy", "create")
 	Created(c, gin.H{
-		"id":        "DEP-20260607-MOCK",
+		"id":        id,
 		"status":    "PENDING",
 		"createdAt": time.Now().Format(time.RFC3339),
 	})
@@ -186,6 +192,42 @@ func (h *Handler) stepAction(c *gin.Context, action string, status string) {
 		"stepId": c.Param("stepId"),
 		"action": action,
 		"status": status,
+	})
+}
+
+func (h *Handler) GetAgentTaskStatus(c *gin.Context) {
+	if h.queue == nil {
+		OK(c, gin.H{
+			"enabled": false,
+			"message": "redis queue is not configured",
+		})
+		return
+	}
+	status, err := h.queue.Status(c.Request.Context(), c.Param("id"))
+	if err != nil || len(status) == 0 {
+		NotFound(c, "agent task status not found")
+		return
+	}
+	logs, err := h.queue.Logs(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		logs = []string{}
+	}
+	OK(c, gin.H{
+		"enabled": true,
+		"status":  status,
+		"logs":    logs,
+	})
+}
+
+func (h *Handler) enqueue(c *gin.Context, id string, taskType string, action string) {
+	if h.queue == nil {
+		return
+	}
+	_ = h.queue.Enqueue(c.Request.Context(), agent.Task{
+		ID:        id,
+		Type:      taskType,
+		Action:    action,
+		CreatedAt: time.Now(),
 	})
 }
 
