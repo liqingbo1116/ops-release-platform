@@ -32,3 +32,4 @@ Use this skill before changing project structure, module boundaries, or third-pa
 - Do not put real infrastructure credentials in source, docs, or skills.
 - For TODO selection, use `ops-release-platform-todo`.
 - For local run and Git workflow, use `ops-release-platform-dev`.
+- If runtime logs must be checked during architectural diagnosis, only read a short tail of the latest 10 or 20 lines. Never load entire log files.

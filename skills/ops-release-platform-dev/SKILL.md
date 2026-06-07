@@ -1,6 +1,6 @@
 ---
 name: ops-release-platform-dev
-description: Use for continuing development, review, testing, deployment notes, or Git submission work in the ops-release-platform repository. Includes project context, completed milestone state, repo organization, validation commands, security constraints, mock integration boundaries, and required Git workflow for this specific 运维发布交付平台 project.
+description: Use for continuing development, review, testing, deployment notes, or Git submission work in the ops-release-platform repository. Includes project context, completed milestone state, repo organization, validation commands, security constraints, mock integration boundaries, and required Git workflow for this specific ops-release-platform project.
 ---
 
 # Ops Release Platform Dev
@@ -34,6 +34,7 @@ Use this skill before making code, docs, deployment, or Git changes in this repo
 - Local development runtime: run frontend with npm and backend with `go run`; do not use docker-compose for frontend/backend during development. See `../ops-release-platform-deployment/`.
 - For user requests like "继续开发", choose the next clear item from `docs/development-plan.md` and current repository state.
 - For user requests like "提交", follow `docs/git-submit-workflow.md` and the extra checks in `references/workflows.md`.
+- If you must inspect log files, only read a small tail of the newest lines, such as the latest 10 or 20 lines. Never load the full log file into context.
 
 ## Update This Skill
 

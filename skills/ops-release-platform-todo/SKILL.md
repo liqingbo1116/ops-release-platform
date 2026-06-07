@@ -32,3 +32,4 @@ Use this skill to keep project progress explicit and avoid losing the current de
 - Do not store credentials, server addresses, SSH details, or connection strings in TODO files.
 - For architectural questions, use `ops-release-platform-architecture`.
 - For commit/push workflow, use `ops-release-platform-dev` and `docs/git-submit-workflow.md`.
+- If log inspection is needed while checking progress, only read the newest 10 or 20 lines from a log file. Do not load full logs into context.

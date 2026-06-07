@@ -1,0 +1,49 @@
+# Dependencies and generated artifacts
+node_modules/
+frontend/node_modules/
+dist/
+build/
+.next/
+.cache/
+coverage/
+__pycache__/
+*.pyc
+
+# Lockfiles and logs
+*.lock
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+*.log
+logs/
+log/
+
+# VCS and IDE files
+.git/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Large or low-signal assets
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.min.js
+*.map
+*.d.ts
+
+# Local env and runtime data
+.env
+.env.*
+.secrets/
+postgres_data/
+redis_data/
+
+# Large test data should not be loaded into context
+test/
+tests/

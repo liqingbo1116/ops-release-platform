@@ -28,3 +28,4 @@ During development:
 - Do not commit `.secrets/`.
 - Do not write real host addresses, passwords, SSH ports, database DSNs, Redis addresses, or tokens into tracked files.
 - Final summaries may mention that remote PostgreSQL/Redis are used, but must not print their connection details.
+- If you inspect service logs, only read a small tail of the newest 10 or 20 lines. Do not load full log files into context.
