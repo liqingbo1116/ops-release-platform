@@ -1,0 +1,28 @@
+﻿{
+  "id":"DEP-20260607-009",
+  "productName":"产品 A",
+  "targetEnvironmentName":"项目 X 生产",
+  "source":"BL-20260607-0001",
+  "status":"RUNNING",
+  "progress":46,
+  "steps":[
+    {"order":1,"name":"检查环境连接","type":"STANDARD","status":"SUCCESS"},
+    {"order":2,"name":"准备 namespace 与 StorageClass","type":"KUBECTL","status":"SUCCESS"},
+    {"order":3,"name":"人工确认：中间件可用性","type":"MANUAL_CONFIRM","status":"SUCCESS"},
+    {"order":4,"name":"部署中间件","type":"SHELL","status":"SUCCESS"},
+    {"order":5,"name":"恢复 MySQL","type":"SQL","status":"SUCCESS"},
+    {"order":6,"name":"恢复 MinIO","type":"SHELL","status":"RUNNING"},
+    {"order":7,"name":"人工确认：数据恢复结果","type":"MANUAL_CONFIRM","status":"WAITING_CONFIRM"},
+    {"order":8,"name":"写入 Nacos 配置","type":"STANDARD","status":"PENDING"},
+    {"order":9,"name":"人工确认：Nginx 变更前检查","type":"MANUAL_CONFIRM","status":"PENDING"},
+    {"order":10,"name":"写入 Nginx 配置","type":"STANDARD","status":"PENDING"},
+    {"order":11,"name":"应用 manifests","type":"KUBECTL","status":"PENDING"},
+    {"order":12,"name":"启动服务","type":"KUBECTL","status":"PENDING"},
+    {"order":13,"name":"健康检查","type":"HTTP_CHECK","status":"PENDING"}
+  ],
+  "logs":[
+    "[16:08:11] INFO download minio backup oss://delivery/project-x/minio.tar.gz",
+    "[16:12:40] WARN restore timeout, retry #1",
+    "[16:13:22] INFO retry restore minio object batch=12"
+  ]
+}

@@ -1,0 +1,240 @@
+﻿
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>运维发布交付平台 V3</title>
+<!-- AI coding 使用说明：这是初步产品设计原型，用于表达页面结构、关键状态和交互意图；后续开发应以 PRD、数据模型、状态流转和接口定义为准，不要把示例数据直接当作业务规则。 -->
+<style>
+:root{--bg:#f5f7fb;--surface:#fff;--surface2:#f8fafc;--fg:#111827;--muted:#667085;--border:#e4e7ec;--primary:#2563eb;--primarySoft:#eff6ff;--success:#16a34a;--successSoft:#ecfdf3;--warning:#f59e0b;--warningSoft:#fffaeb;--error:#dc2626;--errorSoft:#fef2f2;--info:#0891b2;--terminal:#0b1220;--font:Inter,"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;--mono:"DIN Alternate","SFMono-Regular",Consolas,ui-monospace,monospace;--sidebar:248px;--topbar:56px}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px}body{overflow:hidden}button,input,select,textarea{font:inherit}button{cursor:pointer}.app{display:grid;grid-template-columns:var(--sidebar) 1fr;height:100vh;min-width:1180px}
+.sidebar{background:#0f172a;color:#e5edf8;display:flex;flex-direction:column}.brand{height:var(--topbar);display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid rgba(255,255,255,.08)}.brand-mark{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:linear-gradient(135deg,#2563eb,#0891b2);color:#fff;font-weight:800}.brand-title{font-weight:700}.nav{padding:12px 10px;overflow:auto}.nav-group{margin:12px 0 8px;padding:0 10px;color:#94a3b8;font-size:12px}.nav button{width:100%;height:38px;border:0;border-radius:6px;background:transparent;color:#cbd5e1;display:flex;align-items:center;gap:10px;padding:0 10px;text-align:left}.nav button:hover,.nav button.active{background:rgba(37,99,235,.18);color:#fff}.dot{width:7px;height:7px;border-radius:50%;background:#64748b}.active .dot{background:#38bdf8}
+.main{min-width:0;display:grid;grid-template-rows:var(--topbar) 1fr}.topbar{height:var(--topbar);background:rgba(255,255,255,.92);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 18px;backdrop-filter:blur(10px);z-index:2}.crumb{color:var(--muted);font-size:13px}.crumb strong{color:var(--fg)}.content{overflow:auto;padding:18px}.page{display:none}.page.active{display:block}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:14px}h1{font-size:22px;margin:0 0 6px}.sub,.small{color:var(--muted);font-size:12px}.sub{margin:0;font-size:13px}
+.top-actions,.toolbar-left,.toolbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.select,.input{height:32px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--fg);padding:0 10px;outline:none}.input{min-width:240px}.btn{height:32px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--fg);padding:0 12px;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(16,24,40,.06);white-space:nowrap}.btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}.btn.danger{color:var(--error)}.btn.ghost{box-shadow:none;background:transparent}.btn:disabled,input:disabled{opacity:.45;cursor:not-allowed}
+.grid{display:grid;gap:12px}.grid.kpi{grid-template-columns:repeat(6,minmax(150px,1fr))}.grid.two{grid-template-columns:1.15fr .85fr}.panel{background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(16,24,40,.06);min-width:0}.panel-head{min-height:46px;padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px}.panel-title{margin:0;font-size:15px;font-weight:700}.panel-body{padding:14px}.kpi-card{padding:14px}.kpi-label{color:var(--muted);font-size:12px;margin-bottom:8px}.kpi-value{font-family:var(--mono);font-size:24px;font-weight:800;line-height:1}.kpi-foot{margin-top:8px;color:var(--muted);font-size:12px}.good{color:var(--success)}.bad{color:var(--error)}.warn-text{color:var(--warning)}
+.toolbar{display:flex;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border);background:var(--surface2)}.table-wrap{width:100%;overflow-x:auto}table{width:100%;min-width:920px;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle;white-space:nowrap}th{color:#475467;font-size:12px;background:#f8fafc}td{font-size:13px}tr:hover td{background:#fbfdff}.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}.status{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid transparent}.status:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.ok{color:var(--success);background:var(--successSoft);border-color:#bbf7d0}.run{color:var(--primary);background:var(--primarySoft);border-color:#bfdbfe}.warn{color:var(--warning);background:var(--warningSoft);border-color:#fedf89}.err{color:var(--error);background:var(--errorSoft);border-color:#fecaca}.unk{color:#64748b;background:#f1f5f9;border-color:#e2e8f0}.info{color:var(--info);background:#ecfeff;border-color:#a5f3fc}
+.progress{height:8px;background:#eef2f7;border-radius:99px;overflow:hidden;width:140px}.progress span{display:block;height:100%;background:var(--primary);border-radius:99px}.progress.ok span{background:var(--success)}.progress.warn span{background:var(--warning)}.progress.err span{background:var(--error)}.split-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.filter-chip{height:30px;border:1px solid var(--border);background:#fff;border-radius:999px;padding:0 11px;color:#475467;box-shadow:none}.filter-chip.active{background:var(--primarySoft);border-color:#bfdbfe;color:var(--primary);font-weight:700}
+.compare-head{display:grid;grid-template-columns:1fr 80px 1fr;gap:12px;margin-bottom:12px}.env-box{border:1px solid var(--border);background:#fff;border-radius:8px;padding:12px}.arrow-box{display:grid;place-items:center;color:var(--primary);font-weight:800}.diff-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px}.diff-item{border:1px solid var(--border);background:#fff;border-radius:7px;padding:10px}.diff-item b{display:block;font-family:var(--mono);font-size:22px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field{display:grid;gap:6px}.field label{font-size:12px;color:#475467;font-weight:700}.field input,.field select,.field textarea{min-height:34px;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:#fff}.field textarea{min-height:88px;resize:vertical}.check{min-height:38px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;gap:8px;padding:0 10px;background:#fff}.risk{border:1px solid #fedf89;background:#fffaeb;border-radius:8px;padding:12px;display:grid;gap:8px}
+.steps{display:grid;gap:8px}.step{display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:start;padding:10px;border:1px solid var(--border);border-radius:7px;background:#fff}.step-index{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);font-size:12px;background:#eef2ff;color:var(--primary);font-weight:700}.step.done .step-index{background:var(--successSoft);color:var(--success)}.step.fail .step-index{background:var(--errorSoft);color:var(--error)}.step-title{font-weight:700;margin-bottom:3px}.terminal{background:var(--terminal);color:#d1d5db;border-radius:7px;border:1px solid #111827;overflow:hidden;font-family:var(--mono);font-size:12px;line-height:1.65}.terminal-head{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:#111827;color:#94a3b8}.terminal-body{padding:12px;height:290px;overflow:auto;white-space:pre-wrap}.log-ok{color:#86efac}.log-warn{color:#fbbf24}.log-err{color:#fca5a5}.log-info{color:#93c5fd}
+.drawer{position:fixed;inset:var(--topbar) 0 0 auto;width:520px;background:#fff;border-left:1px solid var(--border);box-shadow:-12px 0 30px rgba(15,23,42,.12);transform:translateX(100%);transition:transform .18s;z-index:5;display:grid;grid-template-rows:52px 1fr}.drawer.open{transform:translateX(0)}.drawer-head{display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--border)}.drawer-body{padding:16px;overflow:auto}.kv{display:grid;grid-template-columns:120px 1fr;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)}.tag-diff{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;font-family:var(--mono);font-size:12px}.tag-box{border:1px solid var(--border);background:#f8fafc;border-radius:6px;padding:8px;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:1280px){.grid.kpi{grid-template-columns:repeat(3,1fr)}.grid.two{grid-template-columns:1fr}.app{min-width:1024px}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand"><div class="brand-mark">发</div><div><div class="brand-title">运维发布交付平台</div><div class="small" style="color:#94a3b8">Baseline Delivery Console</div></div></div>
+  <nav class="nav">
+    <div class="nav-group">工作台</div><button class="active" data-page="dashboard"><span class="dot"></span>首页工作台</button>
+    <div class="nav-group">环境与接入</div><button data-page="environments"><span class="dot"></span>环境管理</button><button data-page="agents"><span class="dot"></span>Agent 管理</button>
+    <div class="nav-group">环境基线</div><button data-page="baselines"><span class="dot"></span>环境基线列表</button><button data-page="baseline-detail"><span class="dot"></span>基线详情</button><button data-page="compare"><span class="dot"></span>环境差异对比</button>
+    <div class="nav-group">发布交付</div><button data-page="create-release"><span class="dot"></span>创建发布单</button><button data-page="release-detail"><span class="dot"></span>发布详情</button>
+    <div class="nav-group">部署脚本平台化</div><button data-page="deploy-list"><span class="dot"></span>部署任务列表</button><button data-page="deploy-detail"><span class="dot"></span>部署任务详情</button>
+  </nav>
+</aside>
+<main class="main">
+<header class="topbar"><div class="crumb">运维发布交付平台 / <strong id="crumb-current">首页工作台</strong></div><div class="top-actions"><select class="select"><option>本地生产环境 / local-prod</option><option>项目 X 生产环境 / project-x-prod</option></select><button class="btn" data-page-jump="agents">Agent 状态</button><button class="btn primary" data-page-jump="create-release">新建发布单</button></div></header>
+<section class="content">
+
+<div class="page active" id="dashboard">
+  <div class="page-head"><div><h1>首页工作台</h1><p class="sub">以真实运行环境生成基线，驱动项目环境发布、镜像同步、健康检查与审计追踪。</p></div><div class="top-actions"><button class="btn">刷新运行态</button><button class="btn primary" data-page-jump="baselines">生成环境基线</button></div></div>
+  <div class="grid kpi">
+    <div class="panel kpi-card"><div class="kpi-label">在线环境</div><div class="kpi-value">18</div><div class="kpi-foot good">16 个连接正常</div></div>
+    <div class="panel kpi-card"><div class="kpi-label">Agent 在线</div><div class="kpi-value">12/13</div><div class="kpi-foot warn-text">1 个心跳超时</div></div>
+    <div class="panel kpi-card"><div class="kpi-label">已锁定基线</div><div class="kpi-value">47</div><div class="kpi-foot">今日新增 3 个</div></div>
+    <div class="panel kpi-card"><div class="kpi-label">待发布服务</div><div class="kpi-value">68</div><div class="kpi-foot warn-text">跨 4 个项目环境</div></div>
+    <div class="panel kpi-card"><div class="kpi-label">执行中发布</div><div class="kpi-value">6</div><div class="kpi-foot">镜像同步 81%</div></div>
+    <div class="panel kpi-card"><div class="kpi-label">失败任务</div><div class="kpi-value">3</div><div class="kpi-foot bad">需人工处理</div></div>
+  </div>
+  <div class="grid two" style="margin-top:12px">
+    <div class="panel"><div class="panel-head"><h2 class="panel-title">项目环境发布状态</h2><button class="btn ghost" data-page-jump="compare">查看差异</button></div><div class="table-wrap"><table><thead><tr><th>环境</th><th>Agent</th><th>服务数</th><th>基线一致率</th><th>最近发布</th><th>状态</th></tr></thead><tbody>
+      <tr><td>项目 X 生产</td><td><span class="status ok">在线</span></td><td class="mono">213</td><td><div class="split-row"><span class="mono">87%</span><div class="progress"><span style="width:87%"></span></div></div></td><td class="mono">REL-20260607-024</td><td><span class="status warn">有差异</span></td></tr>
+      <tr><td>项目 Y 预发</td><td><span class="status ok">在线</span></td><td class="mono">198</td><td><div class="split-row"><span class="mono">96%</span><div class="progress ok"><span style="width:96%"></span></div></div></td><td class="mono">REL-20260607-019</td><td><span class="status ok">健康</span></td></tr>
+      <tr><td>项目 Z 生产</td><td><span class="status err">离线</span></td><td class="mono">205</td><td><div class="split-row"><span class="mono">72%</span><div class="progress warn"><span style="width:72%"></span></div></div></td><td class="mono">REL-20260606-041</td><td><span class="status err">任务失败</span></td></tr>
+    </tbody></table></div></div>
+    <div class="panel"><div class="panel-head"><h2 class="panel-title">部署与失败任务</h2><button class="btn ghost" data-page-jump="deploy-detail">打开部署详情</button></div><div class="table-wrap"><table><thead><tr><th>任务</th><th>类型</th><th>步骤</th><th>结果</th></tr></thead><tbody>
+      <tr><td class="mono">DEP-20260607-009</td><td>项目初始化</td><td>恢复 MinIO</td><td><span class="status run">执行中</span></td></tr>
+      <tr><td class="mono">TASK-8831</td><td>发布</td><td>镜像同步</td><td><span class="status err">Harbor 认证失败</span></td></tr>
+      <tr><td class="mono">DEP-20260606-018</td><td>部署</td><td>Nacos 配置</td><td><span class="status ok">完成</span></td></tr>
+    </tbody></table></div></div>
+  </div>
+</div>
+
+<div class="page" id="environments">
+  <div class="page-head"><div><h1>环境管理</h1><p class="sub">管理网络模式、K8s、Harbor、Nacos、MySQL、MinIO、凭证与连接测试。</p></div><button class="btn primary">新增环境</button></div>
+  <div class="panel"><div class="toolbar"><div class="toolbar-left"><input class="input js-filter" data-table="env-table" placeholder="搜索环境、Harbor、K8s 集群"><select class="select"><option>全部网络模式</option><option>平台直连</option><option>Agent 模式</option></select></div><div class="toolbar-right"><button class="btn">批量连接测试</button></div></div>
+  <div class="table-wrap"><table id="env-table"><thead><tr><th>环境</th><th>类型</th><th>网络模式</th><th>K8s</th><th>Harbor</th><th>Nacos</th><th>Agent</th><th>最近测试</th><th>操作</th></tr></thead><tbody>
+    <tr><td>本地生产环境</td><td>本地环境</td><td><span class="status info">平台直连</span></td><td><span class="status ok">可访问</span></td><td><span class="status ok">可访问</span></td><td><span class="status ok">可访问</span></td><td><span class="status unk">不需要</span></td><td class="mono">2 分钟前</td><td><button class="btn ghost" data-drawer="env" data-name="本地生产环境">连接配置</button></td></tr>
+    <tr><td>项目 X 生产</td><td>项目环境</td><td><span class="status run">Agent 模式</span></td><td><span class="status ok">Agent 可访问</span></td><td><span class="status ok">Agent 可访问</span></td><td><span class="status ok">Agent 可访问</span></td><td><span class="status ok">在线</span></td><td class="mono">12 秒前</td><td><button class="btn ghost" data-drawer="env" data-name="项目 X 生产">连接配置</button></td></tr>
+    <tr><td>项目 Z 生产</td><td>项目环境</td><td><span class="status run">Agent 模式</span></td><td><span class="status unk">未知</span></td><td><span class="status unk">未知</span></td><td><span class="status unk">未知</span></td><td><span class="status err">离线</span></td><td class="mono">9 分钟前</td><td><button class="btn ghost" data-drawer="env" data-name="项目 Z 生产">连接配置</button></td></tr>
+  </tbody></table></div></div>
+</div>
+
+<div class="page" id="agents">
+  <div class="page-head"><div><h1>Agent 管理</h1><p class="sub">项目环境 Agent 主动拉取任务，执行镜像同步、kubectl、shell、健康检查并回传日志。</p></div><button class="btn primary" data-drawer="agent-register">注册 Agent</button></div>
+  <div class="grid kpi">
+    <div class="panel kpi-card"><div class="kpi-label">注册 Agent</div><div class="kpi-value">13</div><div class="kpi-foot">绑定 13 个环境</div></div><div class="panel kpi-card"><div class="kpi-label">在线</div><div class="kpi-value">12</div><div class="kpi-foot good">心跳正常</div></div><div class="panel kpi-card"><div class="kpi-label">执行中</div><div class="kpi-value">7</div><div class="kpi-foot">发布 6 / 部署 1</div></div><div class="panel kpi-card"><div class="kpi-label">离线</div><div class="kpi-value">1</div><div class="kpi-foot bad">项目 Z</div></div><div class="panel kpi-card"><div class="kpi-label">平均心跳</div><div class="kpi-value">18s</div></div><div class="panel kpi-card"><div class="kpi-label">版本覆盖</div><div class="kpi-value">92%</div></div>
+  </div>
+  <div class="panel" style="margin-top:12px"><div class="toolbar"><div class="toolbar-left"><input class="input js-filter" data-table="agent-table" placeholder="搜索 Agent、环境、能力"></div><button class="btn">下发探测任务</button></div><div class="table-wrap"><table id="agent-table"><thead><tr><th>Agent</th><th>绑定环境</th><th>版本</th><th>心跳</th><th>可执行能力</th><th>最近任务日志</th><th>状态</th></tr></thead><tbody>
+    <tr><td>agent-project-x</td><td>项目 X 生产</td><td class="mono">1.3.2</td><td class="mono">12 秒前</td><td>镜像同步 / kubectl / shell / HTTP</td><td class="mono">REL-20260607-031 step=health-check</td><td><span class="status ok">在线</span></td></tr>
+    <tr><td>agent-project-y</td><td>项目 Y 预发</td><td class="mono">1.3.2</td><td class="mono">18 秒前</td><td>镜像同步 / kubectl / shell / HTTP</td><td class="mono">heartbeat ok</td><td><span class="status ok">在线</span></td></tr>
+    <tr><td>agent-project-z</td><td>项目 Z 生产</td><td class="mono">1.2.8</td><td class="mono">9 分钟前</td><td>kubectl / shell</td><td class="mono">last error: network unreachable</td><td><span class="status err">离线</span></td></tr>
+  </tbody></table></div></div>
+</div>
+
+<div class="page" id="baselines">
+  <div class="page-head"><div><h1>环境基线列表</h1><p class="sub">从真实运行态采集生成交付基线，替代难以维护的传统产品版本。</p></div><button class="btn primary">从运行环境生成基线</button></div>
+  <div class="panel"><div class="toolbar"><div class="toolbar-left"><input class="input js-filter" data-table="baseline-table" placeholder="搜索基线 ID、来源环境、用途"></div><div class="toolbar-right"><button class="btn">导出清单</button><button class="btn">批量锁定</button></div></div><div class="table-wrap"><table id="baseline-table"><thead><tr><th><input type="checkbox" data-select-all="baseline-table"></th><th>基线 ID</th><th>基线名称</th><th>来源环境</th><th>服务数</th><th>创建人</th><th>创建时间</th><th>状态</th><th>用途</th><th>操作</th></tr></thead><tbody>
+    <tr><td><input type="checkbox"></td><td class="mono">BL-20260607-0001</td><td>local-prod-20260607-1530</td><td>本地生产环境</td><td class="mono">213</td><td>张三</td><td class="mono">2026-06-07 15:30</td><td><span class="status ok">已锁定</span></td><td>项目 X 交付</td><td><button class="btn ghost" data-page-jump="baseline-detail">查看</button></td></tr>
+    <tr><td><input type="checkbox"></td><td class="mono">BL-20260607-0002</td><td>project-y-pre-snapshot</td><td>项目 Y 预发</td><td class="mono">198</td><td>李四</td><td class="mono">2026-06-07 14:20</td><td><span class="status warn">草稿</span></td><td>回归验证</td><td><button class="btn ghost" data-page-jump="baseline-detail">查看</button></td></tr>
+  </tbody></table></div></div>
+</div>
+
+<div class="page" id="baseline-detail">
+  <div class="page-head"><div><h1>基线详情：BL-20260607-0001</h1><p class="sub">来源本地生产环境，服务 213 个，已锁定，可用于项目环境差异发布。</p></div><div class="top-actions"><button class="btn" data-page-jump="compare">对比目标环境</button><button class="btn primary" data-page-jump="create-release">基于此基线发布</button></div></div>
+  <div class="grid kpi"><div class="panel kpi-card"><div class="kpi-label">服务总数</div><div class="kpi-value">213</div><div class="kpi-foot">Deployment 196 / StatefulSet 17</div></div><div class="panel kpi-card"><div class="kpi-label">健康服务</div><div class="kpi-value">208</div><div class="kpi-foot good">Ready 正常</div></div><div class="panel kpi-card"><div class="kpi-label">异常服务</div><div class="kpi-value">5</div><div class="kpi-foot bad">采集时异常</div></div><div class="panel kpi-card"><div class="kpi-label">镜像仓库</div><div class="kpi-value" style="font-size:18px">Harbor</div><div class="kpi-foot mono">harbor.local/prod</div></div><div class="panel kpi-card"><div class="kpi-label">采集耗时</div><div class="kpi-value">02:41</div></div><div class="panel kpi-card"><div class="kpi-label">锁定人</div><div class="kpi-value" style="font-size:18px">张三</div></div></div>
+  <div class="panel" style="margin-top:12px"><div class="toolbar"><input class="input js-filter" data-table="service-table" placeholder="搜索服务、namespace、workload、tag"><button class="btn">导出镜像清单</button></div><div class="table-wrap"><table id="service-table"><thead><tr><th>服务</th><th>namespace</th><th>workload</th><th>类型</th><th>镜像 tag</th><th>digest</th><th>副本</th><th>健康</th></tr></thead><tbody>
+    <tr><td>user-service</td><td class="mono">prod-core</td><td class="mono">user-service</td><td>Deployment</td><td class="mono">20260607-a1b2c3</td><td class="mono">sha256:8f21...aa09</td><td class="mono">3/3</td><td><span class="status ok">健康</span></td></tr>
+    <tr><td>web-console</td><td class="mono">prod-web</td><td class="mono">web-console</td><td>Deployment</td><td class="mono">20260607-999bbb</td><td class="mono">sha256:b0fd...91ef</td><td class="mono">2/2</td><td><span class="status ok">健康</span></td></tr>
+  </tbody></table></div></div>
+</div>
+
+<div class="page" id="compare">
+  <div class="page-head"><div><h1>环境差异对比</h1><p class="sub">文本搜索与状态筛选现在使用统一过滤函数，避免筛选互相覆盖。</p></div><div class="top-actions"><button class="btn">重新采集目标环境</button><button class="btn primary" data-page-jump="create-release">按差异创建发布单</button></div></div>
+  <div class="compare-head"><div class="env-box"><h3>来源基线</h3><div class="mono">BL-20260607-0001</div><div class="small">本地生产 / 213 服务 / 已锁定</div></div><div class="arrow-box">同步到</div><div class="env-box"><h3>目标环境</h3><div class="mono">project-x-prod</div><div class="small">Agent 在线 / 最近采集 12 秒前</div></div></div>
+  <div class="diff-summary"><div class="diff-item"><span class="small">一致</span><b style="color:var(--success)">145</b></div><div class="diff-item"><span class="small">需更新</span><b style="color:var(--warning)">52</b></div><div class="diff-item"><span class="small">目标缺失</span><b style="color:var(--error)">11</b></div><div class="diff-item"><span class="small">workload 异常</span><b style="color:var(--error)">5</b></div><div class="diff-item"><span class="small">预计同步镜像</span><b style="color:var(--primary)">68</b></div></div>
+  <div class="panel"><div class="toolbar"><div class="toolbar-left"><button class="filter-chip active" data-diff-status="all">全部</button><button class="filter-chip" data-diff-status="需更新">只看需更新</button><button class="filter-chip" data-diff-status="目标缺失">只看目标缺失</button><button class="filter-chip" data-diff-status="workload 异常">只看 workload 异常</button><button class="filter-chip" data-diff-status="不可发布">只看不可发布</button><input class="input" id="diff-search" placeholder="搜索服务、tag、namespace"></div><div class="toolbar-right"><button class="btn" id="select-publishable">批量选择可发布服务</button><button class="btn primary">确认 68 个服务</button></div></div>
+  <div class="table-wrap"><table id="diff-table"><thead><tr><th><input type="checkbox" data-select-all="diff-table"></th><th>服务</th><th>namespace</th><th>来源 tag</th><th>目标 tag</th><th>差异状态</th><th>发布性</th><th>处理策略</th></tr></thead><tbody>
+    <tr data-status="需更新" data-publishable="true"><td><input type="checkbox" checked></td><td>user-service</td><td class="mono">prod-core</td><td class="mono">20260607-a1b2c3</td><td class="mono">20260601-d4e5f6</td><td><span class="status warn">需更新</span></td><td><span class="status ok">可发布</span></td><td>同步镜像并更新 tag</td></tr>
+    <tr data-status="一致" data-publishable="false"><td><input type="checkbox"></td><td>order-service</td><td class="mono">prod-core</td><td class="mono">20260606-111aaa</td><td class="mono">20260606-111aaa</td><td><span class="status ok">一致</span></td><td><span class="status unk">无需发布</span></td><td>无需处理</td></tr>
+    <tr data-status="目标缺失" data-publishable="true"><td><input type="checkbox" checked></td><td>web-console</td><td class="mono">prod-web</td><td class="mono">20260607-999bbb</td><td class="mono">未部署</td><td><span class="status err">目标缺失</span></td><td><span class="status warn">需确认</span></td><td>提示新增部署</td></tr>
+    <tr data-status="需更新" data-publishable="true"><td><input type="checkbox" checked></td><td>payment-service</td><td class="mono">prod-core</td><td class="mono">20260607-88ac10</td><td class="mono">20260603-21cc80</td><td><span class="status warn">需更新</span></td><td><span class="status ok">可发布</span></td><td>同步镜像并更新 tag</td></tr>
+    <tr data-status="workload 异常 不可发布" data-publishable="false"><td><input type="checkbox" disabled></td><td>report-worker</td><td class="mono">prod-data</td><td class="mono">20260605-73cd10</td><td class="mono">20260601-091ef0</td><td><span class="status err">workload 异常</span></td><td><span class="status err">不可发布</span></td><td>先修复 workload</td></tr>
+  </tbody></table></div></div>
+</div>
+
+<div class="page" id="create-release">
+  <div class="page-head"><div><h1>创建发布单</h1><p class="sub">强化 200+ 服务批量选择、风险确认、自动回滚与跳过异常 workload 策略。</p></div><button class="btn primary" id="submit-release">提交发布单</button></div>
+  <div class="grid two">
+    <div class="panel"><div class="panel-head"><h2 class="panel-title">发布配置</h2><span class="status run">基线差异发布</span></div><div class="panel-body"><div class="form-grid"><div class="field"><label>发布类型</label><select><option>基线差异发布</option><option>单服务发布</option><option>多服务发布</option></select></div><div class="field"><label>目标环境</label><select><option>项目 X 生产 / project-x-prod</option></select></div><div class="field"><label>来源基线</label><select><option>BL-20260607-0001 / local-prod</option></select></div><div class="field"><label>执行 Agent</label><select><option>agent-project-x / 在线</option></select></div></div></div></div>
+    <div class="panel"><div class="panel-head"><h2 class="panel-title">风险与策略确认</h2><span class="status warn">提交前必读</span></div><div class="panel-body"><div class="risk"><strong>发布前风险提示</strong><div class="small">当前原型示例已选择 3 个服务；真实批量场景可选择 68 个差异服务。5 个 workload 异常服务不可选且会跳过。提交时以实际勾选数量计算镜像同步与 K8s workload 更新数量。</div><label class="check"><input type="checkbox" checked> 失败时自动回滚到上一 tag</label><label class="check"><input type="checkbox" checked> 跳过 workload 异常服务</label><label class="check"><input type="checkbox" checked> 发布前重新采集目标环境运行态</label><label class="check"><input type="checkbox" checked> 记录发布审计与 Agent 日志</label></div></div></div>
+  </div>
+  <div class="panel" style="margin-top:12px"><div class="toolbar"><div class="toolbar-left"><strong>已选择 <span class="mono" id="selected-count">3</span> 个服务</strong><input class="input js-filter" data-table="release-select-table" placeholder="搜索服务、namespace、tag"></div><div class="toolbar-right"><button class="btn" id="select-release-publishable">选择全部可发布</button><button class="btn" id="clear-release">清空选择</button></div></div><div class="table-wrap"><table id="release-select-table"><thead><tr><th><input type="checkbox" data-select-all="release-select-table"></th><th>服务</th><th>namespace</th><th>来源 tag</th><th>目标 tag</th><th>差异</th><th>发布动作</th><th>风险</th></tr></thead><tbody>
+    <tr data-publishable="true"><td><input type="checkbox" checked class="service-check"></td><td>user-service</td><td class="mono">prod-core</td><td class="mono">20260607-a1b2c3</td><td class="mono">20260601-d4e5f6</td><td><span class="status warn">需更新</span></td><td>同步镜像 + 更新 tag</td><td><span class="status ok">低</span></td></tr>
+    <tr data-publishable="true"><td><input type="checkbox" checked class="service-check"></td><td>payment-service</td><td class="mono">prod-core</td><td class="mono">20260607-88ac10</td><td class="mono">20260603-21cc80</td><td><span class="status warn">需更新</span></td><td>同步镜像 + 更新 tag</td><td><span class="status warn">中</span></td></tr>
+    <tr data-publishable="true"><td><input type="checkbox" checked class="service-check"></td><td>web-console</td><td class="mono">prod-web</td><td class="mono">20260607-999bbb</td><td class="mono">未部署</td><td><span class="status err">目标缺失</span></td><td>新增部署</td><td><span class="status warn">需确认</span></td></tr>
+    <tr data-publishable="false"><td><input type="checkbox" disabled class="service-check"></td><td>report-worker</td><td class="mono">prod-data</td><td class="mono">20260605-73cd10</td><td class="mono">20260601-091ef0</td><td><span class="status err">workload 异常</span></td><td>跳过</td><td><span class="status err">不可发布</span></td></tr>
+  </tbody></table></div></div>
+</div>
+
+<div class="page" id="release-detail">
+  <div class="page-head"><div><h1>发布详情：REL-20260607-031</h1><p class="sub">基线差异发布，本地生产环境 BL-20260607-0001 到项目 X 生产环境，68 个服务。</p></div><div class="top-actions"><button class="btn">暂停</button><button class="btn danger">失败重试</button><button class="btn primary">生成发布报告</button></div></div>
+  <div class="grid kpi"><div class="panel kpi-card"><div class="kpi-label">整体进度</div><div class="kpi-value">81%</div><div class="kpi-foot">正在健康检查</div></div><div class="panel kpi-card"><div class="kpi-label">镜像同步</div><div class="kpi-value">68/68</div><div class="kpi-foot good">全部完成</div></div><div class="panel kpi-card"><div class="kpi-label">更新 tag</div><div class="kpi-value">66/68</div><div class="kpi-foot warn-text">2 个等待 rollout</div></div><div class="panel kpi-card"><div class="kpi-label">健康检查</div><div class="kpi-value">61/68</div></div><div class="panel kpi-card"><div class="kpi-label">失败服务</div><div class="kpi-value">2</div><div class="kpi-foot bad">可重试</div></div><div class="panel kpi-card"><div class="kpi-label">执行 Agent</div><div class="kpi-value" style="font-size:18px">在线</div><div class="kpi-foot mono">agent-project-x</div></div></div>
+  <div class="grid two" style="margin-top:12px"><div class="panel"><div class="panel-head"><h2 class="panel-title">发布步骤</h2><span class="status run">执行中</span></div><div class="panel-body"><div class="steps"><div class="step done"><div class="step-index">1</div><div><div class="step-title">同步镜像到项目 Harbor</div><div class="small">68 个镜像全部同步完成</div></div><span class="status ok">完成</span></div><div class="step done"><div class="step-index">2</div><div><div class="step-title">更新 K8s 服务镜像 tag</div><div class="small">66 个成功，2 个等待重试</div></div><span class="status warn">部分完成</span></div><div class="step fail"><div class="step-index">3</div><div><div class="step-title">HTTP 健康检查</div><div class="small">web-console 返回 503，order-service 超时</div></div><span class="status err">失败 2</span></div></div></div></div>
+  <div class="panel"><div class="panel-head"><h2 class="panel-title">Agent 执行日志</h2><button class="btn ghost" id="copy-log">复制日志</button></div><div class="panel-body"><div class="terminal"><div class="terminal-head"><span>agent-project-x / REL-20260607-031</span><span>live</span></div><div class="terminal-body" id="log-body">[15:38:19] <span class="log-ok">OK</span> image sync completed total=68 failed=0
+[15:42:11] <span class="log-warn">WARN</span> rollout pending payment-service ready=1/2
+[15:43:26] <span class="log-err">ERROR</span> health check failed web-console status=503
+[15:43:44] <span class="log-err">ERROR</span> health check timeout order-service timeout=10s</div></div></div></div></div>
+  <div class="panel" style="margin-top:12px"><div class="panel-head"><h2 class="panel-title">失败定位建议</h2><input class="input js-filter" data-table="release-fail-table" placeholder="搜索失败服务、原因、建议"></div><div class="table-wrap"><table id="release-fail-table"><thead><tr><th>服务</th><th>失败原因</th><th>建议处理动作</th><th>排障入口</th><th>操作</th></tr></thead><tbody>
+    <tr><td>web-console</td><td><span class="status err">HTTP 503</span></td><td>检查 Nginx upstream、服务端口、ConfigMap 与 Pod 日志</td><td><button class="btn ghost">查看 Pod 日志</button><button class="btn ghost">查看事件</button></td><td><button class="btn danger" data-drawer="service" data-name="web-console">重试单服务</button></td></tr>
+    <tr><td>order-service</td><td><span class="status err">健康检查超时</span></td><td>检查启动耗时、数据库连接、readinessProbe 超时时间</td><td><button class="btn ghost">查看 Pod 日志</button><button class="btn ghost">查看事件</button></td><td><button class="btn danger" data-drawer="service" data-name="order-service">重试单服务</button></td></tr>
+  </tbody></table></div></div>
+</div>
+
+<div class="page" id="deploy-list">
+  <div class="page-head"><div><h1>部署任务列表</h1><p class="sub">将原有 shell 脚本包装为平台化步骤，统一参数、顺序、日志、重试、跳过与人工确认。</p></div><button class="btn primary" data-page-jump="deploy-detail">查看部署详情</button></div>
+  <div class="panel"><div class="toolbar"><div class="toolbar-left"><input class="input js-filter" data-table="deploy-table" placeholder="搜索部署任务、产品、环境"></div><button class="btn">批量重试失败步骤</button></div><div class="table-wrap"><table id="deploy-table"><thead><tr><th>任务</th><th>产品</th><th>目标环境</th><th>来源</th><th>当前步骤</th><th>进度</th><th>状态</th><th>操作</th></tr></thead><tbody>
+    <tr><td class="mono">DEP-20260607-009</td><td>产品 A</td><td>项目 X 生产</td><td>BL-20260607-0001</td><td>恢复 MinIO</td><td><div class="progress"><span style="width:46%"></span></div></td><td><span class="status run">执行中</span></td><td><button class="btn ghost" data-page-jump="deploy-detail">查看</button></td></tr>
+    <tr><td class="mono">DEP-20260605-011</td><td>产品 B</td><td>交付 A 环境</td><td>shell 脚本</td><td>Nacos 配置</td><td><div class="progress err"><span style="width:62%"></span></div></td><td><span class="status err">失败</span></td><td><button class="btn ghost" data-page-jump="deploy-detail">查看</button></td></tr>
+  </tbody></table></div></div>
+</div>
+
+<div class="page" id="deploy-detail">
+  <div class="page-head"><div><h1>部署任务详情：DEP-20260607-009</h1><p class="sub">项目 X 生产初始化部署，来源基线 BL-20260607-0001，当前执行到 MinIO 数据恢复。</p></div><div class="top-actions"><button class="btn">暂停</button><button class="btn">跳过当前步骤</button><button class="btn danger">重试失败步骤</button></div></div>
+  <div class="grid kpi"><div class="panel kpi-card"><div class="kpi-label">整体进度</div><div class="kpi-value">46%</div><div class="kpi-foot">5/13 步完成</div></div><div class="panel kpi-card"><div class="kpi-label">执行步骤</div><div class="kpi-value">13</div><div class="kpi-foot">含 3 个人工确认</div></div><div class="panel kpi-card"><div class="kpi-label">脚本步骤</div><div class="kpi-value">4</div></div><div class="panel kpi-card"><div class="kpi-label">失败次数</div><div class="kpi-value">1</div><div class="kpi-foot bad">MinIO 重试中</div></div><div class="panel kpi-card"><div class="kpi-label">当前 Agent</div><div class="kpi-value" style="font-size:18px">在线</div></div><div class="panel kpi-card"><div class="kpi-label">耗时</div><div class="kpi-value">28:14</div></div></div>
+  <div class="grid two" style="margin-top:12px"><div class="panel"><div class="panel-head"><h2 class="panel-title">部署步骤编排</h2><span class="status run">执行中</span></div><div class="panel-body"><div class="steps">
+    <div class="step done"><div class="step-index">1</div><div><div class="step-title">检查环境连接</div><div class="small">K8s、Harbor、Nacos、MySQL、MinIO 连通性检查</div></div><span class="status ok">完成</span></div>
+    <div class="step done"><div class="step-index">2</div><div><div class="step-title">部署中间件</div><div class="small">Redis、RabbitMQ、Elasticsearch 初始化</div></div><span class="status ok">完成</span></div>
+    <div class="step done"><div class="step-index">3</div><div><div class="step-title">人工确认：中间件可用性</div><div class="small">运维确认核心中间件可连接后继续</div></div><span class="status ok">已确认</span></div>
+    <div class="step done"><div class="step-index">4</div><div><div class="step-title">恢复 MySQL</div><div class="small">备份下载、导入、checksum 校验</div></div><span class="status ok">完成</span></div>
+    <div class="step fail"><div class="step-index">5</div><div><div class="step-title">恢复 MinIO</div><div class="small">对象数据恢复失败 1 次，正在重试</div></div><span class="status run">重试中</span></div>
+    <div class="step"><div class="step-index">6</div><div><div class="step-title">人工确认：数据恢复结果</div><div class="small">确认 MySQL/MinIO 抽样校验通过</div></div><span class="status warn">等待确认</span></div>
+    <div class="step"><div class="step-index">7</div><div><div class="step-title">写入 Nacos 配置</div><div class="small">替换 endpoint、namespace 与密钥引用</div></div><span class="status unk">等待</span></div>
+    <div class="step"><div class="step-index">8</div><div><div class="step-title">写入 Nginx 配置</div><div class="small">应用 upstream、域名与证书路径</div></div><span class="status unk">等待</span></div>
+    <div class="step"><div class="step-index">9</div><div><div class="step-title">人工确认：Nginx 变更前检查</div><div class="small">确认域名、证书、upstream 配置后继续</div></div><span class="status warn">等待确认</span></div>
+    <div class="step"><div class="step-index">10</div><div><div class="step-title">应用 manifests</div><div class="small">kubectl apply manifests 并记录 commit</div></div><span class="status unk">等待</span></div>
+    <div class="step"><div class="step-index">11</div><div><div class="step-title">启动服务</div><div class="small">按启动顺序启动 213 个服务</div></div><span class="status unk">等待</span></div>
+    <div class="step"><div class="step-index">12</div><div><div class="step-title">健康检查</div><div class="small">rollout、Pod、HTTP health 统一检查</div></div><span class="status unk">等待</span></div>
+  </div></div></div>
+  <div class="panel"><div class="panel-head"><h2 class="panel-title">当前步骤日志</h2><div class="top-actions"><button class="btn ghost">下载日志</button><button class="btn danger">重试 MinIO</button></div></div><div class="panel-body"><div class="terminal"><div class="terminal-head"><span>DEP-20260607-009 / restore-minio</span><span>retry #1</span></div><div class="terminal-body">[16:08:11] <span class="log-info">INFO</span> download minio backup oss://delivery/project-x/minio.tar.gz
+[16:10:42] <span class="log-ok">OK</span> backup downloaded size=18.4GB
+[16:16:31] <span class="log-warn">WARN</span> network jitter detected offset=184200
+[16:17:08] <span class="log-err">ERROR</span> restore failed: connection reset by peer
+[16:18:42] <span class="log-info">INFO</span> restored objects=20148/52690</div></div></div></div></div>
+</div>
+
+</section>
+</main>
+</div>
+
+<aside class="drawer" id="drawer">
+  <div class="drawer-head"><strong id="drawer-title">详情</strong><button class="btn ghost" id="close-drawer">关闭</button></div>
+  <div class="drawer-body" id="drawer-body"></div>
+</aside>
+
+<script>
+(function(){
+  const pages=[...document.querySelectorAll('.page')],navs=[...document.querySelectorAll('[data-page]')],crumb=document.getElementById('crumb-current');
+  const titles={dashboard:'首页工作台',environments:'环境管理',agents:'Agent 管理',baselines:'环境基线列表','baseline-detail':'基线详情',compare:'环境差异对比','create-release':'创建发布单','release-detail':'发布详情','deploy-list':'部署任务列表','deploy-detail':'部署任务详情'};
+  function showPage(id){pages.forEach(p=>p.classList.toggle('active',p.id===id));navs.forEach(b=>b.classList.toggle('active',b.dataset.page===id));crumb.textContent=titles[id]||id;document.querySelector('.content').scrollTo({top:0,behavior:'smooth'});}
+  navs.forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
+  document.querySelectorAll('[data-page-jump]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.pageJump)));
+
+  const filterState={diffStatus:'all',diffQuery:''};
+  function applyTableFilter(tableId,query){
+    const q=(query||'').trim().toLowerCase(),table=document.getElementById(tableId); if(!table)return;
+    table.querySelectorAll('tbody tr').forEach(row=>row.style.display=row.innerText.toLowerCase().includes(q)?'':'none');
+  }
+  function applyDiffFilter(){
+    const q=filterState.diffQuery.trim().toLowerCase(),s=filterState.diffStatus;
+    document.querySelectorAll('#diff-table tbody tr').forEach(row=>{
+      const matchText=row.innerText.toLowerCase().includes(q);
+      const matchStatus=s==='all'||row.dataset.status.includes(s);
+      row.style.display=matchText&&matchStatus?'':'none';
+    });
+  }
+  document.querySelectorAll('.js-filter').forEach(input=>input.addEventListener('input',()=>applyTableFilter(input.dataset.table,input.value)));
+  document.getElementById('diff-search').addEventListener('input',e=>{filterState.diffQuery=e.target.value;applyDiffFilter();});
+  document.querySelectorAll('[data-diff-status]').forEach(btn=>btn.addEventListener('click',()=>{
+    document.querySelectorAll('[data-diff-status]').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');filterState.diffStatus=btn.dataset.diffStatus;applyDiffFilter();
+  }));
+
+  function updateSelectedCount(){const el=document.getElementById('selected-count'); if(el)el.textContent=document.querySelectorAll('#release-select-table .service-check:checked:not(:disabled)').length;}
+  document.querySelectorAll('[data-select-all]').forEach(box=>box.addEventListener('change',()=>{
+    const table=document.getElementById(box.dataset.selectAll);
+    table.querySelectorAll('tbody input[type="checkbox"]').forEach(cb=>{if(!cb.disabled)cb.checked=box.checked;});
+    updateSelectedCount();
+  }));
+  document.querySelectorAll('.service-check').forEach(cb=>cb.addEventListener('change',updateSelectedCount));
+  document.getElementById('select-publishable').addEventListener('click',()=>document.querySelectorAll('#diff-table tbody tr').forEach(r=>{const cb=r.querySelector('input[type=checkbox]');if(cb&&!cb.disabled)cb.checked=r.dataset.publishable==='true';}));
+  document.getElementById('select-release-publishable').addEventListener('click',()=>{document.querySelectorAll('#release-select-table tbody tr').forEach(r=>{const cb=r.querySelector('input[type=checkbox]');if(cb&&!cb.disabled)cb.checked=r.dataset.publishable==='true';});updateSelectedCount();});
+  document.getElementById('clear-release').addEventListener('click',()=>{document.querySelectorAll('#release-select-table .service-check:not(:disabled)').forEach(cb=>cb.checked=false);updateSelectedCount();});
+  document.getElementById('submit-release').addEventListener('click',()=>showPage('release-detail'));
+
+  const drawer=document.getElementById('drawer'),drawerTitle=document.getElementById('drawer-title'),drawerBody=document.getElementById('drawer-body');
+  function openDrawer(type,name){
+    if(type==='env'){drawerTitle.textContent=name+' / 连接配置';drawerBody.innerHTML='<div class="kv"><span>网络模式</span><strong>Agent 模式</strong></div><div class="kv"><span>K8s 集群</span><span class="mono">https://10.12.8.21:6443</span></div><div class="kv"><span>Harbor</span><span class="mono">harbor.project.local</span></div><div class="kv"><span>Nacos</span><span class="mono">nacos.project.local:8848</span></div><div class="kv"><span>MySQL</span><span>凭证已托管 / 最近测试成功</span></div><div class="kv"><span>MinIO</span><span>凭证已托管 / bucket 可访问</span></div><div class="kv"><span>Agent 心跳</span><span class="status ok">12 秒前</span></div><div style="height:12px"></div><button class="btn primary" style="width:100%;justify-content:center">执行连接测试</button>';}
+    else if(type==='agent-register'){drawerTitle.textContent='注册 Agent';drawerBody.innerHTML='<div class="field"><label>绑定环境</label><select><option>项目 X 生产</option><option>项目 Z 生产</option></select></div><div style="height:12px"></div><div class="field"><label>注册 Token</label><input class="mono" value="agt_7f92c1b8_20260607" readonly><div class="small">Token 有效期 10 分钟，仅可使用一次，可重新生成。</div></div><div style="height:12px"></div><div class="field"><label>安装指令</label><textarea class="mono" readonly>curl -fsSL https://platform.local/agent/install.sh | bash -s -- --token agt_7f92c1b8_20260607 --server https://platform.local</textarea></div><div style="height:12px"></div><button class="btn primary" style="width:100%;justify-content:center">复制注册指令</button><div style="height:8px"></div><button class="btn" style="width:100%;justify-content:center">重新生成 Token</button>';}
+    else {drawerTitle.textContent=name+' 执行详情';drawerBody.innerHTML='<div class="field"><label>失败定位</label><textarea readonly>HTTP 健康检查异常。建议检查 Pod 日志、Kubernetes 事件、Nginx upstream、ConfigMap 和服务端口。</textarea></div><div style="height:12px"></div><div class="grid two" style="grid-template-columns:1fr 1fr"><button class="btn">查看 Pod 日志</button><button class="btn">查看事件</button></div><div style="height:8px"></div><button class="btn primary" style="width:100%;justify-content:center">重试该服务</button>';}
+    drawer.classList.add('open');
+  }
+  document.querySelectorAll('[data-drawer]').forEach(btn=>btn.addEventListener('click',()=>openDrawer(btn.dataset.drawer,btn.dataset.name||'')));
+  document.getElementById('close-drawer').addEventListener('click',()=>drawer.classList.remove('open'));
+  const copy=document.getElementById('copy-log'); if(copy)copy.addEventListener('click',async e=>{try{await navigator.clipboard.writeText(document.getElementById('log-body')?.innerText||'');e.currentTarget.textContent='已复制';}catch(_){e.currentTarget.textContent='复制失败';}setTimeout(()=>e.currentTarget.textContent='复制日志',1200);});
+})();
+</script>
+</body>
+</html>
+

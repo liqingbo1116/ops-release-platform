@@ -1,0 +1,11 @@
+﻿{
+  "sourceBaselineId":"BL-20260607-0001",
+  "targetEnvironmentId":"env-project-x-prod",
+  "summary":{"consistent":145,"needUpdate":52,"missingInTarget":11,"workloadError":5,"publishable":63},
+  "items":[
+    {"serviceId":"svc-user","serviceName":"user-service","namespace":"prod-core","sourceTag":"20260607-a1b2c3","targetTag":"20260601-d4e5f6","diffStatus":"NEED_UPDATE","publishable":true,"strategy":"同步镜像并更新 tag"},
+    {"serviceId":"svc-order","serviceName":"order-service","namespace":"prod-core","sourceTag":"20260606-111aaa","targetTag":"20260606-111aaa","diffStatus":"CONSISTENT","publishable":false,"strategy":"无需处理"},
+    {"serviceId":"svc-web","serviceName":"web-console","namespace":"prod-web","sourceTag":"20260607-999bbb","targetTag":null,"diffStatus":"MISSING_IN_TARGET","publishable":true,"strategy":"确认后新增部署"},
+    {"serviceId":"svc-report","serviceName":"report-worker","namespace":"prod-data","sourceTag":"20260605-73cd10","targetTag":"20260601-091ef0","diffStatus":"WORKLOAD_ERROR","publishable":false,"strategy":"先修复 workload"}
+  ]
+}
