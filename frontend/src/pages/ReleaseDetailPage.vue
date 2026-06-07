@@ -25,7 +25,7 @@
       <DeployStepPanel title="发布步骤" :status="release.status" :steps="release.steps" />
       <el-card shadow="never">
         <template #header><div class="panel-head"><strong>Agent 执行日志</strong><el-button link type="primary">复制日志</el-button></div></template>
-        <LogTerminal :title="`${release.agentName} / ${release.id}`" :logs="release.logs" />
+        <LogTerminal :title="`${release.agentName} / ${logTitleId}`" :logs="agentLogs" :badge="agentBadge" />
       </el-card>
     </div>
 
@@ -46,21 +46,70 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import DeployStepPanel from '@/components/DeployStepPanel.vue'
 import LogTerminal from '@/components/LogTerminal.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import ServiceFailureDrawer from '@/components/ServiceFailureDrawer.vue'
+import { getAgentTaskStatus, type AgentTaskStatus } from '@/api/agentTasks'
+import { getReleaseDetail } from '@/api/releases'
 import { mockData } from '@/api/mockData'
 
 type Failure = (typeof mockData.releaseDetail.failures)[number]
 
-const release = mockData.releaseDetail
+const route = useRoute()
+const release = ref({ ...mockData.releaseDetail })
+const agentStatus = ref<AgentTaskStatus | null>(null)
 const drawerVisible = ref(false)
 const activeFailure = ref<Failure | null>(null)
+const agentTaskId = computed(() => {
+  if (route.query.agentTaskId) return String(route.query.agentTaskId)
+  const routeID = String(route.params.id || '')
+  return routeID.endsWith('-MOCK') ? routeID : ''
+})
+const logTitleId = computed(() => agentTaskId.value || release.value.id)
+const agentLogs = computed(() => {
+  const logs = agentStatus.value?.logs ?? []
+  return logs.length > 0 ? logs : release.value.logs
+})
+const agentBadge = computed(() => agentStatus.value?.status?.status ?? (agentStatus.value?.enabled === false ? 'disabled' : 'live'))
+let pollingTimer: number | undefined
 
 function openFailure(row: Failure) {
   activeFailure.value = row
   drawerVisible.value = true
 }
+
+async function loadRelease() {
+  release.value = await getReleaseDetail(String(route.params.id || release.value.id))
+}
+
+async function pollAgentStatus() {
+  if (!agentTaskId.value) {
+    agentStatus.value = {
+      enabled: false,
+      message: 'agent task id is not available',
+      logs: [],
+    }
+    return
+  }
+  try {
+    agentStatus.value = await getAgentTaskStatus(agentTaskId.value)
+  } catch {
+    agentStatus.value = null
+  }
+}
+
+onMounted(async () => {
+  await loadRelease()
+  await pollAgentStatus()
+  pollingTimer = window.setInterval(pollAgentStatus, 2000)
+})
+
+onUnmounted(() => {
+  if (pollingTimer) {
+    window.clearInterval(pollingTimer)
+  }
+})
 </script>

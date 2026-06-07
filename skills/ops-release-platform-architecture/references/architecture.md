@@ -25,6 +25,21 @@ This is a compact architecture guide for Codex sessions. Use project docs as sou
 
 Introduce `internal/service` when handlers need to coordinate multiple repositories, queues, or adapters with meaningful business rules.
 
+## Agent Module Skeleton
+
+The real project-side Agent source tree is reserved under top-level `agent/`.
+
+- `agent/cmd/agent`: future Agent process entrypoint.
+- `agent/internal/config`: Agent config loading.
+- `agent/internal/heartbeat`: heartbeat reporting.
+- `agent/internal/kubernetes`: K8s workload scanning and rollout operations.
+- `agent/internal/harbor`: Harbor/image query and sync helpers.
+- `agent/internal/reporter`: RuntimeSnapshot, logs, and task result reporting.
+- `agent/internal/runtime`: local runtime and environment discovery.
+- `agent/internal/task`: task pull/execute loop.
+
+Current status: directories only. Do not implement real Agent code until requested.
+
 ## Frontend Layers
 
 - `src/api`: backend API clients and mock fallback access.
@@ -44,6 +59,16 @@ Keep page components responsible for interaction composition; move reusable tabl
 4. For release/deploy creation, backend enqueues Redis Stream task when `REDIS_ADDR` is configured.
 5. Mock Agent worker consumes stream, writes task status and logs to Redis keys.
 6. Frontend can poll task status API when task IDs are available.
+
+## Release And Deployment Flow
+
+- Service release targets services that already exist in the target environment. It must not be based on a source baseline.
+- Service release has two sources:
+  - `JENKINS_JOB`: choose a Jenkins Job associated by view or naming/label convention, build jar/dist, build image, and push to local Harbor.
+  - `LOCAL_HARBOR_IMAGE`: scan local Harbor image versions for the service and choose a tag directly; do not choose or trigger Jenkins Job for this path.
+- Both service release sources eventually require the project-environment Agent to sync the image to the project environment and update workload tag. Local environments currently keep using GitOps.
+- Service deployment targets services missing in the target environment. It is based on source baseline/production environment comparison and creates a deploy task.
+- `MISSING_IN_TARGET` diff items represent service deployment candidates, not normal service release candidates.
 
 ## External Integration Boundary
 

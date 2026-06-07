@@ -138,20 +138,88 @@ func (h *Handler) CompareBaseline(c *gin.Context) {
 }
 
 func (h *Handler) CreateRelease(c *gin.Context) {
+	var request struct {
+		Type              string   `json:"type"`
+		ReleaseSource     string   `json:"releaseSource"`
+		SourceBaselineID  string   `json:"sourceBaselineId"`
+		TargetEnvironment string   `json:"targetEnvironmentId"`
+		AgentID           string   `json:"agentId"`
+		ServiceIDs        []string `json:"serviceIds"`
+		Image             struct {
+			Repository string `json:"repository"`
+			Tag        string `json:"tag"`
+			Digest     string `json:"digest"`
+		} `json:"image"`
+		Jenkins struct {
+			JobName    string            `json:"jobName"`
+			Branch     string            `json:"branch"`
+			Parameters map[string]string `json:"parameters"`
+		} `json:"jenkins"`
+		Options map[string]bool `json:"options"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid release request")
+		return
+	}
 	id := "REL-20260607-MOCK"
+	if request.Type == "SERVICE_RELEASE" && request.ReleaseSource == "LOCAL_HARBOR_IMAGE" {
+		h.enqueue(c, id, "release", "harbor-image-sync")
+		Created(c, gin.H{
+			"id":            id,
+			"status":        "PENDING_IMAGE_SYNC",
+			"executionMode": "AGENT_IMAGE_SYNC",
+			"agentTaskId":   id,
+			"releaseSource": request.ReleaseSource,
+			"createdAt":     time.Now().Format(time.RFC3339),
+		})
+		return
+	}
+	if request.Type == "SERVICE_RELEASE" && h.integrations.Jenkins != nil {
+		jobName := request.Jenkins.JobName
+		if jobName == "" {
+			jobName = "mock-service-release"
+		}
+		build, err := h.integrations.Jenkins.TriggerBuild(c.Request.Context(), integration.BuildRequest{
+			JobName:    jobName,
+			Branch:     request.Jenkins.Branch,
+			Parameters: request.Jenkins.Parameters,
+		})
+		if err != nil {
+			BadRequest(c, "jenkins trigger failed")
+			return
+		}
+		h.enqueue(c, id, "release", "project-agent-sync")
+		Created(c, gin.H{
+			"id":            id,
+			"status":        "JENKINS_QUEUED",
+			"executionMode": "JENKINS_AGENT",
+			"agentTaskId":   id,
+			"releaseSource": request.ReleaseSource,
+			"buildId":       build.BuildID,
+			"buildStatus":   build.Status,
+			"buildUrl":      build.URL,
+			"createdAt":     time.Now().Format(time.RFC3339),
+		})
+		return
+	}
 	h.enqueue(c, id, "release", "create")
 	Created(c, gin.H{
-		"id":        id,
-		"status":    "PENDING_CONFIRM",
-		"createdAt": time.Now().Format(time.RFC3339),
+		"id":            id,
+		"status":        "PENDING_CONFIRM",
+		"executionMode": "AGENT",
+		"createdAt":     time.Now().Format(time.RFC3339),
 	})
 }
 
 func (h *Handler) GetRelease(c *gin.Context) {
 	detail, ok := h.repo.GetReleaseDetail(c.Param("id"))
 	if !ok {
-		NotFound(c, "release not found")
-		return
+		detail, ok = h.repo.GetReleaseDetail("")
+		if !ok {
+			NotFound(c, "release not found")
+			return
+		}
+		detail.ID = c.Param("id")
 	}
 	OK(c, detail)
 }
@@ -189,8 +257,12 @@ func (h *Handler) CreateDeployTask(c *gin.Context) {
 func (h *Handler) GetDeployTask(c *gin.Context) {
 	detail, ok := h.repo.GetDeployDetail(c.Param("id"))
 	if !ok {
-		NotFound(c, "deploy task not found")
-		return
+		detail, ok = h.repo.GetDeployDetail("")
+		if !ok {
+			NotFound(c, "deploy task not found")
+			return
+		}
+		detail.ID = c.Param("id")
 	}
 	OK(c, detail)
 }

@@ -25,18 +25,69 @@
       <DeployStepPanel title="部署步骤编排" :status="deploy.status" :steps="deploy.steps" />
       <el-card shadow="never">
         <template #header><div class="panel-head"><strong>当前步骤日志</strong><el-button type="danger" link>重试 MinIO</el-button></div></template>
-        <LogTerminal :title="`${deploy.id} / restore-minio`" :logs="deploy.logs" badge="retry #1" />
+        <LogTerminal :title="`${logTitleId} / ${agentStep}`" :logs="agentLogs" :badge="agentBadge" />
       </el-card>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import DeployStepPanel from '@/components/DeployStepPanel.vue'
 import LogTerminal from '@/components/LogTerminal.vue'
 import MetricCard from '@/components/MetricCard.vue'
+import { getAgentTaskStatus, type AgentTaskStatus } from '@/api/agentTasks'
+import { getDeployTaskDetail } from '@/api/deployTasks'
 import { mockData } from '@/api/mockData'
 
-const deploy = mockData.deployDetail
-const scriptStepCount = deploy.steps.filter((item) => ['SHELL', 'SQL'].includes(item.type)).length
+const route = useRoute()
+const deploy = ref({ ...mockData.deployDetail })
+const agentStatus = ref<AgentTaskStatus | null>(null)
+const agentTaskId = computed(() => {
+  if (route.query.agentTaskId) return String(route.query.agentTaskId)
+  const routeID = String(route.params.id || '')
+  return routeID.endsWith('-MOCK') ? routeID : ''
+})
+const logTitleId = computed(() => agentTaskId.value || deploy.value.id)
+const agentStep = computed(() => agentStatus.value?.status?.step ?? 'restore-minio')
+const agentLogs = computed(() => {
+  const logs = agentStatus.value?.logs ?? []
+  return logs.length > 0 ? logs : deploy.value.logs
+})
+const agentBadge = computed(() => agentStatus.value?.status?.status ?? (agentStatus.value?.enabled === false ? 'disabled' : 'retry #1'))
+const scriptStepCount = computed(() => deploy.value.steps.filter((item) => ['SHELL', 'SQL'].includes(item.type)).length)
+let pollingTimer: number | undefined
+
+async function loadDeployTask() {
+  deploy.value = await getDeployTaskDetail(String(route.params.id || deploy.value.id))
+}
+
+async function pollAgentStatus() {
+  if (!agentTaskId.value) {
+    agentStatus.value = {
+      enabled: false,
+      message: 'agent task id is not available',
+      logs: [],
+    }
+    return
+  }
+  try {
+    agentStatus.value = await getAgentTaskStatus(agentTaskId.value)
+  } catch {
+    agentStatus.value = null
+  }
+}
+
+onMounted(async () => {
+  await loadDeployTask()
+  await pollAgentStatus()
+  pollingTimer = window.setInterval(pollAgentStatus, 2000)
+})
+
+onUnmounted(() => {
+  if (pollingTimer) {
+    window.clearInterval(pollingTimer)
+  }
+})
 </script>
