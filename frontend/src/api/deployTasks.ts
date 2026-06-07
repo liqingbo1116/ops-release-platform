@@ -12,6 +12,8 @@ export async function listDeployTasks() {
 export type CreateDeployTaskResult = {
   id: string
   status: string
+  executionMode?: string
+  agentTaskId?: string
   createdAt: string
 }
 
@@ -29,6 +31,8 @@ export function createDeployTask(body: unknown = {}) {
   return Promise.resolve<CreateDeployTaskResult>({
     id: 'DEP-20260607-MOCK',
     status: 'PENDING',
+    executionMode: 'AGENT',
+    agentTaskId: 'DEP-20260607-MOCK',
     createdAt: new Date().toISOString(),
   })
 }

@@ -106,6 +106,74 @@ func TestEnvironmentCheckUsesMockIntegrations(t *testing.T) {
 	}
 }
 
+func TestCreateReleaseReturnsAgentTaskID(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Code string `json:"code"`
+		Data struct {
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			ExecutionMode string `json:"executionMode"`
+			AgentTaskID   string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "OK" {
+		t.Fatalf("expected OK response, got %s", payload.Code)
+	}
+	if payload.Data.ExecutionMode != "AGENT" {
+		t.Fatalf("expected executionMode AGENT, got %s", payload.Data.ExecutionMode)
+	}
+	if payload.Data.AgentTaskID == "" || payload.Data.AgentTaskID != payload.Data.ID {
+		t.Fatalf("expected agentTaskId to match id, got %+v", payload.Data)
+	}
+}
+
+func TestCreateDeployTaskReturnsAgentTaskID(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Code string `json:"code"`
+		Data struct {
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			ExecutionMode string `json:"executionMode"`
+			AgentTaskID   string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "OK" {
+		t.Fatalf("expected OK response, got %s", payload.Code)
+	}
+	if payload.Data.ExecutionMode != "AGENT" {
+		t.Fatalf("expected executionMode AGENT, got %s", payload.Data.ExecutionMode)
+	}
+	if payload.Data.AgentTaskID == "" || payload.Data.AgentTaskID != payload.Data.ID {
+		t.Fatalf("expected agentTaskId to match id, got %+v", payload.Data)
+	}
+}
+
 func TestUnknownRoute(t *testing.T) {
 	router := newTestRouter()
 	request := httptest.NewRequest(http.MethodGet, "/api/missing", nil)

@@ -134,7 +134,7 @@ async function submitRelease() {
         },
       })
       ElMessage.success('服务部署任务已创建')
-      router.push({ path: `/deploy-tasks/${result.id}`, query: { agentTaskId: result.id } })
+      router.push({ path: `/deploy-tasks/${result.id}`, query: { agentTaskId: result.agentTaskId ?? result.id } })
       return
     }
 

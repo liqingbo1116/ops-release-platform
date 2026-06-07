@@ -11,16 +11,20 @@ import (
 	"ops-release-platform/backend/internal/domain"
 	"ops-release-platform/backend/internal/integration"
 	"ops-release-platform/backend/internal/repository"
+	"ops-release-platform/backend/internal/service"
 )
 
 type Handler struct {
 	repo         *repository.MockRepository
 	queue        *agent.Queue
 	integrations integration.Suite
+	service      *service.ReleaseCreator
 }
 
 func NewHandler(repo *repository.MockRepository, queue *agent.Queue, integrations integration.Suite) *Handler {
-	return &Handler{repo: repo, queue: queue, integrations: integrations}
+	handler := &Handler{repo: repo, queue: queue, integrations: integrations}
+	handler.service = service.NewReleaseCreator(integrations, handler.enqueue)
+	return handler
 }
 
 func (h *Handler) Login(c *gin.Context) {
@@ -138,77 +142,24 @@ func (h *Handler) CompareBaseline(c *gin.Context) {
 }
 
 func (h *Handler) CreateRelease(c *gin.Context) {
-	var request struct {
-		Type              string   `json:"type"`
-		ReleaseSource     string   `json:"releaseSource"`
-		SourceBaselineID  string   `json:"sourceBaselineId"`
-		TargetEnvironment string   `json:"targetEnvironmentId"`
-		AgentID           string   `json:"agentId"`
-		ServiceIDs        []string `json:"serviceIds"`
-		Image             struct {
-			Repository string `json:"repository"`
-			Tag        string `json:"tag"`
-			Digest     string `json:"digest"`
-		} `json:"image"`
-		Jenkins struct {
-			JobName    string            `json:"jobName"`
-			Branch     string            `json:"branch"`
-			Parameters map[string]string `json:"parameters"`
-		} `json:"jenkins"`
-		Options map[string]bool `json:"options"`
-	}
+	var request service.CreateReleaseRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid release request")
 		return
 	}
-	id := "REL-20260607-MOCK"
-	if request.Type == "SERVICE_RELEASE" && request.ReleaseSource == "LOCAL_HARBOR_IMAGE" {
-		h.enqueue(c, id, "release", "harbor-image-sync")
-		Created(c, gin.H{
-			"id":            id,
-			"status":        "PENDING_IMAGE_SYNC",
-			"executionMode": "AGENT_IMAGE_SYNC",
-			"agentTaskId":   id,
-			"releaseSource": request.ReleaseSource,
-			"createdAt":     time.Now().Format(time.RFC3339),
-		})
-		return
-	}
-	if request.Type == "SERVICE_RELEASE" && h.integrations.Jenkins != nil {
-		jobName := request.Jenkins.JobName
-		if jobName == "" {
-			jobName = "mock-service-release"
-		}
-		build, err := h.integrations.Jenkins.TriggerBuild(c.Request.Context(), integration.BuildRequest{
-			JobName:    jobName,
-			Branch:     request.Jenkins.Branch,
-			Parameters: request.Jenkins.Parameters,
-		})
-		if err != nil {
+	result, err := h.service.CreateRelease(c.Request.Context(), request)
+	if err != nil {
+		switch err {
+		case service.ErrInvalidReleaseType:
+			BadRequest(c, "release type must be SERVICE_RELEASE")
+		case service.ErrJenkinsTrigger:
 			BadRequest(c, "jenkins trigger failed")
-			return
+		default:
+			BadRequest(c, "invalid release request")
 		}
-		h.enqueue(c, id, "release", "project-agent-sync")
-		Created(c, gin.H{
-			"id":            id,
-			"status":        "JENKINS_QUEUED",
-			"executionMode": "JENKINS_AGENT",
-			"agentTaskId":   id,
-			"releaseSource": request.ReleaseSource,
-			"buildId":       build.BuildID,
-			"buildStatus":   build.Status,
-			"buildUrl":      build.URL,
-			"createdAt":     time.Now().Format(time.RFC3339),
-		})
 		return
 	}
-	h.enqueue(c, id, "release", "create")
-	Created(c, gin.H{
-		"id":            id,
-		"status":        "PENDING_CONFIRM",
-		"executionMode": "AGENT",
-		"createdAt":     time.Now().Format(time.RFC3339),
-	})
+	Created(c, result)
 }
 
 func (h *Handler) GetRelease(c *gin.Context) {
@@ -245,13 +196,22 @@ func (h *Handler) ListDeployTasks(c *gin.Context) {
 }
 
 func (h *Handler) CreateDeployTask(c *gin.Context) {
-	id := "DEP-20260607-MOCK"
-	h.enqueue(c, id, "deploy", "create")
-	Created(c, gin.H{
-		"id":        id,
-		"status":    "PENDING",
-		"createdAt": time.Now().Format(time.RFC3339),
-	})
+	var request service.CreateDeployTaskRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid deploy request")
+		return
+	}
+	result, err := h.service.CreateDeployTask(c.Request.Context(), request)
+	if err != nil {
+		switch err {
+		case service.ErrInvalidDeployType:
+			BadRequest(c, "deploy type must be SERVICE_DEPLOYMENT")
+		default:
+			BadRequest(c, "invalid deploy request")
+		}
+		return
+	}
+	Created(c, result)
 }
 
 func (h *Handler) GetDeployTask(c *gin.Context) {
@@ -312,11 +272,24 @@ func (h *Handler) GetAgentTaskStatus(c *gin.Context) {
 	})
 }
 
-func (h *Handler) enqueue(c *gin.Context, id string, taskType string, action string) {
+func (h *Handler) enqueue(ctx interface{ Request() *http.Request }, id string, taskType string, action string) {
+	requestContext := ctx.Request().Context()
 	if h.queue == nil {
 		return
 	}
-	_ = h.queue.Enqueue(c.Request.Context(), agent.Task{
+	_ = h.queue.Enqueue(requestContext, agent.Task{
+		ID:        id,
+		Type:      taskType,
+		Action:    action,
+		CreatedAt: time.Now(),
+	})
+}
+
+func (h *Handler) enqueueTask(ctx context.Context, id string, taskType string, action string) {
+	if h.queue == nil {
+		return
+	}
+	_ = h.queue.Enqueue(ctx, agent.Task{
 		ID:        id,
 		Type:      taskType,
 		Action:    action,
