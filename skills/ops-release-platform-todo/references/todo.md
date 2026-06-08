@@ -1,6 +1,6 @@
 # Ops Release Platform TODO
 
-Last updated: 2026-06-07
+Last updated: 2026-06-08
 
 Always verify this file against `git status --short --branch`, `git log -1 --oneline`, and implementation docs before acting.
 
@@ -48,41 +48,66 @@ Latest pushed milestone:
   - diff `MISSING_IN_TARGET` should be shown as service deployment
   - real Agent module directories should be created without implementation code
 
+## V1 Mainline Goal
+
+V1 must prioritize functional closure over optimization work. The minimum acceptable V1 outcome is:
+
+- the platform can manage remote project environments
+- the platform can create and track remote deployment/release tasks
+- Agent-driven execution and status reporting are visible end to end
+
+Until this mainline is complete, performance tuning, warning cleanup, and refactor-only work stay behind feature work unless they block delivery.
+
 ## Recommended Development Path
 
-1. Complete the mock release/deploy runtime loop:
-   - after creating release/deploy tasks, keep or expose the Agent task ID clearly
-   - make release/deploy detail pages poll `GET /api/agent-tasks/:id/status`
-   - render mock Agent status and logs in the frontend
-2. Add backend `internal/service` when handlers coordinate multiple dependencies:
-   - release service
-   - deploy task service
-   - environment check service
-   - agent task status service
-3. Update API contract docs:
-   - `GET /api/agent-tasks/{id}/status`
-   - `POST /api/environments/{id}/check` response `checks`
-   - integration health response DTOs
-4. Expand frontend tests:
-   - changelog filtering
-   - diff table filtering and non-publishable selection behavior
-   - login/logout flow
-   - Agent log polling display
-5. Keep integration mock-first:
-   - refine Jenkins, Registry/Harbor, Kubernetes adapter contracts
-   - do not implement real adapters until explicitly requested
-6. Replace mock data with persistence gradually:
+1. Complete runtime snapshot and baseline generation flow.
+   - define backend-owned runtime snapshot acquisition path
+   - support baseline creation from environment runtime data
+   - support baseline lock state transition
+   - make baseline detail pages consume the generated data path
+2. Complete backend-owned diff and action classification.
+   - classify `NEED_UPDATE` as release candidates
+   - classify `MISSING_IN_TARGET` as deploy candidates
+   - keep action rules out of frontend-only logic
+3. Complete release management closure.
+   - single-service release
+   - multi-service release
+   - baseline diff release
+   - retain `agentTaskId` and surface task state/logs in details
+   - support failure reason display and retry state modeling
+4. Complete deployment management closure for remote project environments.
+   - create deploy tasks for target-missing services
+   - model deploy steps and state transitions
+   - support retry / skip / manual confirm
+   - expose deploy detail logs and final result clearly
+5. Complete Agent task protocol.
+   - heartbeat
+   - task pull
+   - step status report
+   - log report
+   - final result report
+6. Complete audit and permission requirements for release/deploy flows.
+   - operator
+   - target environment
+   - affected services
+   - source/target tag changes
+   - success/failure and failed step
+7. Gradually persist runtime data instead of relying only on mock payloads.
+   - baselines
    - release orders
    - deploy tasks
    - operation logs
-   - changelog
+8. Only after the above, continue non-functional work.
+   - bundle optimization
+   - build warning cleanup
+   - UI polish
+   - refactor-only cleanup
 
 ## Next Suggested Tasks
 
-1. Add backend service layer if API handlers start accumulating business orchestration.
-2. Implement real project-side Agent scanner and reporter after the directory skeleton is agreed.
-3. Add focused frontend tests for changelog filtering and diff table selection behavior.
-4. Persist release orders, deploy tasks, operation logs, and changelog gradually.
+1. Finish backend baseline generation and lock flow so the current baseline pages are backed by real service logic.
+2. Move diff classification rules fully into backend service/domain logic and align release/deploy creation with that split.
+3. Continue release/deploy detail closure around `agentTaskId`, structured logs, retry states, and audit fields.
 
 ## Validation Checklist
 
