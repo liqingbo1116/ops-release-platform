@@ -1,7 +1,5 @@
-import 'element-plus/dist/index.css'
 import './style.css'
 
-import ElementPlus from 'element-plus'
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 
@@ -11,4 +9,4 @@ import router from './router'
 
 await loadRuntimeData()
 
-createApp(App).use(createPinia()).use(router).use(ElementPlus).mount('#app')
+createApp(App).use(createPinia()).use(router).mount('#app')

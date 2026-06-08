@@ -5,40 +5,54 @@ import (
 	"errors"
 	"time"
 
+	"ops-release-platform/backend/internal/domain"
 	"ops-release-platform/backend/internal/integration"
 )
 
 var (
 	ErrInvalidReleaseType = errors.New("invalid release type")
 	ErrInvalidDeployType  = errors.New("invalid deploy type")
+	ErrAgentNotFound      = errors.New("agent not found")
+	ErrAgentOffline       = errors.New("agent offline")
+	ErrAgentEnvironment   = errors.New("agent environment mismatch")
 	ErrJenkinsTrigger     = errors.New("jenkins trigger failed")
+	ErrRegistryImageCheck = errors.New("registry image check failed")
+	ErrRegistryImageSync  = errors.New("registry image sync failed")
+	ErrImageNotFound      = errors.New("release image not found")
+	ErrWorkloadProbe      = errors.New("kubernetes workload probe failed")
 )
 
 type EnqueueFunc func(ctx context.Context, id string, taskType string, action string)
 
+type AgentReader interface {
+	GetAgent(id string) (domain.Agent, bool)
+}
+
 type ReleaseCreator struct {
 	integrations integration.Suite
+	agents       AgentReader
 	enqueue      EnqueueFunc
 	now          func() time.Time
 }
 
-func NewReleaseCreator(integrations integration.Suite, enqueue EnqueueFunc) *ReleaseCreator {
+func NewReleaseCreator(integrations integration.Suite, agents AgentReader, enqueue EnqueueFunc) *ReleaseCreator {
 	return &ReleaseCreator{
 		integrations: integrations,
+		agents:       agents,
 		enqueue:      enqueue,
 		now:          time.Now,
 	}
 }
 
 type CreateReleaseRequest struct {
-	Type                string            `json:"type"`
-	ReleaseSource       string            `json:"releaseSource"`
-	TargetEnvironmentID string            `json:"targetEnvironmentId"`
-	AgentID             string            `json:"agentId"`
-	ServiceIDs          []string          `json:"serviceIds"`
-	Image               ReleaseImage      `json:"image"`
-	Jenkins             ReleaseJenkins    `json:"jenkins"`
-	Options             map[string]bool   `json:"options"`
+	Type                string          `json:"type"`
+	ReleaseSource       string          `json:"releaseSource"`
+	TargetEnvironmentID string          `json:"targetEnvironmentId"`
+	AgentID             string          `json:"agentId"`
+	ServiceIDs          []string        `json:"serviceIds"`
+	Image               ReleaseImage    `json:"image"`
+	Jenkins             ReleaseJenkins  `json:"jenkins"`
+	Options             map[string]bool `json:"options"`
 }
 
 type ReleaseImage struct {
@@ -69,9 +83,41 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 	if request.Type != "SERVICE_RELEASE" {
 		return CreateReleaseResult{}, ErrInvalidReleaseType
 	}
+	if err := c.validateAgent(request.AgentID, request.TargetEnvironmentID); err != nil {
+		return CreateReleaseResult{}, err
+	}
 
 	id := "REL-20260607-MOCK"
 	if request.ReleaseSource == "LOCAL_HARBOR_IMAGE" {
+		if c.integrations.Registry != nil {
+			image, err := c.integrations.Registry.GetImage(ctx, request.Image.Repository, request.Image.Tag)
+			if err != nil {
+				return CreateReleaseResult{}, ErrRegistryImageCheck
+			}
+			if !image.Exists {
+				return CreateReleaseResult{}, ErrImageNotFound
+			}
+			syncResult, err := c.integrations.Registry.SyncImage(ctx, integration.SyncImageRequest{
+				SourceImage:    request.Image.Repository,
+				SourceTag:      request.Image.Tag,
+				TargetRegistry: request.TargetEnvironmentID,
+				TargetProject:  request.AgentID,
+			})
+			if err != nil {
+				return CreateReleaseResult{}, ErrRegistryImageSync
+			}
+			c.enqueueIfNeeded(ctx, id, "release", "harbor-image-sync")
+			return CreateReleaseResult{
+				ID:            id,
+				Status:        "RUNNING",
+				ExecutionMode: "AGENT_IMAGE_SYNC",
+				AgentTaskID:   id,
+				ReleaseSource: request.ReleaseSource,
+				BuildID:       syncResult.TaskID,
+				BuildStatus:   syncResult.Status,
+				CreatedAt:     c.now().Format(time.RFC3339),
+			}, nil
+		}
 		c.enqueueIfNeeded(ctx, id, "release", "harbor-image-sync")
 		return CreateReleaseResult{
 			ID:            id,
@@ -141,6 +187,15 @@ func (c *ReleaseCreator) CreateDeployTask(ctx context.Context, request CreateDep
 	if request.Type != "" && request.Type != "SERVICE_DEPLOYMENT" {
 		return CreateDeployTaskResult{}, ErrInvalidDeployType
 	}
+	if err := c.validateAgent(request.AgentID, request.TargetEnvironmentID); err != nil {
+		return CreateDeployTaskResult{}, err
+	}
+
+	if c.integrations.Kubernetes != nil {
+		if _, err := c.integrations.Kubernetes.ListWorkloads(ctx, request.TargetEnvironmentID); err != nil {
+			return CreateDeployTaskResult{}, ErrWorkloadProbe
+		}
+	}
 
 	id := "DEP-20260607-MOCK"
 	c.enqueueIfNeeded(ctx, id, "deploy", "create")
@@ -158,4 +213,21 @@ func (c *ReleaseCreator) enqueueIfNeeded(ctx context.Context, id string, taskTyp
 		return
 	}
 	c.enqueue(ctx, id, taskType, action)
+}
+
+func (c *ReleaseCreator) validateAgent(agentID string, environmentID string) error {
+	if c.agents == nil {
+		return nil
+	}
+	agent, ok := c.agents.GetAgent(agentID)
+	if !ok {
+		return ErrAgentNotFound
+	}
+	if agent.EnvironmentID != environmentID {
+		return ErrAgentEnvironment
+	}
+	if agent.Status != "ONLINE" {
+		return ErrAgentOffline
+	}
+	return nil
 }

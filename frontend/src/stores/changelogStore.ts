@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
-import { mockData } from '@/api/mockData'
+import { changelogMockData } from '@/api/mockData/changelog'
 
 export const useChangelogStore = defineStore('changelog', {
   state: () => ({
-    items: mockData.changelog,
+    items: changelogMockData.changelog,
   }),
 })

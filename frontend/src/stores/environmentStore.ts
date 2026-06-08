@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
-import { mockData } from '@/api/mockData'
+import { environmentMockData } from '@/api/mockData/environment'
 
 export const useEnvironmentStore = defineStore('environment', {
   state: () => ({
-    items: mockData.environments,
+    items: environmentMockData.environments,
   }),
 })

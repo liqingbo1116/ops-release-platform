@@ -31,6 +31,7 @@ const groups = [
   {
     title: '发布交付',
     items: [
+      { label: '发布单列表', path: '/releases' },
       { label: '创建发布单', path: '/releases/create' },
       { label: '发布详情', path: '/releases/REL-20260607-031' },
     ],

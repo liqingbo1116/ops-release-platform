@@ -1,12 +1,12 @@
-import { mockData } from './mockData'
+import { deployMockData } from './mockData/deploy'
 import { getData, postData, type PageResult, useMockApi } from './client'
 
 export async function listDeployTasks() {
   if (!useMockApi) {
-    const result = await getData<PageResult<typeof mockData.deployTasks[number]>>('/api/deploy-tasks')
+    const result = await getData<PageResult<typeof deployMockData.deployTasks[number]>>('/api/deploy-tasks')
     return result.items
   }
-  return Promise.resolve(mockData.deployTasks)
+  return Promise.resolve(deployMockData.deployTasks)
 }
 
 export type CreateDeployTaskResult = {
@@ -19,9 +19,9 @@ export type CreateDeployTaskResult = {
 
 export function getDeployTaskDetail(id = 'DEP-20260607-009') {
   if (!useMockApi) {
-    return getData<typeof mockData.deployDetail>(`/api/deploy-tasks/${id}`)
+    return getData<typeof deployMockData.deployDetail>(`/api/deploy-tasks/${id}`)
   }
-  return Promise.resolve(mockData.deployDetail)
+  return Promise.resolve(deployMockData.deployDetail)
 }
 
 export function createDeployTask(body: unknown = {}) {

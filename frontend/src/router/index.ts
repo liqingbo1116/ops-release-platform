@@ -1,20 +1,21 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import AgentPage from '@/pages/AgentPage.vue'
-import BaselineDetailPage from '@/pages/BaselineDetailPage.vue'
-import BaselineListPage from '@/pages/BaselineListPage.vue'
-import ChangelogPage from '@/pages/ChangelogPage.vue'
-import ComparePage from '@/pages/ComparePage.vue'
-import CreateReleasePage from '@/pages/CreateReleasePage.vue'
-import DashboardPage from '@/pages/DashboardPage.vue'
-import DeployDetailPage from '@/pages/DeployDetailPage.vue'
-import DeployListPage from '@/pages/DeployListPage.vue'
-import EnvironmentPermissionPage from '@/pages/EnvironmentPermissionPage.vue'
-import EnvironmentPage from '@/pages/EnvironmentPage.vue'
-import LoginPage from '@/pages/LoginPage.vue'
-import ReleaseDetailPage from '@/pages/ReleaseDetailPage.vue'
-import RoleListPage from '@/pages/RoleListPage.vue'
-import UserListPage from '@/pages/UserListPage.vue'
+const LoginPage = () => import('@/pages/LoginPage.vue')
+const DashboardPage = () => import('@/pages/DashboardPage.vue')
+const EnvironmentPage = () => import('@/pages/EnvironmentPage.vue')
+const AgentPage = () => import('@/pages/AgentPage.vue')
+const BaselineListPage = () => import('@/pages/BaselineListPage.vue')
+const BaselineDetailPage = () => import('@/pages/BaselineDetailPage.vue')
+const ComparePage = () => import('@/pages/ComparePage.vue')
+const ReleaseListPage = () => import('@/pages/ReleaseListPage.vue')
+const CreateReleasePage = () => import('@/pages/CreateReleasePage.vue')
+const ReleaseDetailPage = () => import('@/pages/ReleaseDetailPage.vue')
+const DeployListPage = () => import('@/pages/DeployListPage.vue')
+const DeployDetailPage = () => import('@/pages/DeployDetailPage.vue')
+const UserListPage = () => import('@/pages/UserListPage.vue')
+const RoleListPage = () => import('@/pages/RoleListPage.vue')
+const EnvironmentPermissionPage = () => import('@/pages/EnvironmentPermissionPage.vue')
+const ChangelogPage = () => import('@/pages/ChangelogPage.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -27,6 +28,7 @@ const router = createRouter({
     { path: '/baselines', name: 'baselines', component: BaselineListPage, meta: { title: '环境基线列表' } },
     { path: '/baselines/:id', name: 'baseline-detail', component: BaselineDetailPage, meta: { title: '基线详情' } },
     { path: '/compare', name: 'compare', component: ComparePage, meta: { title: '环境差异对比' } },
+    { path: '/releases', name: 'release-list', component: ReleaseListPage, meta: { title: '发布单列表' } },
     { path: '/releases/create', name: 'create-release', component: CreateReleasePage, meta: { title: '创建发布单' } },
     { path: '/releases/:id', name: 'release-detail', component: ReleaseDetailPage, meta: { title: '发布详情' } },
     { path: '/deploy-tasks', name: 'deploy-list', component: DeployListPage, meta: { title: '部署任务列表' } },

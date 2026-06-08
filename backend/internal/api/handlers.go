@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,7 +24,7 @@ type Handler struct {
 
 func NewHandler(repo *repository.MockRepository, queue *agent.Queue, integrations integration.Suite) *Handler {
 	handler := &Handler{repo: repo, queue: queue, integrations: integrations}
-	handler.service = service.NewReleaseCreator(integrations, handler.enqueue)
+	handler.service = service.NewReleaseCreator(integrations, repo, handler.enqueueTask)
 	return handler
 }
 
@@ -133,12 +134,23 @@ func (h *Handler) LockBaseline(c *gin.Context) {
 }
 
 func (h *Handler) CompareBaseline(c *gin.Context) {
-	result, ok := h.repo.GetDiffResult(c.Param("id"))
+	var request struct {
+		TargetEnvironmentID string `json:"targetEnvironmentId"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid compare request")
+		return
+	}
+	result, ok := h.repo.GetDiffResult(c.Param("id"), request.TargetEnvironmentID)
 	if !ok {
 		NotFound(c, "baseline not found")
 		return
 	}
 	OK(c, result)
+}
+
+func (h *Handler) ListReleases(c *gin.Context) {
+	OK(c, paginate(h.repo.ListReleases(c.Query("keyword")), c))
 }
 
 func (h *Handler) CreateRelease(c *gin.Context) {
@@ -152,8 +164,20 @@ func (h *Handler) CreateRelease(c *gin.Context) {
 		switch err {
 		case service.ErrInvalidReleaseType:
 			BadRequest(c, "release type must be SERVICE_RELEASE")
+		case service.ErrAgentNotFound:
+			BadRequest(c, "agent not found")
+		case service.ErrAgentOffline:
+			BadRequest(c, "agent must be ONLINE")
+		case service.ErrAgentEnvironment:
+			BadRequest(c, "agent does not belong to target environment")
 		case service.ErrJenkinsTrigger:
 			BadRequest(c, "jenkins trigger failed")
+		case service.ErrRegistryImageCheck:
+			BadRequest(c, "registry image check failed")
+		case service.ErrRegistryImageSync:
+			BadRequest(c, "registry image sync failed")
+		case service.ErrImageNotFound:
+			BadRequest(c, "release image not found")
 		default:
 			BadRequest(c, "invalid release request")
 		}
@@ -206,6 +230,14 @@ func (h *Handler) CreateDeployTask(c *gin.Context) {
 		switch err {
 		case service.ErrInvalidDeployType:
 			BadRequest(c, "deploy type must be SERVICE_DEPLOYMENT")
+		case service.ErrAgentNotFound:
+			BadRequest(c, "agent not found")
+		case service.ErrAgentOffline:
+			BadRequest(c, "agent must be ONLINE")
+		case service.ErrAgentEnvironment:
+			BadRequest(c, "agent does not belong to target environment")
+		case service.ErrWorkloadProbe:
+			BadRequest(c, "kubernetes workload probe failed")
 		default:
 			BadRequest(c, "invalid deploy request")
 		}

@@ -13,9 +13,9 @@
 
     <div class="metric-grid">
       <MetricCard label="在线环境" :value="healthyEnvCount" foot="连接正常" tone="good" />
-      <MetricCard label="Agent 在线" :value="`${onlineAgentCount}/${mockData.agents.length}`" foot="心跳正常" tone="good" />
+      <MetricCard label="Agent 在线" :value="`${onlineAgentCount}/${agentMockData.agents.length}`" foot="心跳正常" tone="good" />
       <MetricCard label="已锁定基线" :value="lockedBaselineCount" foot="今日新增 1 个" />
-      <MetricCard label="待发布服务" :value="mockData.diffResult.summary.publishable" foot="来自差异对比" tone="warn" />
+      <MetricCard label="待发布服务" :value="baselineMockData.diffResult.summary.publishable" foot="来自差异对比" tone="warn" />
       <MetricCard label="执行中发布" value="1" foot="健康检查阶段" />
     </div>
 
@@ -27,7 +27,7 @@
             <el-button link type="primary" @click="$router.push('/compare')">查看差异</el-button>
           </div>
         </template>
-        <el-table :data="mockData.environments" class="wide-table">
+        <el-table :data="environmentMockData.environments" class="wide-table">
           <el-table-column prop="name" label="环境" min-width="160" />
           <el-table-column label="Agent" min-width="120">
             <template #default="{ row }"><StatusTag :status="row.agentStatus" /></template>
@@ -67,11 +67,13 @@
 <script setup lang="ts">
 import MetricCard from '@/components/MetricCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { mockData } from '@/api/mockData'
+import { agentMockData } from '@/api/mockData/agent'
+import { baselineMockData } from '@/api/mockData/baseline'
+import { environmentMockData } from '@/api/mockData/environment'
 
-const healthyEnvCount = mockData.environments.filter((item) => item.status === 'HEALTHY').length
-const onlineAgentCount = mockData.agents.filter((item) => item.status === 'ONLINE').length
-const lockedBaselineCount = mockData.baselines.filter((item) => item.status === 'LOCKED').length
+const healthyEnvCount = environmentMockData.environments.filter((item) => item.status === 'HEALTHY').length
+const onlineAgentCount = agentMockData.agents.filter((item) => item.status === 'ONLINE').length
+const lockedBaselineCount = baselineMockData.baselines.filter((item) => item.status === 'LOCKED').length
 const taskRows = [
   { id: 'REL-20260607-031', type: '发布', step: 'HTTP 健康检查', status: 'PARTIAL_FAILED' },
   { id: 'DEP-20260607-009', type: '部署', step: '恢复 MinIO', status: 'RUNNING' },

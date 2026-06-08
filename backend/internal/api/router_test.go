@@ -25,13 +25,14 @@ func TestCoreMockAPIs(t *testing.T) {
 		{name: "baselines", method: http.MethodGet, path: "/api/baselines", statusCode: http.StatusOK},
 		{name: "baseline detail", method: http.MethodGet, path: "/api/baselines/BL-20260607-0001", statusCode: http.StatusOK},
 		{name: "baseline compare", method: http.MethodPost, path: "/api/baselines/BL-20260607-0001/compare", body: "{}", statusCode: http.StatusOK},
-		{name: "create release", method: http.MethodPost, path: "/api/releases", body: "{}", statusCode: http.StatusCreated},
-		{name: "create service release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
-		{name: "create image release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"LOCAL_HARBOR_IMAGE","image":{"repository":"harbor.local/project-x/user-service","tag":"20260607-a1b2c3"}}`, statusCode: http.StatusCreated},
+		{name: "release list", method: http.MethodGet, path: "/api/releases", statusCode: http.StatusOK},
+		{name: "create release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
+		{name: "create service release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
+		{name: "create image release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"LOCAL_HARBOR_IMAGE","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","image":{"repository":"harbor.local/project-x/user-service","tag":"20260607-a1b2c3"}}`, statusCode: http.StatusCreated},
 		{name: "release detail", method: http.MethodGet, path: "/api/releases/REL-20260607-031", statusCode: http.StatusOK},
 		{name: "created release detail", method: http.MethodGet, path: "/api/releases/REL-20260607-MOCK", statusCode: http.StatusOK},
 		{name: "deploy tasks", method: http.MethodGet, path: "/api/deploy-tasks", statusCode: http.StatusOK},
-		{name: "create deploy task", method: http.MethodPost, path: "/api/deploy-tasks", body: "{}", statusCode: http.StatusCreated},
+		{name: "create deploy task", method: http.MethodPost, path: "/api/deploy-tasks", body: `{"type":"SERVICE_DEPLOYMENT","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x"}`, statusCode: http.StatusCreated},
 		{name: "deploy detail", method: http.MethodGet, path: "/api/deploy-tasks/DEP-20260607-009", statusCode: http.StatusOK},
 		{name: "created deploy detail", method: http.MethodGet, path: "/api/deploy-tasks/DEP-20260607-MOCK", statusCode: http.StatusOK},
 		{name: "auth login", method: http.MethodPost, path: "/api/auth/login", body: `{"username":"admin","password":"mock"}`, statusCode: http.StatusOK},
@@ -108,7 +109,41 @@ func TestEnvironmentCheckUsesMockIntegrations(t *testing.T) {
 
 func TestCreateReleaseReturnsAgentTaskID(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Code string `json:"code"`
+		Data struct {
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			ExecutionMode string `json:"executionMode"`
+			AgentTaskID   string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "OK" {
+		t.Fatalf("expected OK response, got %s", payload.Code)
+	}
+	if payload.Data.ExecutionMode != "JENKINS_AGENT" {
+		t.Fatalf("expected executionMode JENKINS_AGENT, got %s", payload.Data.ExecutionMode)
+	}
+	if payload.Data.AgentTaskID == "" || payload.Data.AgentTaskID != payload.Data.ID {
+		t.Fatalf("expected agentTaskId to match id, got %+v", payload.Data)
+	}
+}
+
+func TestCreateDeployTaskReturnsAgentTaskID(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{"type":"SERVICE_DEPLOYMENT","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x"}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -140,9 +175,9 @@ func TestCreateReleaseReturnsAgentTaskID(t *testing.T) {
 	}
 }
 
-func TestCreateDeployTaskReturnsAgentTaskID(t *testing.T) {
+func TestCreateImageReleaseReturnsRegistrySyncMetadata(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"LOCAL_HARBOR_IMAGE","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","image":{"repository":"harbor.local/project-x/user-service","tag":"20260607-a1b2c3"}}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -154,10 +189,42 @@ func TestCreateDeployTaskReturnsAgentTaskID(t *testing.T) {
 	var payload struct {
 		Code string `json:"code"`
 		Data struct {
-			ID            string `json:"id"`
-			Status        string `json:"status"`
 			ExecutionMode string `json:"executionMode"`
-			AgentTaskID   string `json:"agentTaskId"`
+			BuildID       string `json:"buildId"`
+			BuildStatus   string `json:"buildStatus"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Data.ExecutionMode != "AGENT_IMAGE_SYNC" {
+		t.Fatalf("expected AGENT_IMAGE_SYNC, got %s", payload.Data.ExecutionMode)
+	}
+	if payload.Data.BuildID == "" || payload.Data.BuildStatus != "SUCCESS" {
+		t.Fatalf("expected registry sync metadata, got %+v", payload.Data)
+	}
+}
+
+func TestBaselineCompareUsesRequestedTargetEnvironment(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/baselines/BL-20260607-0001/compare",
+		strings.NewReader(`{"targetEnvironmentId":"env-project-z-prod"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Code string `json:"code"`
+		Data struct {
+			SourceBaselineID    string `json:"sourceBaselineId"`
+			TargetEnvironmentID string `json:"targetEnvironmentId"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
@@ -166,11 +233,63 @@ func TestCreateDeployTaskReturnsAgentTaskID(t *testing.T) {
 	if payload.Code != "OK" {
 		t.Fatalf("expected OK response, got %s", payload.Code)
 	}
-	if payload.Data.ExecutionMode != "AGENT" {
-		t.Fatalf("expected executionMode AGENT, got %s", payload.Data.ExecutionMode)
+	if payload.Data.SourceBaselineID != "BL-20260607-0001" {
+		t.Fatalf("unexpected source baseline id: %+v", payload.Data)
 	}
-	if payload.Data.AgentTaskID == "" || payload.Data.AgentTaskID != payload.Data.ID {
-		t.Fatalf("expected agentTaskId to match id, got %+v", payload.Data)
+	if payload.Data.TargetEnvironmentID != "env-project-z-prod" {
+		t.Fatalf("expected requested target environment, got %+v", payload.Data)
+	}
+}
+
+func TestCreateReleaseRejectsOfflineAgent(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-z-prod","agentId":"agent-project-z","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCreateReleaseRejectsAgentEnvironmentMismatch(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-y","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCreateDeployTaskRejectsOfflineAgent(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{"type":"SERVICE_DEPLOYMENT","targetEnvironmentId":"env-project-z-prod","agentId":"agent-project-z"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCreateDeployTaskRejectsAgentEnvironmentMismatch(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{"type":"SERVICE_DEPLOYMENT","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-y"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
 

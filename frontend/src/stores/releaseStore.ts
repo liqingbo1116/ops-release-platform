@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
-import { mockData } from '@/api/mockData'
+import { releaseMockData } from '@/api/mockData/release'
 
 export const useReleaseStore = defineStore('release', {
   state: () => ({
-    detail: mockData.releaseDetail,
+    detail: releaseMockData.releaseDetail,
   }),
 })

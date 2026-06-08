@@ -18,6 +18,7 @@ type MockRepository struct {
 	baselines      []domain.Baseline
 	baselineDetail domain.BaselineDetail
 	diffResult     domain.DiffResult
+	releases       []domain.ReleaseOrder
 	releaseDetail  domain.ReleaseDetail
 	deployTasks    []domain.DeployTask
 	deployDetail   domain.DeployDetail
@@ -36,6 +37,7 @@ func NewMockRepository() (*MockRepository, error) {
 		func() error { return loadJSON("mockdata/baselines.json", &repo.baselines) },
 		func() error { return loadJSON("mockdata/baseline-detail.json", &repo.baselineDetail) },
 		func() error { return loadJSON("mockdata/diff-result.json", &repo.diffResult) },
+		func() error { return loadJSON("mockdata/releases.json", &repo.releases) },
 		func() error { return loadJSON("mockdata/release-detail.json", &repo.releaseDetail) },
 		func() error { return loadJSON("mockdata/deploy-tasks.json", &repo.deployTasks) },
 		func() error { return loadJSON("mockdata/deploy-detail.json", &repo.deployDetail) },
@@ -74,6 +76,15 @@ func (r *MockRepository) ListAgents(query string) []domain.Agent {
 	})
 }
 
+func (r *MockRepository) GetAgent(id string) (domain.Agent, bool) {
+	for _, agent := range r.agents {
+		if agent.ID == id {
+			return agent, true
+		}
+	}
+	return domain.Agent{}, false
+}
+
 func (r *MockRepository) ListBaselines(query string) []domain.Baseline {
 	return filter(r.baselines, query, func(item domain.Baseline) string {
 		return item.ID + " " + item.Name + " " + item.SourceEnvironmentName + " " + item.Purpose + " " + item.Status
@@ -87,11 +98,21 @@ func (r *MockRepository) GetBaselineDetail(id string) (domain.BaselineDetail, bo
 	return r.baselineDetail, true
 }
 
-func (r *MockRepository) GetDiffResult(id string) (domain.DiffResult, bool) {
+func (r *MockRepository) GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool) {
 	if id != "" && id != r.diffResult.SourceBaselineID {
 		return domain.DiffResult{}, false
 	}
-	return r.diffResult, true
+	result := r.diffResult
+	if targetEnvironmentID != "" {
+		result.TargetEnvironmentID = targetEnvironmentID
+	}
+	return result, true
+}
+
+func (r *MockRepository) ListReleases(query string) []domain.ReleaseOrder {
+	return filter(r.releases, query, func(item domain.ReleaseOrder) string {
+		return item.ID + " " + item.Type + " " + item.SourceBaselineID + " " + item.TargetEnvironmentName + " " + item.Status + " " + item.AgentName
+	})
 }
 
 func (r *MockRepository) GetReleaseDetail(id string) (domain.ReleaseDetail, bool) {

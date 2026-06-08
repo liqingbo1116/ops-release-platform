@@ -16,7 +16,7 @@
           <el-button>批量锁定</el-button>
         </div>
       </div>
-      <el-table :data="filteredRows" class="wide-table">
+      <el-table v-loading="loading" :data="filteredRows" class="wide-table">
         <el-table-column type="selection" width="48" />
         <el-table-column prop="id" label="基线 ID" min-width="170" />
         <el-table-column prop="name" label="基线名称" min-width="220" />
@@ -41,17 +41,35 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { computed, onMounted, ref } from 'vue'
+import { listBaselines } from '@/api/baselines'
 import StatusTag from '@/components/StatusTag.vue'
-import { mockData } from '@/api/mockData'
+import { baselineMockData } from '@/api/mockData/baseline'
 import { formatDateTime } from '@/utils/format'
 
 const keyword = ref('')
+const loading = ref(false)
+const rows = ref([...baselineMockData.baselines])
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
-  if (!q) return mockData.baselines
-  return mockData.baselines.filter((item) =>
+  if (!q) return rows.value
+  return rows.value.filter((item) =>
     `${item.id} ${item.name} ${item.sourceEnvironmentName} ${item.purpose}`.toLowerCase().includes(q),
   )
 })
+
+async function loadRows() {
+  loading.value = true
+  try {
+    rows.value = await listBaselines()
+  } catch {
+    ElMessage.warning('加载基线列表失败，已显示本地示例数据')
+    rows.value = [...baselineMockData.baselines]
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(loadRows)
 </script>

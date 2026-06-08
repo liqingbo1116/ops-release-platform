@@ -6,7 +6,7 @@
         <StatusTag :status="status" />
       </div>
     </template>
-    <StepTimeline :steps="steps" />
+    <StepTimeline :steps="steps" :active-step-name="activeStepName" />
   </el-card>
 </template>
 
@@ -26,5 +26,6 @@ defineProps<{
   title: string
   status: string
   steps: Step[]
+  activeStepName?: string
 }>()
 </script>

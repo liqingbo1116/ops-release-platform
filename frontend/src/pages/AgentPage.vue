@@ -9,7 +9,7 @@
     </div>
 
     <div class="metric-grid six">
-      <MetricCard label="注册 Agent" :value="mockData.agents.length" foot="绑定环境" />
+      <MetricCard label="注册 Agent" :value="agentMockData.agents.length" foot="绑定环境" />
       <MetricCard label="在线" :value="onlineCount" foot="心跳正常" tone="good" />
       <MetricCard label="执行中" :value="runningCount" foot="发布 / 部署" />
       <MetricCard label="离线" :value="offlineCount" foot="需排查" tone="bad" />
@@ -41,7 +41,7 @@
       </el-table>
     </el-card>
 
-    <AgentRegisterDrawer v-model:visible="drawerVisible" :environments="mockData.environments" />
+    <AgentRegisterDrawer v-model:visible="drawerVisible" :environments="environmentMockData.environments" />
   </section>
 </template>
 
@@ -50,19 +50,20 @@ import { computed, ref } from 'vue'
 import AgentRegisterDrawer from '@/components/AgentRegisterDrawer.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { mockData } from '@/api/mockData'
+import { agentMockData } from '@/api/mockData/agent'
+import { environmentMockData } from '@/api/mockData/environment'
 import { formatDateTime, joinCapabilities } from '@/utils/format'
 
 const keyword = ref('')
 const drawerVisible = ref(false)
-const onlineCount = mockData.agents.filter((item) => item.status === 'ONLINE').length
-const offlineCount = mockData.agents.filter((item) => item.status === 'OFFLINE').length
-const runningCount = mockData.agents.filter((item) => item.currentTaskId).length
+const onlineCount = agentMockData.agents.filter((item) => item.status === 'ONLINE').length
+const offlineCount = agentMockData.agents.filter((item) => item.status === 'OFFLINE').length
+const runningCount = agentMockData.agents.filter((item) => item.currentTaskId).length
 
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
-  if (!q) return mockData.agents
-  return mockData.agents.filter((item) =>
+  if (!q) return agentMockData.agents
+  return agentMockData.agents.filter((item) =>
     `${item.name} ${item.environmentName} ${item.capabilities.join(' ')}`.toLowerCase().includes(q),
   )
 })

@@ -1,4 +1,23 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const pageStub = { template: '<div />' }
+
+vi.mock('@/pages/LoginPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/DashboardPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/EnvironmentPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/AgentPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/BaselineListPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/BaselineDetailPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/ComparePage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/ReleaseListPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/CreateReleasePage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/ReleaseDetailPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/DeployListPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/DeployDetailPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/UserListPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/RoleListPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/EnvironmentPermissionPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/ChangelogPage.vue', () => ({ default: pageStub }))
 
 import router from './index'
 

@@ -1,5 +1,12 @@
 import { getData, type PageResult, useMockApi } from './client'
-import { mockData } from './mockData'
+import { agentMockData } from './mockData/agent'
+import { authMockData } from './mockData/auth'
+import { baselineMockData } from './mockData/baseline'
+import { changelogMockData } from './mockData/changelog'
+import { deployMockData } from './mockData/deploy'
+import { environmentMockData } from './mockData/environment'
+import { releaseMockData } from './mockData/release'
+import { userMockData } from './mockData/user'
 
 type ListKey =
   | 'agents'
@@ -11,9 +18,40 @@ type ListKey =
   | 'permissions'
   | 'changelog'
 
-async function loadList<T>(key: ListKey, url: string) {
+type ListTargets = {
+  [K in ListKey]: (items: unknown[]) => void
+}
+
+const listTargets: ListTargets = {
+  agents: (items) => {
+    agentMockData.agents = items as typeof agentMockData.agents
+  },
+  baselines: (items) => {
+    baselineMockData.baselines = items as typeof baselineMockData.baselines
+  },
+  deployTasks: (items) => {
+    deployMockData.deployTasks = items as typeof deployMockData.deployTasks
+  },
+  environments: (items) => {
+    environmentMockData.environments = items as typeof environmentMockData.environments
+  },
+  users: (items) => {
+    userMockData.users = items as typeof userMockData.users
+  },
+  roles: (items) => {
+    userMockData.roles = items as typeof userMockData.roles
+  },
+  permissions: (items) => {
+    userMockData.permissions = items as typeof userMockData.permissions
+  },
+  changelog: (items) => {
+    changelogMockData.changelog = items as typeof changelogMockData.changelog
+  },
+}
+
+async function loadList<K extends ListKey, T>(key: K, url: string) {
   const result = await getData<PageResult<T>>(url)
-  ;(mockData[key] as T[]) = result.items
+  listTargets[key](result.items as unknown[])
 }
 
 export async function loadRuntimeData() {
@@ -24,19 +62,19 @@ export async function loadRuntimeData() {
       loadList('environments', '/api/environments'),
       loadList('agents', '/api/agents'),
       loadList('baselines', '/api/baselines'),
-      getData<typeof mockData.baselineDetail>('/api/baselines/BL-20260607-0001').then((data) => {
-        mockData.baselineDetail = data
+      getData<typeof baselineMockData.baselineDetail>('/api/baselines/BL-20260607-0001').then((data) => {
+        baselineMockData.baselineDetail = data
       }),
       postCompare(),
-      getData<typeof mockData.releaseDetail>('/api/releases/REL-20260607-031').then((data) => {
-        mockData.releaseDetail = data
+      getData<typeof releaseMockData.releaseDetail>('/api/releases/REL-20260607-031').then((data) => {
+        releaseMockData.releaseDetail = data
       }),
       loadList('deployTasks', '/api/deploy-tasks'),
-      getData<typeof mockData.deployDetail>('/api/deploy-tasks/DEP-20260607-009').then((data) => {
-        mockData.deployDetail = data
+      getData<typeof deployMockData.deployDetail>('/api/deploy-tasks/DEP-20260607-009').then((data) => {
+        deployMockData.deployDetail = data
       }),
-      getData<typeof mockData.currentUser>('/api/auth/me').then((data) => {
-        mockData.currentUser = data
+      getData<typeof authMockData.currentUser>('/api/auth/me').then((data) => {
+        authMockData.currentUser = data
       }),
       loadList('users', '/api/users'),
       loadList('roles', '/api/roles'),
@@ -56,5 +94,5 @@ async function postCompare() {
   })
   if (!response.ok) throw new Error(`compare failed: ${response.status}`)
   const payload = await response.json()
-  mockData.diffResult = payload.data
+  baselineMockData.diffResult = payload.data
 }

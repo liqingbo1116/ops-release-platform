@@ -54,6 +54,7 @@ func NewRouter(queue *agent.Queue, integrations integration.Suite) *gin.Engine {
 	api.POST("/baselines/:id/lock", handler.LockBaseline)
 	api.POST("/baselines/:id/compare", handler.CompareBaseline)
 
+	api.GET("/releases", handler.ListReleases)
 	api.POST("/releases", handler.CreateRelease)
 	api.GET("/releases/:id", handler.GetRelease)
 	api.POST("/releases/:id/retry", handler.RetryRelease)

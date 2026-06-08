@@ -1,0 +1,29 @@
+[
+  {
+    "id": "REL-20260607-031",
+    "type": "SERVICE_RELEASE",
+    "sourceBaselineId": "BL-20260607-0001",
+    "targetEnvironmentName": "项目 X 生产",
+    "status": "PARTIAL_FAILED",
+    "progress": 81,
+    "agentName": "agent-project-x"
+  },
+  {
+    "id": "REL-20260607-030",
+    "type": "SERVICE_DEPLOYMENT",
+    "sourceBaselineId": "BL-20260606-0009",
+    "targetEnvironmentName": "项目 X 预发",
+    "status": "RUNNING",
+    "progress": 56,
+    "agentName": "agent-project-x-staging"
+  },
+  {
+    "id": "REL-20260607-029",
+    "type": "SERVICE_RELEASE",
+    "sourceBaselineId": "BL-20260605-0007",
+    "targetEnvironmentName": "项目 Y 生产",
+    "status": "SUCCESS",
+    "progress": 100,
+    "agentName": "agent-project-y"
+  }
+]

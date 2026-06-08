@@ -32,12 +32,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import PermissionButton from '@/components/PermissionButton.vue'
-import { mockData } from '@/api/mockData'
+import { userMockData } from '@/api/mockData/user'
 
 const keyword = ref('')
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
-  if (!q) return mockData.users
-  return mockData.users.filter((item) => `${item.username} ${item.displayName} ${item.roles.join(' ')} ${item.status}`.toLowerCase().includes(q))
+  if (!q) return userMockData.users
+  return userMockData.users.filter((item) => `${item.username} ${item.displayName} ${item.roles.join(' ')} ${item.status}`.toLowerCase().includes(q))
 })
 </script>

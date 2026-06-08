@@ -53,10 +53,10 @@
 import { computed, ref } from 'vue'
 import EnvironmentConfigDrawer from '@/components/EnvironmentConfigDrawer.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { mockData } from '@/api/mockData'
+import { environmentMockData } from '@/api/mockData/environment'
 import { formatDateTime } from '@/utils/format'
 
-type Environment = (typeof mockData.environments)[number]
+type Environment = (typeof environmentMockData.environments)[number]
 
 const keyword = ref('')
 const networkMode = ref('')
@@ -65,7 +65,7 @@ const activeEnvironment = ref<Environment | null>(null)
 
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
-  return mockData.environments.filter((item) => {
+  return environmentMockData.environments.filter((item) => {
     const keywordMatched = !q || `${item.name} ${item.code}`.toLowerCase().includes(q)
     const modeMatched = !networkMode.value || item.networkMode === networkMode.value
     return keywordMatched && modeMatched

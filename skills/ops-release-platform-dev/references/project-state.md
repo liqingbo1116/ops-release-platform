@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-06-07
+Last updated: 2026-06-08
 
 Always verify with `git status --short --branch` and `git log -1 --oneline`; this file is an onboarding aid, not a substitute for checking the working tree.
 
@@ -22,19 +22,27 @@ Latest pushed commit at time of this note:
 
 ## Current Local Work
 
-Phase 4 adapter preparation is currently implemented locally and not yet committed at the time this file was created:
+Phase 4 adapter preparation is currently implemented locally and not yet committed:
 
 - Added backend integration interfaces for Jenkins, Registry/Harbor, and Kubernetes.
 - Added mock integration suite and adapter tests.
 - Wired environment connection check through mock Kubernetes and Registry adapters.
 - Added `INTEGRATION_MODE=mock` config.
 - Updated README and docker-compose with integration mode notes.
+- Wired service release and service deployment creation through the integration suite:
+  - `LOCAL_HARBOR_IMAGE` release now probes and syncs via `RegistryAdapter`
+  - deployment task creation now probes target workloads via `KubernetesAdapter`
+  - handler error mapping now distinguishes Jenkins, registry, image-not-found, and workload probe failures
+  - added backend service/API tests for these flows
 
 Validation already run for this local work:
 
-- `go test ./...` passed.
-- `npm run test:unit` passed.
-- `npm run build` passed.
+- Historical local validation before this iteration:
+  - `go test ./...` passed.
+  - `npm run test:unit` passed.
+  - `npm run build` passed.
+- Current iteration:
+  - `go test ./...` and targeted Go tests were started but remained in dependency download/compile stage in the current environment, so no final pass/fail result was produced yet.
 - `docker compose config` could not run because local Docker command was unavailable.
 
 ## Known Warnings

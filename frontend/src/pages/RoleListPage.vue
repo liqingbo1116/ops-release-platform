@@ -9,7 +9,7 @@
     </div>
 
     <el-card shadow="never">
-      <el-table :data="mockData.roles" class="wide-table">
+      <el-table :data="userMockData.roles" class="wide-table">
         <el-table-column prop="code" label="角色编码" min-width="160" />
         <el-table-column prop="name" label="角色名称" min-width="140" />
         <el-table-column prop="description" label="说明" min-width="280" />
@@ -23,5 +23,5 @@
 
 <script setup lang="ts">
 import PermissionButton from '@/components/PermissionButton.vue'
-import { mockData } from '@/api/mockData'
+import { userMockData } from '@/api/mockData/user'
 </script>

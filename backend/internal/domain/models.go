@@ -101,6 +101,16 @@ type ReleaseFailure struct {
 	Suggestion  string `json:"suggestion"`
 }
 
+type ReleaseOrder struct {
+	ID                    string `json:"id"`
+	Type                  string `json:"type"`
+	SourceBaselineID      string `json:"sourceBaselineId"`
+	TargetEnvironmentName string `json:"targetEnvironmentName"`
+	Status                string `json:"status"`
+	Progress              int    `json:"progress"`
+	AgentName             string `json:"agentName"`
+}
+
 type ReleaseDetail struct {
 	ID                    string           `json:"id"`
 	Type                  string           `json:"type"`

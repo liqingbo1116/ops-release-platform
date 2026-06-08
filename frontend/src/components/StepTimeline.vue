@@ -1,7 +1,11 @@
 <template>
   <div class="steps">
-    <div v-for="(step, index) in steps" :key="`${step.name}-${index}`" class="step-row">
-      <div class="step-index">{{ 'order' in step ? step.order : index + 1 }}</div>
+    <div
+      v-for="(step, index) in steps"
+      :key="`${step.name}-${index}`"
+      :class="['step-row', { active: isActiveStep(step) }]"
+    >
+      <div :class="['step-index', { active: isActiveStep(step) }]">{{ 'order' in step ? step.order : index + 1 }}</div>
       <div class="step-main">
         <strong>{{ step.name }}</strong>
         <span v-if="'message' in step && step.message">{{ step.message }}</span>
@@ -23,7 +27,12 @@ type Step = {
   type?: string
 }
 
-defineProps<{
+const props = defineProps<{
   steps: Step[]
+  activeStepName?: string
 }>()
+
+function isActiveStep(step: Step) {
+  return Boolean(props.activeStepName && step.name === props.activeStepName)
+}
 </script>

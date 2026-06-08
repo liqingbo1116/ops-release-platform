@@ -1,13 +1,13 @@
-import { mockData } from './mockData'
+import { authMockData } from './mockData/auth'
 import { getData, postData, useMockApi } from './client'
 
 export function login(username: string, password: string) {
   if (!useMockApi) {
-    return postData<{ token: string; user: typeof mockData.currentUser }>('/api/auth/login', { username, password })
+    return postData<{ token: string; user: typeof authMockData.currentUser }>('/api/auth/login', { username, password })
   }
   return Promise.resolve({
     token: 'mock-token-admin',
-    user: mockData.currentUser,
+    user: authMockData.currentUser,
   })
 }
 
@@ -20,7 +20,7 @@ export function logout() {
 
 export function getCurrentUser() {
   if (!useMockApi) {
-    return getData<typeof mockData.currentUser>('/api/auth/me')
+    return getData<typeof authMockData.currentUser>('/api/auth/me')
   }
-  return Promise.resolve(mockData.currentUser)
+  return Promise.resolve(authMockData.currentUser)
 }

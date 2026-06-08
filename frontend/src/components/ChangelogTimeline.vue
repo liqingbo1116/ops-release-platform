@@ -32,9 +32,9 @@
 </template>
 
 <script setup lang="ts">
-import { mockData } from '@/api/mockData'
+import { changelogMockData } from '@/api/mockData/changelog'
 
-type ChangelogEntry = (typeof mockData.changelog)[number]
+type ChangelogEntry = (typeof changelogMockData.changelog)[number]
 
 defineProps<{
   items: ChangelogEntry[]

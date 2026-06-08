@@ -29,14 +29,14 @@
 import { computed, ref } from 'vue'
 import ChangelogTimeline from '@/components/ChangelogTimeline.vue'
 import PermissionButton from '@/components/PermissionButton.vue'
-import { mockData } from '@/api/mockData'
+import { changelogMockData } from '@/api/mockData/changelog'
 
 const keyword = ref('')
 const typeFilter = ref('')
 
 const filteredItems = computed(() => {
   const q = keyword.value.trim().toLowerCase()
-  return mockData.changelog.filter((item) => {
+  return changelogMockData.changelog.filter((item) => {
     const typeMatched = !typeFilter.value || item.type === typeFilter.value
     const keywordMatched =
       !q ||
