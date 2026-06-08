@@ -10,16 +10,18 @@ import (
 )
 
 var (
-	ErrInvalidReleaseType = errors.New("invalid release type")
-	ErrInvalidDeployType  = errors.New("invalid deploy type")
-	ErrAgentNotFound      = errors.New("agent not found")
-	ErrAgentOffline       = errors.New("agent offline")
-	ErrAgentEnvironment   = errors.New("agent environment mismatch")
-	ErrJenkinsTrigger     = errors.New("jenkins trigger failed")
-	ErrRegistryImageCheck = errors.New("registry image check failed")
-	ErrRegistryImageSync  = errors.New("registry image sync failed")
-	ErrImageNotFound      = errors.New("release image not found")
-	ErrWorkloadProbe      = errors.New("kubernetes workload probe failed")
+	ErrInvalidReleaseType      = errors.New("invalid release type")
+	ErrInvalidDeployType       = errors.New("invalid deploy type")
+	ErrAgentNotFound           = errors.New("agent not found")
+	ErrAgentOffline            = errors.New("agent offline")
+	ErrAgentEnvironment        = errors.New("agent environment mismatch")
+	ErrBaselineNotFound        = errors.New("baseline not found")
+	ErrInvalidServiceSelection = errors.New("invalid service selection")
+	ErrJenkinsTrigger          = errors.New("jenkins trigger failed")
+	ErrRegistryImageCheck      = errors.New("registry image check failed")
+	ErrRegistryImageSync       = errors.New("registry image sync failed")
+	ErrImageNotFound           = errors.New("release image not found")
+	ErrWorkloadProbe           = errors.New("kubernetes workload probe failed")
 )
 
 type EnqueueFunc func(ctx context.Context, id string, taskType string, action string)
@@ -28,17 +30,23 @@ type AgentReader interface {
 	GetAgent(id string) (domain.Agent, bool)
 }
 
+type DiffReader interface {
+	GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool)
+}
+
 type ReleaseCreator struct {
 	integrations integration.Suite
 	agents       AgentReader
+	diffReader   DiffReader
 	enqueue      EnqueueFunc
 	now          func() time.Time
 }
 
-func NewReleaseCreator(integrations integration.Suite, agents AgentReader, enqueue EnqueueFunc) *ReleaseCreator {
+func NewReleaseCreator(integrations integration.Suite, agents AgentReader, diffReader DiffReader, enqueue EnqueueFunc) *ReleaseCreator {
 	return &ReleaseCreator{
 		integrations: integrations,
 		agents:       agents,
+		diffReader:   diffReader,
 		enqueue:      enqueue,
 		now:          time.Now,
 	}
@@ -47,6 +55,7 @@ func NewReleaseCreator(integrations integration.Suite, agents AgentReader, enque
 type CreateReleaseRequest struct {
 	Type                string          `json:"type"`
 	ReleaseSource       string          `json:"releaseSource"`
+	SourceBaselineID    string          `json:"sourceBaselineId"`
 	TargetEnvironmentID string          `json:"targetEnvironmentId"`
 	AgentID             string          `json:"agentId"`
 	ServiceIDs          []string        `json:"serviceIds"`
@@ -85,6 +94,13 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 	}
 	if err := c.validateAgent(request.AgentID, request.TargetEnvironmentID); err != nil {
 		return CreateReleaseResult{}, err
+	}
+	if request.SourceBaselineID != "" {
+		allowedServiceIDs, err := c.resolveServiceSelection(request.SourceBaselineID, request.TargetEnvironmentID, request.ServiceIDs, "NEED_UPDATE")
+		if err != nil {
+			return CreateReleaseResult{}, err
+		}
+		request.ServiceIDs = allowedServiceIDs
 	}
 
 	id := "REL-20260607-MOCK"
@@ -190,6 +206,13 @@ func (c *ReleaseCreator) CreateDeployTask(ctx context.Context, request CreateDep
 	if err := c.validateAgent(request.AgentID, request.TargetEnvironmentID); err != nil {
 		return CreateDeployTaskResult{}, err
 	}
+	if request.SourceBaselineID != "" {
+		allowedServiceIDs, err := c.resolveServiceSelection(request.SourceBaselineID, request.TargetEnvironmentID, request.ServiceIDs, "MISSING_IN_TARGET")
+		if err != nil {
+			return CreateDeployTaskResult{}, err
+		}
+		request.ServiceIDs = allowedServiceIDs
+	}
 
 	if c.integrations.Kubernetes != nil {
 		if _, err := c.integrations.Kubernetes.ListWorkloads(ctx, request.TargetEnvironmentID); err != nil {
@@ -230,4 +253,39 @@ func (c *ReleaseCreator) validateAgent(agentID string, environmentID string) err
 		return ErrAgentOffline
 	}
 	return nil
+}
+
+func (c *ReleaseCreator) resolveServiceSelection(sourceBaselineID string, targetEnvironmentID string, requestedServiceIDs []string, expectedStatus string) ([]string, error) {
+	if c.diffReader == nil {
+		return nil, ErrBaselineNotFound
+	}
+	diff, ok := c.diffReader.GetDiffResult(sourceBaselineID, targetEnvironmentID)
+	if !ok {
+		return nil, ErrBaselineNotFound
+	}
+	allowed := make(map[string]struct{})
+	defaultSelection := make([]string, 0)
+	for _, item := range diff.Items {
+		if item.DiffStatus != expectedStatus {
+			continue
+		}
+		allowed[item.ServiceID] = struct{}{}
+		defaultSelection = append(defaultSelection, item.ServiceID)
+	}
+	if len(requestedServiceIDs) == 0 {
+		return defaultSelection, nil
+	}
+	selected := make([]string, 0, len(requestedServiceIDs))
+	seen := make(map[string]struct{}, len(requestedServiceIDs))
+	for _, serviceID := range requestedServiceIDs {
+		if _, ok := allowed[serviceID]; !ok {
+			return nil, ErrInvalidServiceSelection
+		}
+		if _, duplicated := seen[serviceID]; duplicated {
+			continue
+		}
+		seen[serviceID] = struct{}{}
+		selected = append(selected, serviceID)
+	}
+	return selected, nil
 }

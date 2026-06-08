@@ -131,12 +131,11 @@ const options = ref({
 })
 
 const candidateItems = computed(() => {
-  return diffResult.value.items.filter((item) => {
-    if (releaseMode.value === 'SERVICE_DEPLOYMENT') {
-      return item.diffStatus === 'MISSING_IN_TARGET'
-    }
-    return item.diffStatus !== 'MISSING_IN_TARGET'
-  })
+  return diffResult.value.items.filter((item) =>
+    releaseMode.value === 'SERVICE_DEPLOYMENT'
+      ? item.diffStatus === 'MISSING_IN_TARGET'
+      : item.diffStatus === 'NEED_UPDATE',
+  )
 })
 
 const filteredItems = computed(() => {
@@ -160,7 +159,7 @@ const selectedServices = computed(() => {
   const selectedSet = new Set(selectedIds.value)
   return candidateItems.value.filter((item) => selectedSet.has(item.serviceId))
 })
-const releaseServices = computed(() => selectedServices.value.filter((item) => item.diffStatus !== 'MISSING_IN_TARGET'))
+const releaseServices = computed(() => selectedServices.value.filter((item) => item.diffStatus === 'NEED_UPDATE'))
 const serviceSlug = computed(() => {
   const firstService = releaseServices.value[0]?.serviceName || candidateItems.value[0]?.serviceName || 'service'
   return firstService.replace(/-service$/, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase()
@@ -187,6 +186,11 @@ function selectPublishable() {
   selectedIds.value = filteredItems.value.filter((item) => item.publishable).map((item) => item.serviceId)
 }
 
+function syncSelectedIds() {
+  const candidateIds = new Set(candidateItems.value.map((item) => item.serviceId))
+  selectedIds.value = selectedIds.value.filter((id) => candidateIds.has(id))
+}
+
 function syncReleaseSourceFields() {
   if (!jenkinsJobOptions.value.includes(jenkinsJob.value)) {
     jenkinsJob.value = jenkinsJobOptions.value[0] || ''
@@ -210,6 +214,7 @@ function syncTargetEnvironmentId() {
 
 watch(releaseMode, () => {
   keyword.value = ''
+  syncSelectedIds()
   selectPublishable()
   syncReleaseSourceFields()
 }, { immediate: true })
@@ -252,6 +257,7 @@ async function submitRelease() {
 
     const result = await createRelease({
       type: 'SERVICE_RELEASE',
+      sourceBaselineId: diffResult.value.sourceBaselineId,
       targetEnvironmentId: targetEnvironmentId.value,
       agentId: agentId.value,
       serviceIds: selectedIds.value,
@@ -320,6 +326,7 @@ async function loadDiffResult() {
     diffResult.value = result
     sourceBaselineId.value = result.sourceBaselineId
     syncTargetEnvironmentId()
+    syncSelectedIds()
     if (selectedIds.value.length === 0) {
       selectedIds.value = candidateItems.value.filter((item) => item.publishable).map((item) => item.serviceId)
     }
@@ -328,6 +335,7 @@ async function loadDiffResult() {
     diffResult.value = { ...baselineMockData.diffResult }
     sourceBaselineId.value = diffResult.value.sourceBaselineId
     syncTargetEnvironmentId()
+    syncSelectedIds()
     if (selectedIds.value.length === 0) {
       selectedIds.value = candidateItems.value.filter((item) => item.publishable).map((item) => item.serviceId)
     }

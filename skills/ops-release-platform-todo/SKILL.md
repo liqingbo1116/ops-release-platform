@@ -28,6 +28,11 @@ Use this skill to keep project progress explicit and avoid losing the current de
 
 - The default priority is V1 feature closure, not optimization work.
 - The V1 delivery bar is: the platform must at least support remote project-environment deployment and management.
+- If the next task is about real Jenkins, Harbor/Registry, Kubernetes, or Agent integration, call out the required environment prerequisites before implementation continues.
+- Assume the V1 Agent deployment model unless docs are explicitly changed:
+  - Linux host
+  - `docker compose`
+  - Agent operates remote Kubernetes, but is not itself required to run in Kubernetes
 - Treat the following path as the mainline unless the user explicitly reprioritizes:
   - project environment management
   - Agent registration and status
@@ -43,28 +48,40 @@ Use this skill to keep project progress explicit and avoid losing the current de
 
 ## V1 Ordered Path
 
-1. Runtime snapshot and baseline generation flow.
-2. Baseline lock and baseline detail persistence/display.
-3. Backend-owned diff classification and action generation.
-4. Release management closure:
+1. Release/deploy detail closure.
+2. Agent protocol completion.
+3. Runtime snapshot and baseline generation flow.
+4. Baseline lock and baseline detail persistence/display.
+5. Backend-owned diff classification and action generation.
+6. Release management closure:
    - single-service release
    - multi-service release
    - baseline diff release
    - remote Agent execution state updates
-5. Deployment management closure for remote project environments:
+7. Deployment management closure for remote project environments:
    - deploy task creation for missing services
    - step orchestration
    - retry / skip / manual confirm support
    - detail logs and result display
-6. Agent protocol completion:
-   - heartbeat
-   - task pull
-   - step status report
-   - log report
-   - final result report
-7. Audit and permission completion for the above flows.
-8. Product/service management and image management features that are required to operate the above flows.
-9. Non-functional optimization work after V1 functional closure.
+8. Audit and permission completion for the above flows.
+9. Product/service management and image management features that are required to operate the above flows.
+10. Non-functional optimization work after V1 functional closure.
+
+## User-View Acceptance Path
+
+When reconciling TODO with implementation, prefer checking whether the user can complete the V1 path in the UI:
+
+1. log in and enter the platform
+2. view remote environments and Agent status
+3. generate or inspect a baseline from a source environment
+4. compare source baseline with target environment
+5. create a release for target-existing services
+6. create a deploy task for target-missing services
+7. track execution state, logs, failure reasons, and action history in detail pages
+8. observe Agent online status, recent heartbeat, and recent task result
+9. verify audit and environment-level permission boundaries after the above flow works
+
+If the user asks “现在到哪一步了” or “下一步做什么”, answer against this user-view path and the ordered V1 path together.
 
 ## Rules
 
@@ -73,6 +90,11 @@ Use this skill to keep project progress explicit and avoid losing the current de
 - Separate committed work from local uncommitted work.
 - Prefer backend/domain completion over UI-only expansion when the core flow is incomplete.
 - Do not move optimization-only work ahead of the remote deploy/manage mainline unless the optimization is blocking delivery.
+- For any step that requires external systems, record the prerequisite environment request in TODO first:
+  - Jenkins
+  - Harbor or compatible registry
+  - Kubernetes
+  - remote Agent Linux host with `docker compose`
 - Do not store credentials, server addresses, SSH details, or connection strings in TODO files.
 - For architectural questions, use `ops-release-platform-architecture`.
 - For commit/push workflow, use `ops-release-platform-dev` and `docs/git-submit-workflow.md`.

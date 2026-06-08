@@ -33,12 +33,14 @@ type Agent struct {
 type Baseline struct {
 	ID                    string `json:"id"`
 	Name                  string `json:"name"`
+	SourceEnvironmentID   string `json:"sourceEnvironmentId"`
 	SourceEnvironmentName string `json:"sourceEnvironmentName"`
 	ServiceCount          int    `json:"serviceCount"`
 	CreatedBy             string `json:"createdBy"`
 	CreatedAt             string `json:"createdAt"`
 	Status                string `json:"status"`
 	Purpose               string `json:"purpose"`
+	LockedAt              string `json:"lockedAt,omitempty"`
 }
 
 type BaselineItem struct {
@@ -57,9 +59,14 @@ type BaselineItem struct {
 type BaselineDetail struct {
 	ID                    string         `json:"id"`
 	Name                  string         `json:"name"`
+	SourceEnvironmentID   string         `json:"sourceEnvironmentId"`
 	SourceEnvironmentName string         `json:"sourceEnvironmentName"`
 	ServiceCount          int            `json:"serviceCount"`
 	Status                string         `json:"status"`
+	CreatedBy             string         `json:"createdBy,omitempty"`
+	CreatedAt             string         `json:"createdAt,omitempty"`
+	Purpose               string         `json:"purpose,omitempty"`
+	LockedAt              string         `json:"lockedAt,omitempty"`
 	Items                 []BaselineItem `json:"items"`
 }
 
@@ -101,6 +108,24 @@ type ReleaseFailure struct {
 	Suggestion  string `json:"suggestion"`
 }
 
+type ActionRecord struct {
+	Action     string `json:"action"`
+	Operator   string `json:"operator"`
+	Status     string `json:"status"`
+	Message    string `json:"message"`
+	OccurredAt string `json:"occurredAt"`
+}
+
+type ReleaseReport struct {
+	GeneratedAt         string `json:"generatedAt"`
+	Operator            string `json:"operator"`
+	SuccessServiceCount int    `json:"successServiceCount"`
+	FailedServiceCount  int    `json:"failedServiceCount"`
+	ManualConfirmCount  int    `json:"manualConfirmCount"`
+	RollbackRecommended bool   `json:"rollbackRecommended"`
+	Summary             string `json:"summary"`
+}
+
 type ReleaseOrder struct {
 	ID                    string `json:"id"`
 	Type                  string `json:"type"`
@@ -119,8 +144,11 @@ type ReleaseDetail struct {
 	Status                string           `json:"status"`
 	Progress              int              `json:"progress"`
 	AgentName             string           `json:"agentName"`
+	AgentTaskID           string           `json:"agentTaskId"`
 	Steps                 []ReleaseStep    `json:"steps"`
 	Failures              []ReleaseFailure `json:"failures"`
+	ActionRecords         []ActionRecord   `json:"actionRecords"`
+	Report                *ReleaseReport   `json:"report,omitempty"`
 	Logs                  []string         `json:"logs"`
 }
 
@@ -135,6 +163,7 @@ type DeployTask struct {
 }
 
 type DeployStep struct {
+	ID     string `json:"id,omitempty"`
 	Order  int    `json:"order"`
 	Name   string `json:"name"`
 	Type   string `json:"type"`
@@ -148,7 +177,9 @@ type DeployDetail struct {
 	Source                string       `json:"source"`
 	Status                string       `json:"status"`
 	Progress              int          `json:"progress"`
+	AgentTaskID           string       `json:"agentTaskId"`
 	Steps                 []DeployStep `json:"steps"`
+	ActionRecords         []ActionRecord `json:"actionRecords"`
 	Logs                  []string     `json:"logs"`
 }
 

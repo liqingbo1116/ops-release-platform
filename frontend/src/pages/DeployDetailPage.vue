@@ -7,8 +7,9 @@
       </div>
       <div class="top-actions">
         <el-button disabled>暂停</el-button>
-        <el-button disabled>跳过当前步骤</el-button>
-        <el-button type="danger" disabled>重试失败步骤</el-button>
+        <el-button :loading="skippingStep" :disabled="!canSkipCurrentStep" @click="handleSkipCurrentStep">跳过当前步骤</el-button>
+        <el-button type="warning" :loading="confirmingStep" :disabled="!canConfirmCurrentStep" @click="handleConfirmCurrentStep">人工确认继续</el-button>
+        <el-button type="danger" :loading="retryingStep" :disabled="!canRetryCurrentStep" @click="handleRetryCurrentStep">重试失败步骤</el-button>
       </div>
     </div>
 
@@ -29,6 +30,19 @@
         <LogTerminal :title="`${logTitleId} / ${agentStep}`" :logs="agentLogs" :badge="agentBadge" />
       </el-card>
     </div>
+
+    <el-card v-loading="loading" shadow="never">
+      <template #header><strong>执行记录</strong></template>
+      <el-table :data="actionRecords" class="wide-table">
+        <el-table-column prop="occurredAt" label="时间" min-width="180" />
+        <el-table-column prop="action" label="动作" min-width="180" />
+        <el-table-column prop="operator" label="执行人" min-width="120" />
+        <el-table-column label="状态" min-width="120">
+          <template #default="{ row }"><StatusTag :status="row.status" /></template>
+        </el-table-column>
+        <el-table-column prop="message" label="说明" min-width="320" />
+      </el-table>
+    </el-card>
   </section>
 </template>
 
@@ -39,16 +53,21 @@ import { useRoute } from 'vue-router'
 import DeployStepPanel from '@/components/DeployStepPanel.vue'
 import LogTerminal from '@/components/LogTerminal.vue'
 import MetricCard from '@/components/MetricCard.vue'
+import StatusTag from '@/components/StatusTag.vue'
 import { getAgentTaskStatus, type AgentTaskStatus } from '@/api/agentTasks'
-import { getDeployTaskDetail } from '@/api/deployTasks'
+import { confirmDeployStep, getDeployTaskDetail, retryDeployStep, skipDeployStep } from '@/api/deployTasks'
 import { deployMockData } from '@/api/mockData/deploy'
 
 const route = useRoute()
 const loading = ref(false)
 const deploy = ref({ ...deployMockData.deployDetail })
 const agentStatus = ref<AgentTaskStatus | null>(null)
+const retryingStep = ref(false)
+const skippingStep = ref(false)
+const confirmingStep = ref(false)
 const deployTaskId = computed(() => String(route.params.id || deploy.value.id))
-const agentTaskId = computed(() => (route.query.agentTaskId ? String(route.query.agentTaskId) : ''))
+const routeAgentTaskId = computed(() => (route.query.agentTaskId ? String(route.query.agentTaskId) : ''))
+const agentTaskId = computed(() => deploy.value.agentTaskId || routeAgentTaskId.value)
 const logTitleId = computed(() => agentTaskId.value || deploy.value.id)
 const runtimeState = computed(() => agentStatus.value?.status?.status ?? '')
 const runtimeStep = computed(() => agentStatus.value?.status?.step?.trim() ?? '')
@@ -103,7 +122,33 @@ const runtimeStatusText = computed(() => {
   return runtimeLabelMap[runtimeState.value] ?? deploy.value.status
 })
 const currentStepTone = computed(() => statusToneMap[runtimeState.value] ?? 'warn')
-const completedStepCount = computed(() => deploy.value.steps.filter((item) => item.status === 'SUCCESS').length)
+const displaySteps = computed(() => {
+  const runtimeIndex = runtimeStep.value ? deploy.value.steps.findIndex((item) => item.name === runtimeStep.value) : -1
+  return deploy.value.steps.map((step, index) => {
+    if (runtimeStep.value && step.name === runtimeStep.value) {
+      return {
+        ...step,
+        status: runtimeState.value || step.status,
+      }
+    }
+    if (runtimeIndex === -1) return step
+    if (index < runtimeIndex && !['FAILED', 'PARTIAL_FAILED', 'WAITING_CONFIRM'].includes(step.status)) {
+      return {
+        ...step,
+        status: 'SUCCESS',
+      }
+    }
+    if (index > runtimeIndex && step.status === 'RUNNING') {
+      return {
+        ...step,
+        status: 'PENDING',
+      }
+    }
+    return step
+  })
+})
+const completedStepCount = computed(() => displaySteps.value.filter((item) => item.status === 'SUCCESS').length)
+const actionRecords = computed(() => deploy.value.actionRecords ?? [])
 const progressFoot = computed(() => `${completedStepCount.value}/${deploy.value.steps.length} 步完成`)
 const stepSummaryFoot = computed(() => {
   const manualStepCount = deploy.value.steps.filter((item) => item.type === 'MANUAL_CONFIRM').length
@@ -112,17 +157,20 @@ const stepSummaryFoot = computed(() => {
 const failureCount = computed(() => agentLogs.value.filter((item) => item.includes('ERROR') || item.includes('WARN')).length)
 const failureFoot = computed(() => {
   if (runtimeState.value === 'FAILED') return '当前任务失败，需处理后重试'
+  if (runtimeState.value === 'WAITING_CONFIRM' || runtimeState.value === 'PENDING_CONFIRM') return '等待人工确认后继续执行'
   if (failureCount.value > 0) return '日志存在告警，建议关注当前步骤'
   return '当前无失败记录'
 })
 const agentHealthLabel = computed(() => {
   if (agentStatus.value?.enabled === false) return '离线回放'
   if (runtimeState.value === 'FAILED' || runtimeState.value === 'CANCELLED') return '需处理'
+  if (runtimeState.value === 'WAITING_CONFIRM' || runtimeState.value === 'PENDING_CONFIRM') return '待确认'
   return agentTaskId.value ? '在线' : '未知'
 })
 const agentTaskHint = computed(() => agentTaskId.value || agentStatus.value?.message || '未关联任务 ID')
 const agentHealthTone = computed(() => {
   if (agentStatus.value?.enabled === false) return 'warn'
+  if (runtimeState.value === 'WAITING_CONFIRM' || runtimeState.value === 'PENDING_CONFIRM') return 'warn'
   return runtimeState.value === 'FAILED' || runtimeState.value === 'CANCELLED' ? 'bad' : 'good'
 })
 const executionModeLabel = computed(() => {
@@ -133,16 +181,16 @@ const executionModeLabel = computed(() => {
 const executionModeTone = computed(() => (agentStatus.value?.enabled === false ? 'warn' : agentTaskId.value ? 'good' : 'warn'))
 const durationFoot = computed(() => agentStatus.value?.status?.updatedAt ? `最近更新 ${agentStatus.value.status?.updatedAt}` : '等待下一次轮询')
 const panelStatus = computed(() => runtimeState.value || deploy.value.status)
-const displaySteps = computed(() =>
-  deploy.value.steps.map((step) => {
-    if (runtimeStep.value && step.name === runtimeStep.value) {
-      return {
-        ...step,
-        status: runtimeState.value || step.status,
-      }
-    }
-    return step
-  }),
+const effectiveDeployStatus = computed(() => runtimeState.value || deploy.value.status)
+const currentStep = computed(() => displaySteps.value.find((item) => item.name === currentStepName.value) || displaySteps.value.find((item) => item.status !== 'SUCCESS'))
+const currentStepId = computed(() => {
+  const step = currentStep.value as ({ id?: string | number; order?: string | number } & Record<string, unknown>) | undefined
+  return String(step?.id ?? step?.order ?? '')
+})
+const canRetryCurrentStep = computed(() => ['FAILED', 'PARTIAL_FAILED'].includes(effectiveDeployStatus.value) && !!currentStepId.value && !retryingStep.value && !skippingStep.value && !confirmingStep.value)
+const canSkipCurrentStep = computed(() => ['RUNNING', 'FAILED', 'WAITING_CONFIRM'].includes(effectiveDeployStatus.value) && !!currentStepId.value && !retryingStep.value && !skippingStep.value && !confirmingStep.value)
+const canConfirmCurrentStep = computed(
+  () => ['WAITING_CONFIRM', 'PENDING_CONFIRM'].includes(effectiveDeployStatus.value) && !!currentStepId.value && !retryingStep.value && !skippingStep.value && !confirmingStep.value,
 )
 let pollingTimer: number | undefined
 
@@ -155,6 +203,53 @@ async function loadDeployTask() {
     deploy.value = { ...deployMockData.deployDetail }
   } finally {
     loading.value = false
+  }
+}
+
+async function reloadDetailState() {
+  await loadDeployTask()
+  await pollAgentStatus()
+}
+
+async function handleRetryCurrentStep() {
+  if (!canRetryCurrentStep.value || !currentStepId.value) return
+  retryingStep.value = true
+  try {
+    const result = await retryDeployStep(deployTaskId.value, currentStepId.value)
+    ElMessage.success(result.message || '已提交步骤重试')
+    await reloadDetailState()
+  } catch {
+    ElMessage.warning('提交步骤重试失败，请稍后重试')
+  } finally {
+    retryingStep.value = false
+  }
+}
+
+async function handleSkipCurrentStep() {
+  if (!canSkipCurrentStep.value || !currentStepId.value) return
+  skippingStep.value = true
+  try {
+    const result = await skipDeployStep(deployTaskId.value, currentStepId.value)
+    ElMessage.success(result.message || '已提交步骤跳过')
+    await reloadDetailState()
+  } catch {
+    ElMessage.warning('提交步骤跳过失败，请稍后重试')
+  } finally {
+    skippingStep.value = false
+  }
+}
+
+async function handleConfirmCurrentStep() {
+  if (!canConfirmCurrentStep.value || !currentStepId.value) return
+  confirmingStep.value = true
+  try {
+    const result = await confirmDeployStep(deployTaskId.value, currentStepId.value)
+    ElMessage.success(result.message || '已提交人工确认')
+    await reloadDetailState()
+  } catch {
+    ElMessage.warning('提交人工确认失败，请稍后重试')
+  } finally {
+    confirmingStep.value = false
   }
 }
 

@@ -7,7 +7,8 @@
       </div>
       <div class="top-actions">
         <el-button>重新采集目标环境</el-button>
-        <el-button type="primary" @click="goCreateRelease">按差异创建发布单</el-button>
+        <el-button @click="goCreateByMode('SERVICE_DEPLOYMENT')">按缺失服务创建部署任务</el-button>
+        <el-button type="primary" @click="goCreateByMode('SERVICE_RELEASE')">按需更新服务创建发布单</el-button>
       </div>
     </div>
 
@@ -39,8 +40,9 @@
           <el-input v-model="keyword" placeholder="搜索服务、tag、namespace" clearable />
         </div>
         <div class="top-actions">
-          <el-button @click="selectPublishable">批量选择可发布服务</el-button>
-          <el-button type="primary">确认 {{ selectedIds.length }} 个服务</el-button>
+          <el-button @click="selectPublishable">批量选择可执行服务</el-button>
+          <el-button @click="goCreateByMode('SERVICE_DEPLOYMENT')">创建部署任务</el-button>
+          <el-button type="primary" @click="goCreateByMode('SERVICE_RELEASE')">创建发布单</el-button>
         </div>
       </div>
       <ServiceDiffTable v-model:selected-ids="selectedIds" :items="filteredItems" />
@@ -96,13 +98,20 @@ function selectPublishable() {
   selectedIds.value = filteredItems.value.filter((item) => item.publishable).map((item) => item.serviceId)
 }
 
-function goCreateRelease() {
+function goCreateByMode(mode: 'SERVICE_RELEASE' | 'SERVICE_DEPLOYMENT') {
   const selectedItems = data.value.items.filter((item) => selectedIds.value.includes(item.serviceId))
-  const hasDeploymentItems = selectedItems.some((item) => item.diffStatus === 'MISSING_IN_TARGET')
-  const hasReleaseItems = selectedItems.some((item) => item.diffStatus !== 'MISSING_IN_TARGET')
+  const expectedStatus = mode === 'SERVICE_DEPLOYMENT' ? 'MISSING_IN_TARGET' : 'NEED_UPDATE'
+  const targetItems = selectedItems.filter((item) => item.diffStatus === expectedStatus)
 
-  if (hasDeploymentItems && hasReleaseItems) {
-    ElMessage.warning('服务部署与服务发版需要分别创建，请按同一类型重新勾选服务')
+  if (targetItems.length === 0) {
+    ElMessage.warning(mode === 'SERVICE_DEPLOYMENT' ? '请先选择待部署服务' : '请先选择待发版服务')
+    return
+  }
+
+  if (targetItems.length !== selectedItems.length) {
+    ElMessage.warning(mode === 'SERVICE_DEPLOYMENT'
+      ? '部署任务只能包含目标环境缺失的服务，请重新勾选'
+      : '发布单只能包含需更新服务，请重新勾选')
     return
   }
 
@@ -111,8 +120,8 @@ function goCreateRelease() {
     query: {
       baselineId: data.value.sourceBaselineId,
       targetEnvironmentId: targetEnvironmentId.value || data.value.targetEnvironmentId,
-      mode: hasDeploymentItems ? 'SERVICE_DEPLOYMENT' : 'SERVICE_RELEASE',
-      serviceIds: selectedIds.value.join(','),
+      mode,
+      serviceIds: targetItems.map((item) => item.serviceId).join(','),
     },
   })
 }

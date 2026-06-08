@@ -11,7 +11,7 @@ import (
 )
 
 func TestCreateReleaseWithLocalHarborImageUsesRegistry(t *testing.T) {
-	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil)
+	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil, nil)
 
 	result, err := creator.CreateRelease(context.Background(), CreateReleaseRequest{
 		Type:                "SERVICE_RELEASE",
@@ -35,7 +35,7 @@ func TestCreateReleaseWithLocalHarborImageUsesRegistry(t *testing.T) {
 }
 
 func TestCreateDeployTaskUsesKubernetesProbe(t *testing.T) {
-	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil)
+	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil, nil)
 
 	result, err := creator.CreateDeployTask(context.Background(), CreateDeployTaskRequest{
 		Type:                "SERVICE_DEPLOYMENT",
@@ -53,7 +53,7 @@ func TestCreateDeployTaskUsesKubernetesProbe(t *testing.T) {
 func TestCreateDeployTaskReturnsWorkloadProbeError(t *testing.T) {
 	creator := NewReleaseCreator(integration.Suite{
 		Kubernetes: failingKubernetesAdapter{err: errors.New("boom")},
-	}, newMockAgentReader(), nil)
+	}, newMockAgentReader(), nil, nil)
 
 	_, err := creator.CreateDeployTask(context.Background(), CreateDeployTaskRequest{
 		Type:                "SERVICE_DEPLOYMENT",
@@ -66,7 +66,7 @@ func TestCreateDeployTaskReturnsWorkloadProbeError(t *testing.T) {
 }
 
 func TestCreateReleaseReturnsAgentNotFound(t *testing.T) {
-	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil)
+	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil, nil)
 
 	_, err := creator.CreateRelease(context.Background(), CreateReleaseRequest{
 		Type:                "SERVICE_RELEASE",
@@ -80,7 +80,7 @@ func TestCreateReleaseReturnsAgentNotFound(t *testing.T) {
 }
 
 func TestCreateReleaseReturnsAgentOffline(t *testing.T) {
-	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil)
+	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil, nil)
 
 	_, err := creator.CreateRelease(context.Background(), CreateReleaseRequest{
 		Type:                "SERVICE_RELEASE",
@@ -94,7 +94,7 @@ func TestCreateReleaseReturnsAgentOffline(t *testing.T) {
 }
 
 func TestCreateDeployTaskReturnsAgentEnvironmentMismatch(t *testing.T) {
-	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil)
+	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), nil, nil)
 
 	_, err := creator.CreateDeployTask(context.Background(), CreateDeployTaskRequest{
 		Type:                "SERVICE_DEPLOYMENT",
@@ -106,7 +106,69 @@ func TestCreateDeployTaskReturnsAgentEnvironmentMismatch(t *testing.T) {
 	}
 }
 
+func TestCreateReleaseUsesNeedUpdateDiffSelection(t *testing.T) {
+	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), mockDiffReader{
+		result: domain.DiffResult{
+			Items: []domain.DiffItem{
+				{ServiceID: "svc-user", DiffStatus: "NEED_UPDATE"},
+				{ServiceID: "svc-web", DiffStatus: "MISSING_IN_TARGET"},
+			},
+		},
+	}, nil)
+
+	_, err := creator.CreateRelease(context.Background(), CreateReleaseRequest{
+		Type:                "SERVICE_RELEASE",
+		ReleaseSource:       "JENKINS_JOB",
+		SourceBaselineID:    "BL-20260607-0001",
+		TargetEnvironmentID: "env-project-x-prod",
+		AgentID:             "agent-project-x",
+		ServiceIDs:          []string{"svc-web"},
+	})
+	if !errors.Is(err, ErrInvalidServiceSelection) {
+		t.Fatalf("expected ErrInvalidServiceSelection, got %v", err)
+	}
+}
+
+func TestCreateDeployTaskUsesMissingInTargetDiffSelection(t *testing.T) {
+	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), mockDiffReader{
+		result: domain.DiffResult{
+			Items: []domain.DiffItem{
+				{ServiceID: "svc-user", DiffStatus: "NEED_UPDATE"},
+				{ServiceID: "svc-web", DiffStatus: "MISSING_IN_TARGET"},
+			},
+		},
+	}, nil)
+
+	result, err := creator.CreateDeployTask(context.Background(), CreateDeployTaskRequest{
+		Type:                "SERVICE_DEPLOYMENT",
+		SourceBaselineID:    "BL-20260607-0001",
+		TargetEnvironmentID: "env-project-x-prod",
+		AgentID:             "agent-project-x",
+	})
+	if err != nil {
+		t.Fatalf("create deploy task: %v", err)
+	}
+	if result.ExecutionMode != "AGENT" || result.AgentTaskID == "" {
+		t.Fatalf("unexpected deploy result: %+v", result)
+	}
+}
+
 type mockAgentReader map[string]string
+
+type mockDiffReader struct {
+	result domain.DiffResult
+	ok     bool
+}
+
+func (m mockDiffReader) GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool) {
+	if m.ok {
+		return m.result, true
+	}
+	if len(m.result.Items) > 0 {
+		return m.result, true
+	}
+	return domain.DiffResult{}, false
+}
 
 func newMockAgentReader() mockAgentReader {
 	return mockAgentReader{

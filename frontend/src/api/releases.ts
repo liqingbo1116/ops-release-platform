@@ -31,6 +31,14 @@ export type CreateReleaseResult = {
   createdAt: string
 }
 
+export type ReleaseActionResult = {
+  releaseId: string
+  action: string
+  status: string
+  message?: string
+  updatedAt?: string
+}
+
 export function listReleases() {
   if (!useMockApi) {
     return getData<PageResult<typeof releaseMockData.releases[number]>>('/api/releases').then((result) => result.items)
@@ -53,5 +61,31 @@ export function createRelease(body: CreateReleaseRequest) {
     id: 'REL-20260607-MOCK',
     status: 'PENDING_CONFIRM',
     createdAt: new Date().toISOString(),
+  })
+}
+
+export function retryRelease(id: string) {
+  if (!useMockApi) {
+    return postData<ReleaseActionResult>(`/api/releases/${id}/retry`)
+  }
+  return Promise.resolve<ReleaseActionResult>({
+    releaseId: id,
+    action: 'retry',
+    status: 'RUNNING',
+    message: '已提交失败重试',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+export function rollbackRelease(id: string) {
+  if (!useMockApi) {
+    return postData<ReleaseActionResult>(`/api/releases/${id}/rollback`)
+  }
+  return Promise.resolve<ReleaseActionResult>({
+    releaseId: id,
+    action: 'rollback',
+    status: 'RUNNING',
+    message: '已提交回滚任务',
+    updatedAt: new Date().toISOString(),
   })
 }

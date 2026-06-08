@@ -24,7 +24,7 @@ type Handler struct {
 
 func NewHandler(repo *repository.MockRepository, queue *agent.Queue, integrations integration.Suite) *Handler {
 	handler := &Handler{repo: repo, queue: queue, integrations: integrations}
-	handler.service = service.NewReleaseCreator(integrations, repo, handler.enqueueTask)
+	handler.service = service.NewReleaseCreator(integrations, repo, repo, handler.enqueueTask)
 	return handler
 }
 
@@ -106,11 +106,25 @@ func (h *Handler) CreateAgentRegisterToken(c *gin.Context) {
 }
 
 func (h *Handler) CreateBaseline(c *gin.Context) {
-	Created(c, gin.H{
-		"id":        "BL-20260607-MOCK",
-		"status":    "DRAFT",
-		"createdAt": time.Now().Format(time.RFC3339),
-	})
+	var request struct {
+		SourceEnvironmentID string `json:"sourceEnvironmentId"`
+		Name                string `json:"name"`
+		Purpose             string `json:"purpose"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid baseline request")
+		return
+	}
+	if request.SourceEnvironmentID == "" || request.Name == "" {
+		BadRequest(c, "sourceEnvironmentId and name are required")
+		return
+	}
+	detail, err := h.repo.CreateBaseline(request.SourceEnvironmentID, request.Name, request.Purpose)
+	if err != nil {
+		BadRequest(c, "source environment not found")
+		return
+	}
+	Created(c, detail)
 }
 
 func (h *Handler) ListBaselines(c *gin.Context) {
@@ -127,15 +141,18 @@ func (h *Handler) GetBaseline(c *gin.Context) {
 }
 
 func (h *Handler) LockBaseline(c *gin.Context) {
-	OK(c, gin.H{
-		"id":     c.Param("id"),
-		"status": "LOCKED",
-	})
+	detail, ok := h.repo.LockBaseline(c.Param("id"))
+	if !ok {
+		NotFound(c, "baseline not found")
+		return
+	}
+	OK(c, detail)
 }
 
 func (h *Handler) CompareBaseline(c *gin.Context) {
 	var request struct {
-		TargetEnvironmentID string `json:"targetEnvironmentId"`
+		TargetEnvironmentID  string `json:"targetEnvironmentId"`
+		RefreshTargetRuntime bool   `json:"refreshTargetRuntime"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid compare request")
@@ -178,6 +195,10 @@ func (h *Handler) CreateRelease(c *gin.Context) {
 			BadRequest(c, "registry image sync failed")
 		case service.ErrImageNotFound:
 			BadRequest(c, "release image not found")
+		case service.ErrBaselineNotFound:
+			BadRequest(c, "baseline not found")
+		case service.ErrInvalidServiceSelection:
+			BadRequest(c, "release services must come from NEED_UPDATE diff items")
 		default:
 			BadRequest(c, "invalid release request")
 		}
@@ -238,6 +259,10 @@ func (h *Handler) CreateDeployTask(c *gin.Context) {
 			BadRequest(c, "agent does not belong to target environment")
 		case service.ErrWorkloadProbe:
 			BadRequest(c, "kubernetes workload probe failed")
+		case service.ErrBaselineNotFound:
+			BadRequest(c, "baseline not found")
+		case service.ErrInvalidServiceSelection:
+			BadRequest(c, "deploy services must come from MISSING_IN_TARGET diff items")
 		default:
 			BadRequest(c, "invalid deploy request")
 		}

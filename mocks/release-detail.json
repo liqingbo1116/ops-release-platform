@@ -6,6 +6,7 @@
   "status":"PARTIAL_FAILED",
   "progress":81,
   "agentName":"agent-project-x",
+  "agentTaskId":"REL-20260607-031",
   "steps":[
     {"name":"同步镜像到项目 Harbor","status":"SUCCESS","message":"68 个镜像全部同步完成"},
     {"name":"更新 K8s 服务镜像 tag","status":"PARTIAL_FAILED","message":"66 个成功，2 个等待重试"},
@@ -15,6 +16,21 @@
     {"serviceName":"web-console","reason":"HTTP 503","suggestion":"检查 Nginx upstream、服务端口、ConfigMap 与 Pod 日志"},
     {"serviceName":"order-service","reason":"健康检查超时","suggestion":"检查启动耗时、数据库连接、readinessProbe 超时时间"}
   ],
+  "actionRecords":[
+    {"action":"CREATE_RELEASE","operator":"li.si","status":"SUCCESS","message":"已根据基线差异生成发布单","occurredAt":"2026-06-07T15:20:08+08:00"},
+    {"action":"START_RELEASE","operator":"li.si","status":"SUCCESS","message":"Agent 已接管发布任务","occurredAt":"2026-06-07T15:22:11+08:00"},
+    {"action":"AUTO_RETRY","operator":"system","status":"SUCCESS","message":"web-console 健康检查已自动重试 1 次","occurredAt":"2026-06-07T15:43:31+08:00"},
+    {"action":"FAIL_FAST","operator":"system","status":"FAILED","message":"order-service 健康检查超时，任务转入部分失败","occurredAt":"2026-06-07T15:43:44+08:00"}
+  ],
+  "report":{
+    "generatedAt":"2026-06-07T15:45:12+08:00",
+    "operator":"li.si",
+    "successServiceCount":66,
+    "failedServiceCount":2,
+    "manualConfirmCount":1,
+    "rollbackRecommended":true,
+    "summary":"本次发布完成镜像同步与大部分服务升级，2 个服务健康检查失败，建议处理后重试或执行回滚。"
+  },
   "logs":[
     "[15:38:19] OK image sync completed total=68 failed=0",
     "[15:43:26] ERROR health check failed web-console status=503",

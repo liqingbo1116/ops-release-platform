@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>基线详情：{{ detail.id }}</h1>
-        <p>来源 {{ detail.sourceEnvironmentName }}，服务 {{ detail.serviceCount }} 个，已锁定，可用于项目环境差异发布。</p>
+        <p>来源 {{ detail.sourceEnvironmentName }}，服务 {{ detail.serviceCount }} 个，{{ statusDescription }}</p>
       </div>
       <el-form inline class="top-actions">
         <el-form-item label="目标环境">
@@ -18,6 +18,9 @@
         </el-form-item>
       </el-form>
       <div class="top-actions">
+        <el-button :disabled="detail.status === 'LOCKED'" :loading="locking" @click="handleLock">
+          {{ detail.status === 'LOCKED' ? '已锁定' : '锁定基线' }}
+        </el-button>
         <el-button @click="goCompare">对比目标环境</el-button>
         <el-button type="primary" @click="goCreateRelease">基于此基线发布</el-button>
       </div>
@@ -54,7 +57,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MetricCard from '@/components/MetricCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { getBaselineDetail } from '@/api/baselines'
+import { getBaselineDetail, lockBaseline } from '@/api/baselines'
 import { listEnvironments } from '@/api/environments'
 import { baselineMockData } from '@/api/mockData/baseline'
 import { environmentMockData } from '@/api/mockData/environment'
@@ -62,11 +65,13 @@ import { environmentMockData } from '@/api/mockData/environment'
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
+const locking = ref(false)
 const detail = ref({ ...baselineMockData.baselineDetail })
 const environments = ref<typeof environmentMockData.environments>([])
 const targetEnvironmentId = ref(String(route.query.targetEnvironmentId || ''))
 const healthyCount = computed(() => detail.value.items.filter((item) => item.healthStatus === 'HEALTHY').length)
 const statusLabel = computed(() => detail.value.status === 'LOCKED' ? '已锁定' : detail.value.status)
+const statusDescription = computed(() => detail.value.status === 'LOCKED' ? '已锁定，可用于项目环境差异发布。' : '当前为草稿，建议锁定后再用于正式交付。')
 
 function syncTargetEnvironmentId() {
   const routeEnvironmentId = String(route.query.targetEnvironmentId || '')
@@ -120,6 +125,19 @@ async function loadDetail() {
     detail.value = { ...baselineMockData.baselineDetail }
   } finally {
     loading.value = false
+  }
+}
+
+async function handleLock() {
+  if (detail.value.status === 'LOCKED') return
+  locking.value = true
+  try {
+    detail.value = await lockBaseline(detail.value.id)
+    ElMessage.success('基线已锁定')
+  } catch {
+    ElMessage.error('锁定基线失败')
+  } finally {
+    locking.value = false
   }
 }
 

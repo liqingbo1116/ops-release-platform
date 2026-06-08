@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 
 	"ops-release-platform/backend/internal/domain"
 )
@@ -13,30 +15,29 @@ import (
 var mockFiles embed.FS
 
 type MockRepository struct {
-	environments   []domain.Environment
-	agents         []domain.Agent
-	baselines      []domain.Baseline
-	baselineDetail domain.BaselineDetail
-	diffResult     domain.DiffResult
-	releases       []domain.ReleaseOrder
-	releaseDetail  domain.ReleaseDetail
-	deployTasks    []domain.DeployTask
-	deployDetail   domain.DeployDetail
-	currentUser    domain.CurrentUser
-	users          []domain.User
-	roles          []domain.Role
-	permissions    []domain.EnvironmentPermission
-	changelog      []domain.ChangelogEntry
+	environments    []domain.Environment
+	agents          []domain.Agent
+	baselines       []domain.Baseline
+	baselineDetails map[string]domain.BaselineDetail
+	releases        []domain.ReleaseOrder
+	releaseDetail   domain.ReleaseDetail
+	deployTasks     []domain.DeployTask
+	deployDetail    domain.DeployDetail
+	currentUser     domain.CurrentUser
+	users           []domain.User
+	roles           []domain.Role
+	permissions     []domain.EnvironmentPermission
+	changelog       []domain.ChangelogEntry
 }
 
 func NewMockRepository() (*MockRepository, error) {
 	repo := &MockRepository{}
+	var baselineDetail domain.BaselineDetail
 	loaders := []func() error{
 		func() error { return loadJSON("mockdata/environments.json", &repo.environments) },
 		func() error { return loadJSON("mockdata/agents.json", &repo.agents) },
 		func() error { return loadJSON("mockdata/baselines.json", &repo.baselines) },
-		func() error { return loadJSON("mockdata/baseline-detail.json", &repo.baselineDetail) },
-		func() error { return loadJSON("mockdata/diff-result.json", &repo.diffResult) },
+		func() error { return loadJSON("mockdata/baseline-detail.json", &baselineDetail) },
 		func() error { return loadJSON("mockdata/releases.json", &repo.releases) },
 		func() error { return loadJSON("mockdata/release-detail.json", &repo.releaseDetail) },
 		func() error { return loadJSON("mockdata/deploy-tasks.json", &repo.deployTasks) },
@@ -52,6 +53,7 @@ func NewMockRepository() (*MockRepository, error) {
 			return nil, err
 		}
 	}
+	repo.bootstrapBaselineDetails(baselineDetail)
 	return repo, nil
 }
 
@@ -92,21 +94,28 @@ func (r *MockRepository) ListBaselines(query string) []domain.Baseline {
 }
 
 func (r *MockRepository) GetBaselineDetail(id string) (domain.BaselineDetail, bool) {
-	if id != "" && id != r.baselineDetail.ID {
+	if id == "" {
+		for _, detail := range r.baselineDetails {
+			return detail, true
+		}
 		return domain.BaselineDetail{}, false
 	}
-	return r.baselineDetail, true
+	detail, ok := r.baselineDetails[id]
+	return detail, ok
 }
 
 func (r *MockRepository) GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool) {
-	if id != "" && id != r.diffResult.SourceBaselineID {
+	baseline, ok := r.GetBaselineDetail(id)
+	if !ok {
 		return domain.DiffResult{}, false
 	}
-	result := r.diffResult
-	if targetEnvironmentID != "" {
-		result.TargetEnvironmentID = targetEnvironmentID
+	if targetEnvironmentID == "" {
+		targetEnvironmentID = baseline.SourceEnvironmentID
 	}
-	return result, true
+	if _, ok := r.getEnvironment(targetEnvironmentID); !ok {
+		return domain.DiffResult{}, false
+	}
+	return buildDiffResult(baseline, targetEnvironmentID, buildTargetRuntimeSnapshot(targetEnvironmentID, baseline.Items)), true
 }
 
 func (r *MockRepository) ListReleases(query string) []domain.ReleaseOrder {
@@ -176,4 +185,261 @@ func filter[T any](items []T, query string, text func(T) string) []T {
 		}
 	}
 	return result
+}
+
+func (r *MockRepository) CreateBaseline(sourceEnvironmentID, name, purpose string) (domain.BaselineDetail, error) {
+	environment, ok := r.getEnvironment(sourceEnvironmentID)
+	if !ok {
+		return domain.BaselineDetail{}, fmt.Errorf("environment not found")
+	}
+	now := time.Now()
+	baselineID := fmt.Sprintf("BL-%s-%04d", now.Format("20060102"), len(r.baselines)+1)
+	items := buildRuntimeSnapshotItems(environment.Code)
+	detail := domain.BaselineDetail{
+		ID:                    baselineID,
+		Name:                  name,
+		SourceEnvironmentID:   environment.ID,
+		SourceEnvironmentName: environment.Name,
+		ServiceCount:          len(items),
+		Status:                "DRAFT",
+		CreatedBy:             r.currentUser.DisplayName,
+		CreatedAt:             now.Format(time.RFC3339),
+		Purpose:               purpose,
+		Items:                 items,
+	}
+	baseline := domain.Baseline{
+		ID:                    detail.ID,
+		Name:                  detail.Name,
+		SourceEnvironmentID:   detail.SourceEnvironmentID,
+		SourceEnvironmentName: detail.SourceEnvironmentName,
+		ServiceCount:          detail.ServiceCount,
+		CreatedBy:             detail.CreatedBy,
+		CreatedAt:             detail.CreatedAt,
+		Status:                detail.Status,
+		Purpose:               detail.Purpose,
+	}
+	r.baselines = append([]domain.Baseline{baseline}, r.baselines...)
+	r.baselineDetails[detail.ID] = detail
+	return detail, nil
+}
+
+func (r *MockRepository) LockBaseline(id string) (domain.BaselineDetail, bool) {
+	detail, ok := r.baselineDetails[id]
+	if !ok {
+		return domain.BaselineDetail{}, false
+	}
+	if detail.Status != "LOCKED" {
+		detail.Status = "LOCKED"
+		detail.LockedAt = time.Now().Format(time.RFC3339)
+		r.baselineDetails[id] = detail
+	}
+	for index := range r.baselines {
+		if r.baselines[index].ID == id {
+			r.baselines[index].Status = detail.Status
+			r.baselines[index].LockedAt = detail.LockedAt
+			break
+		}
+	}
+	return detail, true
+}
+
+func (r *MockRepository) bootstrapBaselineDetails(seedDetail domain.BaselineDetail) {
+	r.baselineDetails = make(map[string]domain.BaselineDetail, len(r.baselines))
+	for index, baseline := range r.baselines {
+		if baseline.SourceEnvironmentID == "" || baseline.SourceEnvironmentName == "" {
+			if environment, ok := r.resolveBaselineEnvironment(baseline); ok {
+				if baseline.SourceEnvironmentID == "" {
+					baseline.SourceEnvironmentID = environment.ID
+				}
+				if baseline.SourceEnvironmentName == "" {
+					baseline.SourceEnvironmentName = environment.Name
+				}
+			}
+			r.baselines[index] = baseline
+		}
+		items := buildRuntimeSnapshotItems(baseline.ID)
+		if seedDetail.ID == baseline.ID && len(seedDetail.Items) > 0 {
+			items = seedDetail.Items
+		}
+		r.baselineDetails[baseline.ID] = domain.BaselineDetail{
+			ID:                    baseline.ID,
+			Name:                  baseline.Name,
+			SourceEnvironmentID:   baseline.SourceEnvironmentID,
+			SourceEnvironmentName: baseline.SourceEnvironmentName,
+			ServiceCount:          baseline.ServiceCount,
+			Status:                baseline.Status,
+			CreatedBy:             baseline.CreatedBy,
+			CreatedAt:             baseline.CreatedAt,
+			Purpose:               baseline.Purpose,
+			LockedAt:              baseline.LockedAt,
+			Items:                 items,
+		}
+	}
+}
+
+func (r *MockRepository) getEnvironment(id string) (domain.Environment, bool) {
+	for _, environment := range r.environments {
+		if environment.ID == id {
+			return environment, true
+		}
+	}
+	return domain.Environment{}, false
+}
+
+func (r *MockRepository) resolveBaselineEnvironment(baseline domain.Baseline) (domain.Environment, bool) {
+	if baseline.SourceEnvironmentID != "" {
+		return r.getEnvironment(baseline.SourceEnvironmentID)
+	}
+	for _, environment := range r.environments {
+		if baseline.SourceEnvironmentName != "" && environment.Name == baseline.SourceEnvironmentName {
+			return environment, true
+		}
+	}
+	name := strings.ToLower(baseline.Name)
+	switch {
+	case strings.Contains(name, "local-prod"):
+		return r.getEnvironment("env-local-prod")
+	case strings.Contains(name, "project-x"):
+		return r.getEnvironment("env-project-x-prod")
+	case strings.Contains(name, "project-z"):
+		return r.getEnvironment("env-project-z-prod")
+	}
+	return domain.Environment{}, false
+}
+
+func buildRuntimeSnapshotItems(seed string) []domain.BaselineItem {
+	prefix := sanitizeSeed(seed)
+	return []domain.BaselineItem{
+		{
+			ServiceID:     prefix + "-gateway",
+			ServiceName:   prefix + "-gateway",
+			Namespace:     "core-system",
+			WorkloadName:  prefix + "-gateway",
+			WorkloadType:  "DEPLOYMENT",
+			Tag:           "20260608-a1b2c3",
+			Digest:        "sha256:8f21aa09",
+			Replicas:      3,
+			ReadyReplicas: 3,
+			HealthStatus:  "HEALTHY",
+		},
+		{
+			ServiceID:     prefix + "-order",
+			ServiceName:   prefix + "-order",
+			Namespace:     "biz-service",
+			WorkloadName:  prefix + "-order",
+			WorkloadType:  "DEPLOYMENT",
+			Tag:           "20260608-d4e5f6",
+			Digest:        "sha256:901b1220",
+			Replicas:      2,
+			ReadyReplicas: 2,
+			HealthStatus:  "HEALTHY",
+		},
+		{
+			ServiceID:     prefix + "-web",
+			ServiceName:   prefix + "-web",
+			Namespace:     "frontend",
+			WorkloadName:  prefix + "-web",
+			WorkloadType:  "DEPLOYMENT",
+			Tag:           "20260608-77aa11",
+			Digest:        "sha256:b0fd91ef",
+			Replicas:      2,
+			ReadyReplicas: 1,
+			HealthStatus:  "DEGRADED",
+		},
+	}
+}
+
+func buildTargetRuntimeSnapshot(targetEnvironmentID string, baselineItems []domain.BaselineItem) []domain.BaselineItem {
+	targetItems := make([]domain.BaselineItem, 0, len(baselineItems))
+	for index, item := range baselineItems {
+		switch index % 4 {
+		case 0:
+			item.Tag = item.Tag + "-hotfix"
+			item.Digest = item.Digest + "99"
+		case 1:
+			// keep target consistent with baseline
+		case 2:
+			continue
+		case 3:
+			item.ReadyReplicas = max(0, item.ReadyReplicas-1)
+			item.HealthStatus = "DEGRADED"
+		}
+		targetItems = append(targetItems, item)
+	}
+	if len(targetItems) == 0 {
+		targetItems = append(targetItems, buildRuntimeSnapshotItems(targetEnvironmentID)[0])
+	}
+	return targetItems
+}
+
+func buildDiffResult(baseline domain.BaselineDetail, targetEnvironmentID string, targetItems []domain.BaselineItem) domain.DiffResult {
+	targetByServiceID := make(map[string]domain.BaselineItem, len(targetItems))
+	for _, item := range targetItems {
+		targetByServiceID[item.ServiceID] = item
+	}
+
+	result := domain.DiffResult{
+		SourceBaselineID:    baseline.ID,
+		TargetEnvironmentID: targetEnvironmentID,
+		Items:               make([]domain.DiffItem, 0, len(baseline.Items)),
+	}
+
+	for _, sourceItem := range baseline.Items {
+		diffItem := domain.DiffItem{
+			ServiceID:   sourceItem.ServiceID,
+			ServiceName: sourceItem.ServiceName,
+			Namespace:   sourceItem.Namespace,
+			SourceTag:   sourceItem.Tag,
+		}
+		targetItem, ok := targetByServiceID[sourceItem.ServiceID]
+		switch {
+		case !ok:
+			diffItem.DiffStatus = "MISSING_IN_TARGET"
+			diffItem.Publishable = true
+			diffItem.Strategy = "确认后新增部署"
+			result.Summary.MissingInTarget++
+			result.Summary.Publishable++
+		case targetItem.HealthStatus != "HEALTHY" || targetItem.ReadyReplicas < targetItem.Replicas:
+			targetTag := targetItem.Tag
+			diffItem.TargetTag = &targetTag
+			diffItem.DiffStatus = "WORKLOAD_ERROR"
+			diffItem.Publishable = false
+			diffItem.Strategy = "先修复 workload"
+			result.Summary.WorkloadError++
+		case targetItem.Tag != sourceItem.Tag:
+			targetTag := targetItem.Tag
+			diffItem.TargetTag = &targetTag
+			diffItem.DiffStatus = "NEED_UPDATE"
+			diffItem.Publishable = true
+			diffItem.Strategy = "同步镜像并更新 tag"
+			result.Summary.NeedUpdate++
+			result.Summary.Publishable++
+		default:
+			targetTag := targetItem.Tag
+			diffItem.TargetTag = &targetTag
+			diffItem.DiffStatus = "CONSISTENT"
+			diffItem.Publishable = false
+			diffItem.Strategy = "无需处理"
+			result.Summary.Consistent++
+		}
+		result.Items = append(result.Items, diffItem)
+	}
+
+	return result
+}
+
+func sanitizeSeed(seed string) string {
+	replacer := strings.NewReplacer("env-", "", "BL-", "baseline-", "_", "-", "/", "-", " ", "-")
+	value := strings.Trim(replacer.Replace(strings.ToLower(seed)), "-")
+	if value == "" {
+		return "runtime"
+	}
+	return value
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

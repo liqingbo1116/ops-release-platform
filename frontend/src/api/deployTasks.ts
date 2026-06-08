@@ -17,6 +17,15 @@ export type CreateDeployTaskResult = {
   createdAt: string
 }
 
+export type DeployStepActionResult = {
+  taskId: string
+  stepId: string
+  action: string
+  status: string
+  message?: string
+  updatedAt?: string
+}
+
 export function getDeployTaskDetail(id = 'DEP-20260607-009') {
   if (!useMockApi) {
     return getData<typeof deployMockData.deployDetail>(`/api/deploy-tasks/${id}`)
@@ -34,5 +43,47 @@ export function createDeployTask(body: unknown = {}) {
     executionMode: 'AGENT',
     agentTaskId: 'DEP-20260607-MOCK',
     createdAt: new Date().toISOString(),
+  })
+}
+
+export function retryDeployStep(taskId: string, stepId: string) {
+  if (!useMockApi) {
+    return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/retry`)
+  }
+  return Promise.resolve<DeployStepActionResult>({
+    taskId,
+    stepId,
+    action: 'retry',
+    status: 'RUNNING',
+    message: '已提交步骤重试',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+export function skipDeployStep(taskId: string, stepId: string) {
+  if (!useMockApi) {
+    return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/skip`)
+  }
+  return Promise.resolve<DeployStepActionResult>({
+    taskId,
+    stepId,
+    action: 'skip',
+    status: 'RUNNING',
+    message: '已提交步骤跳过',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+export function confirmDeployStep(taskId: string, stepId: string) {
+  if (!useMockApi) {
+    return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/confirm`)
+  }
+  return Promise.resolve<DeployStepActionResult>({
+    taskId,
+    stepId,
+    action: 'confirm',
+    status: 'RUNNING',
+    message: '已提交人工确认',
+    updatedAt: new Date().toISOString(),
   })
 }
