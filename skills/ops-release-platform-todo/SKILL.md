@@ -24,6 +24,13 @@ Use this skill to keep project progress explicit and avoid losing the current de
    - commit hash if pushed
    - remaining next task
 
+## Git Submit Rule
+
+- When the user asks to commit, submit, or save changes to Git, commit the scoped changes and push the current branch to the configured remote in the same workflow.
+- Only skip pushing when the user explicitly asks for a local-only commit or when no remote is configured; report the reason clearly.
+- After pushing, report the commit hash, target branch, validation performed, and whether the worktree is clean.
+- Follow `docs/git-submit-workflow.md` for the detailed repository workflow.
+
 ## Priority Strategy
 
 - The default priority is V1 feature closure, not optimization work.
