@@ -258,6 +258,15 @@ describe('ReleaseDetailPage', () => {
         rollbackRecommended: true,
         summary: 'summary text',
       },
+      auditSummary: {
+        operator: 'li.si',
+        targetEnvironmentName: '项目 X 生产',
+        affectedServices: ['svc-a', 'svc-b'],
+        result: 'PARTIAL_FAILED',
+        failedStep: '灰度发布',
+        lastAction: 'AUTO_RETRY',
+        lastActionAt: '2026-06-08T10:00:00Z',
+      },
       logs: ['[ERROR] release failed'],
     })
     getAgentTaskStatus.mockResolvedValue({
@@ -295,6 +304,9 @@ describe('ReleaseDetailPage', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('查看发布报告')
+    expect(wrapper.text()).toContain('审计与影响范围')
+    expect(wrapper.text()).toContain('svc-a、svc-b')
+    expect(wrapper.text()).toContain('灰度发布')
     expect(wrapper.text()).toContain('执行记录')
   })
 })

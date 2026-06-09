@@ -1,6 +1,6 @@
 # Ops Release Platform TODO
 
-Last updated: 2026-06-08
+Last updated: 2026-06-09
 
 Always verify this file against `git status --short --branch`, `git log -1 --oneline`, and implementation docs before acting.
 
@@ -40,24 +40,81 @@ Latest pushed milestone:
   - deploy detail polling for `GET /api/agent-tasks/:id/status`
   - backend release/deploy detail fallback for newly created mock IDs
   - API contract update for Agent task status and integration checks
+- Agent protocol mock closure is implemented locally and not yet committed:
+  - backend in-memory Agent protocol store
+  - Agent heartbeat endpoint
+  - Agent task pull endpoint
+  - step status report endpoint
+  - log report endpoint
+  - final result report endpoint
+  - created release/deploy tasks are enqueued into mock protocol store
+  - Agent page loads Agent status from API instead of static page data
+- Diff-to-task end-to-end mock verification is implemented and locally verified, not yet committed:
+  - frontend pure mock release creation returns `agentTaskId`
+  - frontend pure mock deploy creation returns `agentTaskId`
+  - frontend pure mock Agent task status returns task type, current step, status, and logs
+  - create release page tests verify detail routing keeps `agentTaskId`
+  - backend tests passed
+  - frontend unit tests passed
+  - frontend build passed with existing dependency annotation warnings only
 - Release creation flow adjustment is in progress:
   - service release must not be based on a source baseline
   - service release source supports Jenkins Job and local Harbor image tag
   - both service release sources must eventually use the project Agent to sync image and update tag
   - service deployment should create deploy tasks for target-missing services
   - diff `MISSING_IN_TARGET` should be shown as service deployment
+  - release list/detail should show release source, build/sync task, and image metadata instead of implying baseline-driven release
   - real Agent module directories should be created without implementation code
+- V1 mock-first service release/deployment boundary closure is implemented locally and not yet committed:
+  - `SERVICE_RELEASE` rejects `sourceBaselineId`
+  - `SERVICE_RELEASE` supports `JENKINS_JOB` and `LOCAL_HARBOR_IMAGE`
+  - `SERVICE_DEPLOYMENT` requires `sourceBaselineId`
+  - `SERVICE_DEPLOYMENT` only accepts `MISSING_IN_TARGET` diff services
+  - release list/detail show source, build/sync task, and image metadata
+  - release list user-view tests cover Jenkins release, Harbor image release, and missing-service deployment display/search
+- V1 mock-first deployment list user-view closure is implemented locally and not yet committed:
+  - deploy task list uses `SERVICE_DEPLOYMENT` / missing-service first-deployment wording
+  - list rows show source baseline, missing services, Agent, Agent task, current step, next action
+  - list search covers missing service names and Agent metadata
+  - API contract and domain model document the deploy list fields needed by the page
+- V1 mock-first audit and impact visibility is implemented locally and not yet committed:
+  - release detail shows operator, target environment, affected services, result, failed step, last action
+  - deploy detail shows operator, target environment, affected services, result, failed step, last action
+  - release/deploy detail API examples document `auditSummary`
+  - frontend user-view tests assert audit and affected-service visibility
+- V1 mock-first environment and Agent user-view readiness is implemented locally and not yet committed:
+  - environment page loads environment status from API/mock fallback instead of direct static data
+  - environment page shows real integration prerequisites before switching away from mock flow
+  - environment page warns when a project environment uses Agent mode but Agent is not online
+  - Agent page shows V1 deployment assumption: Linux host plus `docker compose`
+  - Agent page warns that offline Agents block remote release/deploy for bound project environments
+  - frontend user-view tests cover environment readiness, environment filtering, Agent readiness, heartbeat, capabilities, recent task, and offline blocker
+- V1 mock-first failure action to Agent status consistency is implemented locally and not yet committed:
+  - release retry updates mock Agent task status to `retry` / `RUNNING`
+  - release rollback updates mock Agent task status to `rollback` / `ROLLED_BACK`
+  - deploy step retry / skip / confirm update mock Agent task status to the selected step and result state
+  - backend tests cover release failure actions and deploy step actions against `GET /api/agent-tasks/{id}/status`
 
 ## Current Step
 
-- V1 mainline is currently at step 1:
-  - release/deploy detail closure
+- V1 mainline is currently at step 3:
+  - mock-first release/deployment user-view validation before real integration
 - Local completion status:
-  - mostly done in code
-  - frontend tests passed for release/deploy detail pages
-  - frontend build passed
+  - release/deploy detail closure is implemented locally
+  - Agent protocol mock closure is implemented locally
+  - service release/deployment boundary closure is implemented locally
+  - release list/detail source metadata is implemented locally
+  - deploy list missing-service first-deployment view is implemented locally
+  - release/deploy detail audit and impact visibility is implemented locally
+  - environment/Agent user-view readiness is implemented locally
+  - failure action to Agent status consistency is implemented locally
+  - backend full tests passed on 2026-06-09: `go test ./...`
+  - backend focused tests passed on 2026-06-09: `go test ./internal/api ./internal/service`
+  - frontend focused tests passed on 2026-06-09: release detail, deploy detail, create release submit
+  - frontend unit tests passed on 2026-06-09: 10 files, 39 tests
+  - frontend build passed on 2026-06-09 with existing dependency annotation warnings only
 - Next default step:
-  - step 2, Agent protocol completion
+  - review the UI manually in the documented user-view order, then switch to real Agent/Jenkins/Harbor/K8s integration only after the required environment is ready
 
 ## V1 Mainline Goal
 
@@ -176,14 +233,24 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 
 ## Next Suggested Tasks
 
-1. Commit and stabilize the local release/deploy detail closure work.
-2. Start Agent task protocol completion for heartbeat, task pull, step status, log report, and final result report.
-3. Before real verification of step 2, prepare:
+1. Stabilize and commit the local release/deploy detail, Agent protocol mock closure, runtime snapshot baseline metadata work, diff-to-task mock verification, and release source list/detail validation.
+2. Continue V1 mock-first functional refinement that does not require Jenkins/Harbor/K8s:
+   - confirm whether any user-view page still misses the existing-service release/update or target-missing first-deployment path
+   - environment-level permission failures have clear user messages before task creation
+   - environment and Agent pages show whether remote project environments are ready for release/deploy
+   - offline Agent status must be visible before users submit remote release/deploy tasks
+   - API contract examples stay aligned with mock response fields for release list/detail and deploy detail
+   - page tests follow the user-view order and cover the existing service release/update plus target-missing service first deployment paths
+3. Keep the current scope narrow:
+   - existing service release/update
+   - target-missing service first deployment
+   - remote project environment task tracking
+4. Before real Agent verification, prepare:
    - one Linux host for Agent
    - `docker` and `docker compose`
    - platform API connectivity from Agent host
    - one repeatable test project or service
-4. Before steps 3 and 4, also prepare:
+5. Before real Jenkins/Harbor/K8s integration, also prepare:
    - Harbor test image and tag set
    - Jenkins pipeline and build script
    - deployable K8s manifests

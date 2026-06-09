@@ -18,13 +18,17 @@ import (
 type Handler struct {
 	repo         *repository.MockRepository
 	queue        *agent.Queue
+	protocol     *agent.ProtocolStore
 	integrations integration.Suite
 	service      *service.ReleaseCreator
 }
 
-func NewHandler(repo *repository.MockRepository, queue *agent.Queue, integrations integration.Suite) *Handler {
-	handler := &Handler{repo: repo, queue: queue, integrations: integrations}
-	handler.service = service.NewReleaseCreator(integrations, repo, repo, handler.enqueueTask)
+func NewHandler(repo *repository.MockRepository, queue *agent.Queue, protocol *agent.ProtocolStore, integrations integration.Suite) *Handler {
+	if protocol == nil {
+		protocol = agent.NewProtocolStore()
+	}
+	handler := &Handler{repo: repo, queue: queue, protocol: protocol, integrations: integrations}
+	handler.service = service.NewReleaseCreator(integrations, repo, repo, handler.enqueueTask, repo)
 	return handler
 }
 
@@ -103,6 +107,115 @@ func (h *Handler) CreateAgentRegisterToken(c *gin.Context) {
 		"installCommand": "curl -fsSL https://platform.local/agent/install.sh | bash -s -- --token " +
 			token + " --server https://platform.local",
 	})
+}
+
+func (h *Handler) AgentHeartbeat(c *gin.Context) {
+	var request struct {
+		Version      string   `json:"version"`
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid heartbeat request")
+		return
+	}
+	agentItem, ok := h.repo.UpdateAgentHeartbeat(c.Param("id"), request.Version, request.Capabilities)
+	if !ok {
+		NotFound(c, "agent not found")
+		return
+	}
+	OK(c, gin.H{
+		"agent":       agentItem,
+		"serverTime":  time.Now().Format(time.RFC3339),
+		"nextPollSec": 5,
+	})
+}
+
+func (h *Handler) PullAgentTask(c *gin.Context) {
+	agentItem, ok := h.repo.GetAgent(c.Param("id"))
+	if !ok {
+		NotFound(c, "agent not found")
+		return
+	}
+	if agentItem.Status != "ONLINE" {
+		BadRequest(c, "agent must be ONLINE")
+		return
+	}
+	task, ok := h.protocol.Pull(agentItem.ID)
+	if !ok {
+		OK(c, gin.H{
+			"task": nil,
+		})
+		return
+	}
+	h.repo.AssignAgentTask(agentItem.ID, task.ID)
+	OK(c, gin.H{
+		"task": task,
+	})
+}
+
+func (h *Handler) ReportAgentTaskStep(c *gin.Context) {
+	var request struct {
+		Step   string `json:"step"`
+		Status string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid step report")
+		return
+	}
+	if request.Step == "" || request.Status == "" {
+		BadRequest(c, "step and status are required")
+		return
+	}
+	task, ok := h.protocol.ReportStep(c.Param("id"), request.Step, request.Status)
+	if !ok {
+		NotFound(c, "agent task not found")
+		return
+	}
+	OK(c, task)
+}
+
+func (h *Handler) AppendAgentTaskLog(c *gin.Context) {
+	var request struct {
+		Line string `json:"line"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid log report")
+		return
+	}
+	if request.Line == "" {
+		BadRequest(c, "line is required")
+		return
+	}
+	task, ok := h.protocol.AppendLog(c.Param("id"), request.Line)
+	if !ok {
+		NotFound(c, "agent task not found")
+		return
+	}
+	OK(c, task)
+}
+
+func (h *Handler) ReportAgentTaskResult(c *gin.Context) {
+	var request struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid result report")
+		return
+	}
+	if request.Status == "" {
+		BadRequest(c, "status is required")
+		return
+	}
+	task, ok := h.protocol.ReportResult(c.Param("id"), request.Status, request.Message)
+	if !ok {
+		NotFound(c, "agent task not found")
+		return
+	}
+	if task.AgentID != "" && (request.Status == "SUCCESS" || request.Status == "FAILED") {
+		h.repo.AssignAgentTask(task.AgentID, "")
+	}
+	OK(c, task)
 }
 
 func (h *Handler) CreateBaseline(c *gin.Context) {
@@ -187,6 +300,8 @@ func (h *Handler) CreateRelease(c *gin.Context) {
 			BadRequest(c, "agent must be ONLINE")
 		case service.ErrAgentEnvironment:
 			BadRequest(c, "agent does not belong to target environment")
+		case service.ErrEnvironmentPermission:
+			Forbidden(c, "environment permission denied")
 		case service.ErrJenkinsTrigger:
 			BadRequest(c, "jenkins trigger failed")
 		case service.ErrRegistryImageCheck:
@@ -195,6 +310,8 @@ func (h *Handler) CreateRelease(c *gin.Context) {
 			BadRequest(c, "registry image sync failed")
 		case service.ErrImageNotFound:
 			BadRequest(c, "release image not found")
+		case service.ErrReleaseBaselineUnsupported:
+			BadRequest(c, "service release must not include source baseline")
 		case service.ErrBaselineNotFound:
 			BadRequest(c, "baseline not found")
 		case service.ErrInvalidServiceSelection:
@@ -221,6 +338,10 @@ func (h *Handler) GetRelease(c *gin.Context) {
 }
 
 func (h *Handler) RetryRelease(c *gin.Context) {
+	if h.protocol != nil {
+		h.protocol.ReportStep(c.Param("id"), "retry", "RUNNING")
+		h.protocol.AppendLog(c.Param("id"), "release retry requested")
+	}
 	OK(c, gin.H{
 		"id":     c.Param("id"),
 		"status": "RUNNING",
@@ -229,6 +350,10 @@ func (h *Handler) RetryRelease(c *gin.Context) {
 }
 
 func (h *Handler) RollbackRelease(c *gin.Context) {
+	if h.protocol != nil {
+		h.protocol.ReportStep(c.Param("id"), "rollback", "ROLLED_BACK")
+		h.protocol.AppendLog(c.Param("id"), "release rollback requested")
+	}
 	OK(c, gin.H{
 		"id":     c.Param("id"),
 		"status": "ROLLED_BACK",
@@ -257,8 +382,12 @@ func (h *Handler) CreateDeployTask(c *gin.Context) {
 			BadRequest(c, "agent must be ONLINE")
 		case service.ErrAgentEnvironment:
 			BadRequest(c, "agent does not belong to target environment")
+		case service.ErrEnvironmentPermission:
+			Forbidden(c, "environment permission denied")
 		case service.ErrWorkloadProbe:
 			BadRequest(c, "kubernetes workload probe failed")
+		case service.ErrDeployBaselineRequired:
+			BadRequest(c, "source baseline is required for service deployment")
 		case service.ErrBaselineNotFound:
 			BadRequest(c, "baseline not found")
 		case service.ErrInvalidServiceSelection:
@@ -297,6 +426,10 @@ func (h *Handler) ConfirmDeployStep(c *gin.Context) {
 }
 
 func (h *Handler) stepAction(c *gin.Context, action string, status string) {
+	if h.protocol != nil {
+		h.protocol.ReportStep(c.Param("id"), c.Param("stepId"), status)
+		h.protocol.AppendLog(c.Param("id"), "deploy step "+action+" requested: "+c.Param("stepId"))
+	}
 	OK(c, gin.H{
 		"taskId": c.Param("id"),
 		"stepId": c.Param("stepId"),
@@ -306,6 +439,17 @@ func (h *Handler) stepAction(c *gin.Context, action string, status string) {
 }
 
 func (h *Handler) GetAgentTaskStatus(c *gin.Context) {
+	if h.protocol != nil {
+		status, logs, ok := h.protocol.Status(c.Param("id"))
+		if ok {
+			OK(c, gin.H{
+				"enabled": true,
+				"status":  status,
+				"logs":    logs,
+			})
+			return
+		}
+	}
 	if h.queue == nil {
 		OK(c, gin.H{
 			"enabled": false,
@@ -343,15 +487,19 @@ func (h *Handler) enqueue(ctx interface{ Request() *http.Request }, id string, t
 }
 
 func (h *Handler) enqueueTask(ctx context.Context, id string, taskType string, action string) {
-	if h.queue == nil {
-		return
-	}
-	_ = h.queue.Enqueue(ctx, agent.Task{
+	task := agent.Task{
 		ID:        id,
 		Type:      taskType,
 		Action:    action,
 		CreatedAt: time.Now(),
-	})
+	}
+	if h.protocol != nil {
+		h.protocol.Enqueue(task)
+	}
+	if h.queue == nil {
+		return
+	}
+	_ = h.queue.Enqueue(ctx, task)
 }
 
 func paginate[T any](items []T, c *gin.Context) domain.PageResult[T] {

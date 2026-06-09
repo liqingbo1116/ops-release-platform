@@ -93,9 +93,69 @@
   - Redis Stream mock Agent worker
   - mock 集成 adapter
 - 当前本地阶段：
-  - 第 1 步“发布/部署详情闭环”已基本完成，处于待提交收口状态
+  - 第 1 步“发布/部署详情闭环”已完成本地验证，处于待提交收口状态
+  - 第 2 步“Agent 协议闭环”mock-first 实现已完成本地验证，处于待提交收口状态
+  - 第 3 步“运行态快照与基线生成 mock 链路”已补齐快照来源、采集时间、采集模式、快照任务 ID，处于待提交收口状态
+  - 第 4 步“差异结果到服务发布/新增部署的端到端 mock 验证”已完成本地验证，处于待提交收口状态
+  - 第 5 步“失败动作、审计影响范围、环境/Agent 准备状态 mock-first 验证”已完成本地验证，处于待提交收口状态
 - 默认下一步：
-  - 第 2 步“Agent 协议闭环”
+  - 按用户视角页面测试顺序做人工走查；真实联调前等待 Agent 宿主机、Jenkins、Harbor/Registry、Kubernetes 和测试样例准备完成
+
+## 已完成的 mock-first Agent 协议
+
+当前代码已支持：
+
+- Agent 心跳：刷新在线状态、版本、能力、心跳时间
+- Agent 拉任务：从内存协议队列拉取发布/部署任务
+- Agent 步骤回传：更新当前步骤和状态
+- Agent 日志回传：追加任务日志
+- Agent 结果回传：更新最终状态并释放 Agent 当前任务
+- 任务状态查询：详情页可读取 Agent 回传状态和日志
+- Agent 管理页：从后端 Agent 列表读取在线状态、心跳和当前任务
+
+真实 Agent 进程、真实 Jenkins、真实 Harbor、真实 Kubernetes 尚未接入。环境准备完成前，继续用 mock-first 方式推进 V1 主链路。
+
+## 已完成的运行态快照与基线生成 mock 链路
+
+当前代码已支持：
+
+- 从来源环境生成基线时同步生成 mock 运行态服务清单
+- 基线详情返回快照来源、采集时间、采集模式、快照任务 ID
+- 基线详情页展示运行态快照元数据，便于用户确认基线来自哪个环境和哪次采集
+- 基线对比继续兼容 `NEED_UPDATE`、`MISSING_IN_TARGET`、`WORKLOAD_ERROR`、`CONSISTENT` 分类
+
+真实 Kubernetes 运行态采集尚未接入。环境准备完成前，继续使用 `MOCK_RUNTIME` 模式验证页面和任务流。
+
+## 已验证的差异到任务端到端 mock 链路
+
+当前代码已支持并通过本地测试验证：
+
+- 差异页选择 `NEED_UPDATE` 服务后进入创建发布页
+- 差异页选择 `MISSING_IN_TARGET` 服务后进入创建部署页
+- 创建发布/部署任务后跳转详情页并保留 `agentTaskId`
+- 前端纯 mock 模式下也能读取 mock Agent 任务状态、当前步骤和日志
+- 服务发版请求不依赖来源基线
+- 服务部署请求继续携带来源基线，用于确认目标缺失服务范围
+
+真实 Jenkins、Harbor、Kubernetes 未准备完成前，本步骤只验证用户路径和接口契约，不接真实外部组件。
+
+## 已完成的失败动作与准备状态 mock-first 验证
+
+当前代码已支持并通过本地测试验证：
+
+- 发布重试会更新 mock Agent task status 为 `retry` / `RUNNING`
+- 发布回滚会更新 mock Agent task status 为 `rollback` / `ROLLED_BACK`
+- 部署步骤重试、跳过、人工确认会同步更新 mock Agent task status
+- 发布/部署详情页展示操作者、目标环境、影响服务、结果、失败步骤和最近动作
+- 环境页展示真实联调前的 Agent、Jenkins、Harbor/Registry、Kubernetes 准备项
+- Agent 页展示 V1 默认 Linux + `docker compose` 部署假设，并提示离线 Agent 会阻断远程发布/部署
+- 环境级权限失败在后端返回 `403 FORBIDDEN`，创建页会映射成用户可理解的权限提示
+
+本地验证结果：
+
+- 后端：`go test ./...`
+- 前端单测：`npm run test:unit -- --run`，10 个测试文件、39 个用例通过
+- 前端构建：`npm run build` 通过，仅保留第三方依赖 pure annotation warning
 
 ## 用户视角页面测试顺序
 

@@ -75,6 +75,15 @@
       <ReleaseRiskPanel v-model:options="options" :selected-count="selectedIds.length" />
     </div>
 
+    <el-alert
+      class="readiness-alert"
+      :type="readinessAlertType"
+      :closable="false"
+      :title="readinessTitle"
+      :description="readinessDescription"
+      show-icon
+    />
+
     <el-card shadow="never">
       <div class="toolbar">
         <div class="toolbar-left">
@@ -105,10 +114,12 @@ import { createRelease } from '@/api/releases'
 import { agentMockData } from '@/api/mockData/agent'
 import { baselineMockData } from '@/api/mockData/baseline'
 import { environmentMockData } from '@/api/mockData/environment'
+import { useAuthStore } from '@/stores/authStore'
 import { resolveCreateReleaseErrorMessage } from './createReleaseErrors'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const keyword = ref('')
 const releaseMode = ref<'SERVICE_RELEASE' | 'SERVICE_DEPLOYMENT'>('SERVICE_RELEASE')
 const releaseSource = ref<'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE'>('JENKINS_JOB')
@@ -150,14 +161,48 @@ const configTag = computed(() => (releaseMode.value === 'SERVICE_DEPLOYMENT' ? '
 const selectionTitle = computed(() => (releaseMode.value === 'SERVICE_DEPLOYMENT' ? '待部署' : '待发版'))
 const selectAllText = computed(() => (releaseMode.value === 'SERVICE_DEPLOYMENT' ? '选择全部待部署' : '选择全部可发版'))
 const submitText = computed(() => (releaseMode.value === 'SERVICE_DEPLOYMENT' ? '创建服务部署任务' : '提交服务发版'))
-const submitDisabled = computed(() => submitting.value || selectedIds.value.length === 0 || !targetEnvironmentId.value || !agentId.value)
+const submitDisabled = computed(() => submitting.value || readinessBlockingReasons.value.length > 0)
 const baselineOptionLabel = computed(() => `${sourceBaselineId.value} / ${baselineDetail.value.sourceEnvironmentName} / ${baselineDetail.value.name}`)
+const selectedEnvironment = computed(() => environments.value.find((item) => item.id === targetEnvironmentId.value))
+const agentsInTargetEnvironment = computed(() => agents.value.filter((item) => item.environmentId === targetEnvironmentId.value))
 const availableAgents = computed(() =>
-  agents.value.filter((item) => item.environmentId === targetEnvironmentId.value && item.status === 'ONLINE'),
+  agentsInTargetEnvironment.value.filter((item) => item.status === 'ONLINE'),
+)
+const offlineAgentsInTargetEnvironment = computed(() =>
+  agentsInTargetEnvironment.value.filter((item) => item.status !== 'ONLINE'),
 )
 const selectedServices = computed(() => {
   const selectedSet = new Set(selectedIds.value)
   return candidateItems.value.filter((item) => selectedSet.has(item.serviceId))
+})
+const requiredPermission = computed(() => (releaseMode.value === 'SERVICE_DEPLOYMENT' ? 'deploy:write' : 'release:write'))
+const missingPermission = computed(() => !authStore.hasPermission(requiredPermission.value))
+const readinessBlockingReasons = computed(() => {
+  const reasons: string[] = []
+  if (!targetEnvironmentId.value || !selectedEnvironment.value) {
+    reasons.push('请选择有效的目标环境')
+  }
+  if (missingPermission.value) {
+    reasons.push(releaseMode.value === 'SERVICE_DEPLOYMENT' ? '当前账号没有服务部署权限' : '当前账号没有服务发版权限')
+  }
+  if (targetEnvironmentId.value && availableAgents.value.length === 0) {
+    const offlineCount = offlineAgentsInTargetEnvironment.value.length
+    reasons.push(offlineCount > 0 ? `目标环境有 ${offlineCount} 个 Agent，但当前都不在线` : '目标环境尚未接入在线 Agent')
+  }
+  if (selectedIds.value.length === 0) {
+    reasons.push(releaseMode.value === 'SERVICE_DEPLOYMENT' ? '请选择目标环境缺失服务' : '请选择目标已有且需要更新的服务')
+  }
+  return reasons
+})
+const readinessAlertType = computed(() => (readinessBlockingReasons.value.length > 0 ? 'warning' : 'success'))
+const readinessTitle = computed(() => (readinessBlockingReasons.value.length > 0 ? '创建前检查未通过' : '创建前检查已通过'))
+const readinessDescription = computed(() => {
+  if (readinessBlockingReasons.value.length > 0) {
+    return readinessBlockingReasons.value.join('；')
+  }
+  const environmentName = selectedEnvironment.value?.name || targetEnvironmentId.value
+  const agentName = availableAgents.value.find((item) => item.id === agentId.value)?.name || agentId.value
+  return `${environmentName} 已选择在线 Agent ${agentName}，可创建${releaseMode.value === 'SERVICE_DEPLOYMENT' ? '服务部署任务' : '服务发版任务'}`
 })
 const releaseServices = computed(() => selectedServices.value.filter((item) => item.diffStatus === 'NEED_UPDATE'))
 const serviceSlug = computed(() => {
@@ -220,6 +265,10 @@ watch(releaseMode, () => {
 }, { immediate: true })
 
 async function submitRelease() {
+  if (missingPermission.value) {
+    ElMessage.warning(releaseMode.value === 'SERVICE_DEPLOYMENT' ? '当前账号没有服务部署权限' : '当前账号没有服务发版权限')
+    return
+  }
   if (!targetEnvironmentId.value) {
     ElMessage.warning('请选择目标环境')
     return
@@ -257,7 +306,6 @@ async function submitRelease() {
 
     const result = await createRelease({
       type: 'SERVICE_RELEASE',
-      sourceBaselineId: diffResult.value.sourceBaselineId,
       targetEnvironmentId: targetEnvironmentId.value,
       agentId: agentId.value,
       serviceIds: selectedIds.value,
@@ -279,7 +327,7 @@ async function submitRelease() {
       } : undefined,
       options: options.value,
     })
-    ElMessage.success('服务发版已提交 Jenkins')
+    ElMessage.success(releaseSource.value === 'LOCAL_HARBOR_IMAGE' ? '服务发版已提交镜像同步' : '服务发版已提交 Jenkins')
     router.push({
       path: `/releases/${result.id}`,
       query: result.agentTaskId ? { agentTaskId: result.agentTaskId } : undefined,

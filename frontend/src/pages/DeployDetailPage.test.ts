@@ -221,6 +221,15 @@ describe('DeployDetailPage', () => {
         { id: 'step-2', order: 2, name: '恢复 MinIO', type: 'SHELL', status: 'RUNNING' },
       ],
       actionRecords: [{ action: 'STEP_RETRY', operator: 'system', status: 'SUCCESS', message: 'retried', occurredAt: '2026-06-08T10:00:00Z' }],
+      auditSummary: {
+        operator: 'wang.wu',
+        targetEnvironmentName: '项目 X 生产',
+        affectedServices: ['order-web', 'payment-worker'],
+        result: 'RUNNING',
+        failedStep: '',
+        lastAction: 'STEP_RETRY',
+        lastActionAt: '2026-06-08T10:00:00Z',
+      },
       logs: ['[INFO] deploy detail snapshot'],
     })
     getAgentTaskStatus.mockResolvedValue({
@@ -256,5 +265,8 @@ describe('DeployDetailPage', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('执行记录')
+    expect(wrapper.text()).toContain('审计与影响范围')
+    expect(wrapper.text()).toContain('order-web、payment-worker')
+    expect(wrapper.text()).toContain('wang.wu')
   })
 })

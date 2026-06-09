@@ -32,6 +32,18 @@
       <MetricCard label="基线状态" :value="statusLabel" foot="可用于正式交付" tone="good" />
     </div>
 
+    <el-card shadow="never" class="snapshot-card">
+      <template #header>
+        <div class="card-title">运行态快照</div>
+      </template>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="快照来源">{{ snapshotSource }}</el-descriptions-item>
+        <el-descriptions-item label="采集时间">{{ snapshotCollectedAt }}</el-descriptions-item>
+        <el-descriptions-item label="采集模式">{{ snapshotModeLabel }}</el-descriptions-item>
+        <el-descriptions-item label="快照任务">{{ detail.snapshotTaskId || '待生成' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
     <el-card v-loading="loading" shadow="never">
       <el-table :data="detail.items" class="wide-table">
         <el-table-column prop="serviceName" label="服务" min-width="160" />
@@ -61,6 +73,7 @@ import { getBaselineDetail, lockBaseline } from '@/api/baselines'
 import { listEnvironments } from '@/api/environments'
 import { baselineMockData } from '@/api/mockData/baseline'
 import { environmentMockData } from '@/api/mockData/environment'
+import { formatDateTime } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -72,6 +85,13 @@ const targetEnvironmentId = ref(String(route.query.targetEnvironmentId || ''))
 const healthyCount = computed(() => detail.value.items.filter((item) => item.healthStatus === 'HEALTHY').length)
 const statusLabel = computed(() => detail.value.status === 'LOCKED' ? '已锁定' : detail.value.status)
 const statusDescription = computed(() => detail.value.status === 'LOCKED' ? '已锁定，可用于项目环境差异发布。' : '当前为草稿，建议锁定后再用于正式交付。')
+const snapshotSource = computed(() => detail.value.snapshotSource || detail.value.sourceEnvironmentName || '未知来源')
+const snapshotCollectedAt = computed(() => detail.value.snapshotCollectedAt ? formatDateTime(detail.value.snapshotCollectedAt) : '未采集')
+const snapshotModeLabel = computed(() => {
+  if (detail.value.snapshotMode === 'MOCK_RUNTIME') return 'Mock 运行态采集'
+  if (detail.value.snapshotMode === 'AGENT_K8S') return 'Agent/Kubernetes 采集'
+  return detail.value.snapshotMode || '未定义'
+})
 
 function syncTargetEnvironmentId() {
   const routeEnvironmentId = String(route.query.targetEnvironmentId || '')

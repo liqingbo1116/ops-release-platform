@@ -86,6 +86,36 @@ Response data：
 
 查询 Agent 列表。
 
+Response data：
+
+```json
+{
+  "items": [
+    {
+      "id": "agent-project-x",
+      "name": "agent-project-x",
+      "environmentId": "env-project-x-prod",
+      "environmentName": "项目 X 生产",
+      "version": "1.3.2",
+      "status": "ONLINE",
+      "capabilities": ["image-sync", "kubectl", "shell", "http-check"],
+      "lastHeartbeatAt": "2026-06-07T12:40:12+08:00",
+      "currentTaskId": "REL-20260607-031"
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "total": 1
+}
+```
+
+V1 页面依赖字段：
+
+- `status`：判断 Agent 是否在线；离线 Agent 会阻断其绑定项目环境的远程发布/部署。
+- `capabilities`：展示 Agent 是否具备镜像同步、kubectl、shell、健康检查等执行能力。
+- `lastHeartbeatAt`：展示最近心跳，辅助判断真实联调前 Agent 是否可用。
+- `currentTaskId`：展示最近或当前执行任务，辅助用户从 Agent 管理页跳转排查。
+
 ### POST /api/agents/register-token
 
 生成 Agent 注册 token。
@@ -109,6 +139,42 @@ Response data：
 }
 ```
 
+### POST /api/agents/{id}/heartbeat
+
+Agent 上报心跳。V1 mock 阶段用于把 Agent 标记为在线，并刷新版本、能力和最近心跳时间。
+
+Request：
+
+```json
+{
+  "version": "1.3.3",
+  "capabilities": ["image-sync", "kubectl", "http-check"]
+}
+```
+
+### POST /api/agents/{id}/tasks/pull
+
+Agent 主动拉取待执行任务。V1 mock 阶段从内存协议队列读取任务；后续真实 Agent 接入时保持该协议形态。
+
+Response data：
+
+```json
+{
+  "task": {
+    "id": "REL-20260607-MOCK",
+    "type": "release",
+    "action": "jenkins_agent_release",
+    "status": "RUNNING",
+    "step": "pulled",
+    "agentId": "agent-project-x",
+    "createdAt": "2026-06-09T14:30:00+08:00",
+    "updatedAt": "2026-06-09T14:30:05+08:00"
+  }
+}
+```
+
+无待执行任务时返回 `{"task": null}`。
+
 ## 基线
 
 ### POST /api/baselines
@@ -125,13 +191,30 @@ Request：
 }
 ```
 
+Response `data` 重点字段：
+
+```json
+{
+  "id": "BL-20260609-0004",
+  "sourceEnvironmentId": "env-local-prod",
+  "sourceEnvironmentName": "本地生产环境",
+  "serviceCount": 3,
+  "status": "DRAFT",
+  "snapshotSource": "本地生产环境/local-prod",
+  "snapshotCollectedAt": "2026-06-09T14:30:00+08:00",
+  "snapshotMode": "MOCK_RUNTIME",
+  "snapshotTaskId": "snapshot-bl-20260609-0004",
+  "items": []
+}
+```
+
 ### GET /api/baselines
 
 查询基线列表。
 
 ### GET /api/baselines/{id}
 
-查询基线详情和服务清单。
+查询基线详情、运行态快照元数据和服务清单。
 
 ### POST /api/baselines/{id}/lock
 
@@ -151,6 +234,36 @@ Request：
 ```
 
 ## 发布
+
+### GET /api/releases
+
+查询发布单列表。V1 列表同时展示服务发版和服务部署任务，前端按 `type` 区分用户语义：
+
+- `SERVICE_RELEASE`：目标环境已有服务的迭代发版，不返回 `sourceBaselineId`，通过 `releaseSource`、构建任务和镜像元数据说明来源。
+- `SERVICE_DEPLOYMENT`：目标环境缺失服务的首次部署，必须返回 `sourceBaselineId`，用于说明来源基线/生产环境。
+
+Response item：
+
+```json
+{
+  "id": "REL-20260607-031",
+  "type": "SERVICE_RELEASE",
+  "releaseSource": "JENKINS_JOB",
+  "executionMode": "JENKINS_AGENT",
+  "targetEnvironmentName": "项目 X 生产",
+  "agentName": "agent-project-x",
+  "status": "JENKINS_QUEUED",
+  "progress": 30,
+  "agentTaskId": "REL-20260607-031",
+  "buildId": "BUILD-MOCK-20260607",
+  "buildStatus": "QUEUED",
+  "buildUrl": "https://jenkins.local/job/mock-service-release/1",
+  "imageRepository": "harbor.local/project-x/user-service",
+  "imageTag": "20260607-a1b2c3",
+  "imageDigest": "sha256:mock-20260607-a1b2c3",
+  "createdAt": "2026-06-07T13:20:00+08:00"
+}
+```
 
 ### POST /api/releases
 
@@ -243,6 +356,52 @@ POST /api/deploy-tasks
 
 查询发布详情、步骤、日志索引、失败定位建议。
 
+Response data 重点字段：
+
+```json
+{
+  "id": "REL-20260607-031",
+  "type": "SERVICE_RELEASE",
+  "releaseSource": "JENKINS_JOB",
+  "targetEnvironmentName": "项目 X 生产",
+  "status": "PARTIAL_FAILED",
+  "agentTaskId": "REL-20260607-031",
+  "steps": [
+    {
+      "name": "HTTP 健康检查",
+      "status": "FAILED",
+      "message": "web-console 返回 503，order-service 超时"
+    }
+  ],
+  "failures": [
+    {
+      "serviceName": "web-console",
+      "reason": "HTTP 503",
+      "suggestion": "检查 Nginx upstream、服务端口、ConfigMap 与 Pod 日志"
+    }
+  ],
+  "actionRecords": [
+    {
+      "action": "FAIL_FAST",
+      "operator": "system",
+      "status": "FAILED",
+      "message": "order-service 健康检查超时，任务转入部分失败",
+      "occurredAt": "2026-06-07T15:43:44+08:00"
+    }
+  ],
+  "auditSummary": {
+    "operator": "li.si",
+    "targetEnvironmentName": "项目 X 生产",
+    "affectedServices": ["user-service", "web-console", "order-service"],
+    "result": "PARTIAL_FAILED",
+    "failedStep": "HTTP 健康检查",
+    "lastAction": "FAIL_FAST",
+    "lastActionAt": "2026-06-07T15:43:44+08:00"
+  },
+  "logs": []
+}
+```
+
 ### POST /api/releases/{id}/retry
 
 重试失败发布或失败服务。
@@ -253,9 +412,11 @@ POST /api/deploy-tasks
 
 ## Agent 任务
 
+V1 mock 阶段同时支持内存协议队列和 Redis Stream mock worker。发布/部署创建后会写入内存协议队列；如果 Redis 已配置，也会继续写入 Redis 队列，便于兼容旧 mock worker。
+
 ### GET /api/agent-tasks/{id}/status
 
-查询 Redis Stream mock Agent worker 写入的任务状态和日志。
+查询 Agent 任务状态和日志。优先读取内存协议队列中的 Agent 回传状态；若没有命中，再降级读取 Redis Stream mock Agent worker 写入的任务状态和日志。
 
 当 Redis 未配置时，接口返回 `enabled=false`，前端应降级展示发布/部署详情中的静态日志。
 
@@ -267,14 +428,54 @@ Response data：
   "status": {
     "taskId": "REL-20260607-MOCK",
     "type": "release",
-    "step": "finish",
+    "action": "jenkins_agent_release",
     "status": "SUCCESS",
-    "updatedAt": "2026-06-07T13:20:00+08:00"
+    "step": "finished",
+    "agentId": "agent-project-x",
+    "updatedAt": "2026-06-09T14:32:00+08:00"
   },
   "logs": [
-    "[2026-06-07T13:19:58+08:00] RUNNING receive-task",
-    "[2026-06-07T13:20:00+08:00] SUCCESS finish"
+    "sync image mock log",
+    "release mock flow finished"
   ]
+}
+```
+
+### POST /api/agent-tasks/{id}/steps
+
+Agent 回传当前步骤状态。
+
+Request：
+
+```json
+{
+  "step": "sync-image",
+  "status": "RUNNING"
+}
+```
+
+### POST /api/agent-tasks/{id}/logs
+
+Agent 追加任务日志。
+
+Request：
+
+```json
+{
+  "line": "sync image mock log"
+}
+```
+
+### POST /api/agent-tasks/{id}/result
+
+Agent 回传最终执行结果。`SUCCESS` 或 `FAILED` 会释放 Agent 当前任务占用。
+
+Request：
+
+```json
+{
+  "status": "SUCCESS",
+  "message": "release mock flow finished"
 }
 ```
 
@@ -283,6 +484,36 @@ Response data：
 ### GET /api/deploy-tasks
 
 查询部署任务列表。
+
+V1 列表用于用户确认“目标缺失服务首次部署”的状态，不再以旧脚本/部署包为主线。列表项必须能直接展示来源基线、目标环境、缺失服务、Agent 任务、当前步骤和下一步动作。
+
+Response data：
+
+```json
+{
+  "items": [
+    {
+      "id": "DEP-20260607-009",
+      "type": "SERVICE_DEPLOYMENT",
+      "productName": "项目 X",
+      "targetEnvironmentName": "项目 X 生产",
+      "sourceBaselineId": "BL-20260607-0001",
+      "source": "BL-20260607-0001",
+      "missingServiceCount": 2,
+      "serviceNames": ["order-web", "payment-worker"],
+      "currentStep": "恢复 MinIO",
+      "progress": 46,
+      "status": "RUNNING",
+      "agentName": "agent-project-x",
+      "agentTaskId": "DEP-20260607-009",
+      "nextAction": "等待人工确认数据恢复结果"
+    }
+  ],
+  "page": 1,
+  "pageSize": 10,
+  "total": 1
+}
+```
 
 ### POST /api/deploy-tasks
 
@@ -313,6 +544,8 @@ Response data：
 {
   "id": "DEP-20260607-MOCK",
   "status": "PENDING",
+  "executionMode": "AGENT",
+  "agentTaskId": "DEP-20260607-MOCK",
   "createdAt": "2026-06-07T13:20:00+08:00"
 }
 ```
@@ -320,6 +553,49 @@ Response data：
 ### GET /api/deploy-tasks/{id}
 
 查询部署任务详情、步骤和日志。
+
+详情页必须能支撑失败路径验收：当前步骤、日志、执行记录、重试、跳过、人工确认，以及 Agent 轮询状态。
+
+Response data 重点字段：
+
+```json
+{
+  "id": "DEP-20260607-009",
+  "productName": "项目 X",
+  "targetEnvironmentName": "项目 X 生产",
+  "source": "BL-20260607-0001",
+  "status": "RUNNING",
+  "agentTaskId": "DEP-20260607-009",
+  "steps": [
+    {
+      "id": "step-7",
+      "order": 7,
+      "name": "人工确认：数据恢复结果",
+      "type": "MANUAL_CONFIRM",
+      "status": "WAITING_CONFIRM"
+    }
+  ],
+  "actionRecords": [
+    {
+      "action": "WAIT_CONFIRM",
+      "operator": "system",
+      "status": "PENDING_CONFIRM",
+      "message": "等待人工确认数据恢复结果",
+      "occurredAt": "2026-06-07T16:14:03+08:00"
+    }
+  ],
+  "auditSummary": {
+    "operator": "wang.wu",
+    "targetEnvironmentName": "项目 X 生产",
+    "affectedServices": ["order-web", "payment-worker"],
+    "result": "RUNNING",
+    "failedStep": "",
+    "lastAction": "WAIT_CONFIRM",
+    "lastActionAt": "2026-06-07T16:14:03+08:00"
+  },
+  "logs": []
+}
+```
 
 ### POST /api/deploy-tasks/{id}/steps/{stepId}/retry
 

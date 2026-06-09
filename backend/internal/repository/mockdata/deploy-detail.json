@@ -27,6 +27,15 @@
     {"action":"STEP_RETRY","operator":"system","status":"SUCCESS","message":"恢复 MinIO 超时后自动重试 1 次","occurredAt":"2026-06-07T16:12:40+08:00"},
     {"action":"WAIT_CONFIRM","operator":"system","status":"PENDING_CONFIRM","message":"等待人工确认数据恢复结果","occurredAt":"2026-06-07T16:14:03+08:00"}
   ],
+  "auditSummary":{
+    "operator":"wang.wu",
+    "targetEnvironmentName":"项目 X 生产",
+    "affectedServices":["order-web","payment-worker"],
+    "result":"RUNNING",
+    "failedStep":"",
+    "lastAction":"WAIT_CONFIRM",
+    "lastActionAt":"2026-06-07T16:14:03+08:00"
+  },
   "logs":[
     "[16:08:11] INFO download minio backup oss://delivery/project-x/minio.tar.gz",
     "[16:12:40] WARN restore timeout, retry #1",

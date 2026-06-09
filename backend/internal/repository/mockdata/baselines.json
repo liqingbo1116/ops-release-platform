@@ -1,5 +1,5 @@
 ﻿[
-  {"id":"BL-20260607-0001","name":"local-prod-20260607-1530","sourceEnvironmentName":"本地生产环境","serviceCount":213,"createdBy":"张三","createdAt":"2026-06-07T15:30:00+08:00","status":"LOCKED","purpose":"项目 X 交付"},
-  {"id":"BL-20260607-0002","name":"project-y-pre-snapshot","sourceEnvironmentName":"项目 Y 预发","serviceCount":198,"createdBy":"李四","createdAt":"2026-06-07T14:20:00+08:00","status":"DRAFT","purpose":"回归验证"},
-  {"id":"BL-20260606-0038","name":"local-prod-before-hotfix","sourceEnvironmentName":"本地生产环境","serviceCount":213,"createdBy":"王五","createdAt":"2026-06-06T22:10:00+08:00","status":"LOCKED","purpose":"回滚参考"}
+  {"id":"BL-20260607-0001","name":"local-prod-20260607-1530","sourceEnvironmentName":"本地生产环境","serviceCount":213,"createdBy":"张三","createdAt":"2026-06-07T15:30:00+08:00","status":"LOCKED","purpose":"项目 X 交付","snapshotSource":"本地生产环境/local-prod","snapshotCollectedAt":"2026-06-07T15:30:00+08:00","snapshotMode":"MOCK_RUNTIME"},
+  {"id":"BL-20260607-0002","name":"project-y-pre-snapshot","sourceEnvironmentName":"项目 Y 预发","serviceCount":198,"createdBy":"李四","createdAt":"2026-06-07T14:20:00+08:00","status":"DRAFT","purpose":"回归验证","snapshotSource":"项目 Y 预发/project-y-pre","snapshotCollectedAt":"2026-06-07T14:20:00+08:00","snapshotMode":"MOCK_RUNTIME"},
+  {"id":"BL-20260606-0038","name":"local-prod-before-hotfix","sourceEnvironmentName":"本地生产环境","serviceCount":213,"createdBy":"王五","createdAt":"2026-06-06T22:10:00+08:00","status":"LOCKED","purpose":"回滚参考","snapshotSource":"本地生产环境/local-prod","snapshotCollectedAt":"2026-06-06T22:10:00+08:00","snapshotMode":"MOCK_RUNTIME"}
 ]

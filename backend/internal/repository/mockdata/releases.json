@@ -2,7 +2,8 @@
   {
     "id": "REL-20260607-031",
     "type": "SERVICE_RELEASE",
-    "sourceBaselineId": "BL-20260607-0001",
+    "releaseSource": "JENKINS_JOB",
+    "buildId": "BUILD-MOCK-20260607",
     "targetEnvironmentName": "项目 X 生产",
     "status": "PARTIAL_FAILED",
     "progress": 81,
@@ -20,7 +21,9 @@
   {
     "id": "REL-20260607-029",
     "type": "SERVICE_RELEASE",
-    "sourceBaselineId": "BL-20260605-0007",
+    "releaseSource": "LOCAL_HARBOR_IMAGE",
+    "imageRepository": "harbor.local/project-y/web-console",
+    "imageTag": "20260605-8f3c9d",
     "targetEnvironmentName": "项目 Y 生产",
     "status": "SUCCESS",
     "progress": 100,

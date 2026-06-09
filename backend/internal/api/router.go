@@ -12,7 +12,7 @@ import (
 	"ops-release-platform/backend/internal/repository"
 )
 
-func NewRouter(queue *agent.Queue, integrations integration.Suite) *gin.Engine {
+func NewRouter(queue *agent.Queue, protocol *agent.ProtocolStore, integrations integration.Suite) *gin.Engine {
 	router := gin.Default()
 	router.Use(middleware.CORS())
 	router.NoRoute(NoRoute)
@@ -32,7 +32,7 @@ func NewRouter(queue *agent.Queue, integrations integration.Suite) *gin.Engine {
 	if err != nil {
 		log.Fatalf("load mock repository: %v", err)
 	}
-	handler := NewHandler(repo, queue, integrations)
+	handler := NewHandler(repo, queue, protocol, integrations)
 
 	api.POST("/auth/login", handler.Login)
 	api.POST("/auth/logout", handler.Logout)
@@ -47,6 +47,11 @@ func NewRouter(queue *agent.Queue, integrations integration.Suite) *gin.Engine {
 
 	api.GET("/agents", handler.ListAgents)
 	api.POST("/agents/register-token", handler.CreateAgentRegisterToken)
+	api.POST("/agents/:id/heartbeat", handler.AgentHeartbeat)
+	api.POST("/agents/:id/tasks/pull", handler.PullAgentTask)
+	api.POST("/agent-tasks/:id/steps", handler.ReportAgentTaskStep)
+	api.POST("/agent-tasks/:id/logs", handler.AppendAgentTaskLog)
+	api.POST("/agent-tasks/:id/result", handler.ReportAgentTaskResult)
 
 	api.POST("/baselines", handler.CreateBaseline)
 	api.GET("/baselines", handler.ListBaselines)

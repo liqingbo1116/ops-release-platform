@@ -40,6 +40,10 @@ export async function createBaseline(payload: CreateBaselinePayload) {
     createdBy: 'Mock User',
     createdAt,
     purpose: payload.purpose,
+    snapshotSource: `${environmentMockData.environments.find((item) => item.id === payload.sourceEnvironmentId)?.name || '未知环境'}/mock-runtime`,
+    snapshotCollectedAt: createdAt,
+    snapshotMode: 'MOCK_RUNTIME',
+    snapshotTaskId: `snapshot-mock-${Date.now()}`,
   }
   baselineMockData.baselines = [
     {
@@ -53,6 +57,9 @@ export async function createBaseline(payload: CreateBaselinePayload) {
       status: detail.status,
       purpose: detail.purpose,
       lockedAt: '',
+      snapshotSource: detail.snapshotSource,
+      snapshotCollectedAt: detail.snapshotCollectedAt,
+      snapshotMode: detail.snapshotMode,
     },
     ...baselineMockData.baselines,
   ]

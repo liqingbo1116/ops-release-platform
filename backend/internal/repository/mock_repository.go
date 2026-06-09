@@ -87,6 +87,39 @@ func (r *MockRepository) GetAgent(id string) (domain.Agent, bool) {
 	return domain.Agent{}, false
 }
 
+func (r *MockRepository) UpdateAgentHeartbeat(id string, version string, capabilities []string) (domain.Agent, bool) {
+	for index := range r.agents {
+		if r.agents[index].ID != id {
+			continue
+		}
+		r.agents[index].Status = "ONLINE"
+		r.agents[index].LastHeartbeatAt = time.Now().Format(time.RFC3339)
+		if version != "" {
+			r.agents[index].Version = version
+		}
+		if len(capabilities) > 0 {
+			r.agents[index].Capabilities = capabilities
+		}
+		return r.agents[index], true
+	}
+	return domain.Agent{}, false
+}
+
+func (r *MockRepository) AssignAgentTask(id string, taskID string) (domain.Agent, bool) {
+	for index := range r.agents {
+		if r.agents[index].ID != id {
+			continue
+		}
+		if taskID == "" {
+			r.agents[index].CurrentTaskID = nil
+		} else {
+			r.agents[index].CurrentTaskID = &taskID
+		}
+		return r.agents[index], true
+	}
+	return domain.Agent{}, false
+}
+
 func (r *MockRepository) ListBaselines(query string) []domain.Baseline {
 	return filter(r.baselines, query, func(item domain.Baseline) string {
 		return item.ID + " " + item.Name + " " + item.SourceEnvironmentName + " " + item.Purpose + " " + item.Status
@@ -120,7 +153,8 @@ func (r *MockRepository) GetDiffResult(id string, targetEnvironmentID string) (d
 
 func (r *MockRepository) ListReleases(query string) []domain.ReleaseOrder {
 	return filter(r.releases, query, func(item domain.ReleaseOrder) string {
-		return item.ID + " " + item.Type + " " + item.SourceBaselineID + " " + item.TargetEnvironmentName + " " + item.Status + " " + item.AgentName
+		return item.ID + " " + item.Type + " " + item.SourceBaselineID + " " + item.ReleaseSource + " " + item.BuildID + " " +
+			item.ImageRepository + " " + item.ImageTag + " " + item.TargetEnvironmentName + " " + item.Status + " " + item.AgentName
 	})
 }
 
@@ -133,7 +167,9 @@ func (r *MockRepository) GetReleaseDetail(id string) (domain.ReleaseDetail, bool
 
 func (r *MockRepository) ListDeployTasks(query string) []domain.DeployTask {
 	return filter(r.deployTasks, query, func(item domain.DeployTask) string {
-		return item.ID + " " + item.ProductName + " " + item.TargetEnvironmentName + " " + item.Source + " " + item.Status
+		return item.ID + " " + item.Type + " " + item.ProductName + " " + item.TargetEnvironmentName + " " +
+			item.SourceBaselineID + " " + item.Source + " " + strings.Join(item.ServiceNames, " ") + " " +
+			item.CurrentStep + " " + item.Status + " " + item.AgentName + " " + item.AgentTaskID + " " + item.NextAction
 	})
 }
 
@@ -146,6 +182,10 @@ func (r *MockRepository) GetDeployDetail(id string) (domain.DeployDetail, bool) 
 
 func (r *MockRepository) GetCurrentUser() domain.CurrentUser {
 	return r.currentUser
+}
+
+func (r *MockRepository) SetCurrentUserForTest(user domain.CurrentUser) {
+	r.currentUser = user
 }
 
 func (r *MockRepository) ListUsers(query string) []domain.User {
@@ -164,6 +204,27 @@ func (r *MockRepository) ListPermissions(query string) []domain.EnvironmentPermi
 	return filter(r.permissions, query, func(item domain.EnvironmentPermission) string {
 		return item.EnvironmentID + " " + item.EnvironmentName + " " + item.RoleCode + " " + item.Scope + " " + strings.Join(item.Actions, " ")
 	})
+}
+
+func (r *MockRepository) HasEnvironmentAction(environmentID string, action string) bool {
+	userRoles := make(map[string]struct{}, len(r.currentUser.Roles))
+	for _, role := range r.currentUser.Roles {
+		userRoles[role] = struct{}{}
+	}
+	for _, permission := range r.permissions {
+		if permission.EnvironmentID != environmentID && permission.Scope != "ALL" {
+			continue
+		}
+		if _, ok := userRoles[permission.RoleCode]; !ok {
+			continue
+		}
+		for _, allowedAction := range permission.Actions {
+			if allowedAction == action || allowedAction == "write" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *MockRepository) ListChangelog(query string) []domain.ChangelogEntry {
@@ -205,6 +266,10 @@ func (r *MockRepository) CreateBaseline(sourceEnvironmentID, name, purpose strin
 		CreatedBy:             r.currentUser.DisplayName,
 		CreatedAt:             now.Format(time.RFC3339),
 		Purpose:               purpose,
+		SnapshotSource:        fmt.Sprintf("%s/%s", environment.Name, environment.Code),
+		SnapshotCollectedAt:   now.Format(time.RFC3339),
+		SnapshotMode:          "MOCK_RUNTIME",
+		SnapshotTaskID:        fmt.Sprintf("snapshot-%s", strings.ToLower(baselineID)),
 		Items:                 items,
 	}
 	baseline := domain.Baseline{
@@ -217,6 +282,9 @@ func (r *MockRepository) CreateBaseline(sourceEnvironmentID, name, purpose strin
 		CreatedAt:             detail.CreatedAt,
 		Status:                detail.Status,
 		Purpose:               detail.Purpose,
+		SnapshotSource:        detail.SnapshotSource,
+		SnapshotCollectedAt:   detail.SnapshotCollectedAt,
+		SnapshotMode:          detail.SnapshotMode,
 	}
 	r.baselines = append([]domain.Baseline{baseline}, r.baselines...)
 	r.baselineDetails[detail.ID] = detail
@@ -261,6 +329,19 @@ func (r *MockRepository) bootstrapBaselineDetails(seedDetail domain.BaselineDeta
 		if seedDetail.ID == baseline.ID && len(seedDetail.Items) > 0 {
 			items = seedDetail.Items
 		}
+		snapshotCollectedAt := baseline.SnapshotCollectedAt
+		if snapshotCollectedAt == "" {
+			snapshotCollectedAt = baseline.CreatedAt
+		}
+		snapshotSource := baseline.SnapshotSource
+		if snapshotSource == "" {
+			snapshotSource = baseline.SourceEnvironmentName
+		}
+		snapshotMode := baseline.SnapshotMode
+		if snapshotMode == "" {
+			snapshotMode = "MOCK_RUNTIME"
+		}
+		snapshotTaskID := fmt.Sprintf("snapshot-%s", strings.ToLower(baseline.ID))
 		r.baselineDetails[baseline.ID] = domain.BaselineDetail{
 			ID:                    baseline.ID,
 			Name:                  baseline.Name,
@@ -272,6 +353,10 @@ func (r *MockRepository) bootstrapBaselineDetails(seedDetail domain.BaselineDeta
 			CreatedAt:             baseline.CreatedAt,
 			Purpose:               baseline.Purpose,
 			LockedAt:              baseline.LockedAt,
+			SnapshotSource:        snapshotSource,
+			SnapshotCollectedAt:   snapshotCollectedAt,
+			SnapshotMode:          snapshotMode,
+			SnapshotTaskID:        snapshotTaskID,
 			Items:                 items,
 		}
 	}

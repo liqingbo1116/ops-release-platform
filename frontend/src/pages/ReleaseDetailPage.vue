@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>发布详情：{{ release.id }}</h1>
-        <p>基线差异发布，{{ release.sourceBaselineId }} 到 {{ release.targetEnvironmentName }}。</p>
+        <p>{{ releaseSourceLabel }} 发版到 {{ release.targetEnvironmentName }}，{{ releaseSourceSummary }}。</p>
       </div>
       <div class="top-actions">
         <el-button disabled>暂停</el-button>
@@ -29,6 +29,67 @@
         <LogTerminal :title="`${release.agentName} / ${logTitleId}`" :logs="agentLogs" :badge="agentBadge" />
       </el-card>
     </div>
+
+    <el-card v-loading="loading" shadow="never">
+      <template #header><strong>发版来源</strong></template>
+      <div class="source-grid">
+        <div class="source-item">
+          <span>来源类型</span>
+          <strong>{{ releaseSourceLabel }}</strong>
+        </div>
+        <div class="source-item">
+          <span>执行链路</span>
+          <strong>{{ release.executionMode || executionModeLabel }}</strong>
+        </div>
+        <div class="source-item">
+          <span>构建 / 同步任务</span>
+          <strong>{{ release.buildId || agentTaskId || '待生成' }}</strong>
+        </div>
+        <div class="source-item">
+          <span>任务状态</span>
+          <strong>{{ release.buildStatus || runtimeStatusText }}</strong>
+        </div>
+        <div class="source-item wide">
+          <span>镜像</span>
+          <strong>{{ releaseImageLabel }}</strong>
+        </div>
+        <div class="source-item wide">
+          <span>外部链接</span>
+          <a v-if="release.buildUrl" :href="release.buildUrl" target="_blank" rel="noreferrer">{{ release.buildUrl }}</a>
+          <strong v-else>无外部链接</strong>
+        </div>
+      </div>
+    </el-card>
+
+    <el-card v-loading="loading" shadow="never">
+      <template #header><strong>审计与影响范围</strong></template>
+      <div class="audit-grid">
+        <div class="audit-item">
+          <span>操作人</span>
+          <strong>{{ auditSummary.operator || '-' }}</strong>
+        </div>
+        <div class="audit-item">
+          <span>目标环境</span>
+          <strong>{{ auditSummary.targetEnvironmentName || release.targetEnvironmentName }}</strong>
+        </div>
+        <div class="audit-item">
+          <span>执行结果</span>
+          <StatusTag :status="auditSummary.result || effectiveReleaseStatus" />
+        </div>
+        <div class="audit-item">
+          <span>失败步骤</span>
+          <strong>{{ auditSummary.failedStep || '无' }}</strong>
+        </div>
+        <div class="audit-item wide">
+          <span>影响服务</span>
+          <strong>{{ affectedServiceLabel }}</strong>
+        </div>
+        <div class="audit-item wide">
+          <span>最后动作</span>
+          <strong>{{ auditSummary.lastAction || '-' }} / {{ auditSummary.lastActionAt || '-' }}</strong>
+        </div>
+      </div>
+    </el-card>
 
     <el-card v-loading="loading" shadow="never">
       <template #header><strong>失败定位建议</strong></template>
@@ -200,6 +261,33 @@ const displaySteps = computed(() =>
 const completedStepCount = computed(() => displaySteps.value.filter((item) => item.status === 'SUCCESS').length)
 const actionRecords = computed(() => release.value.actionRecords ?? [])
 const releaseReport = computed(() => release.value.report ?? null)
+const auditSummary = computed(() => release.value.auditSummary ?? {
+  operator: actionRecords.value[0]?.operator || '',
+  targetEnvironmentName: release.value.targetEnvironmentName,
+  affectedServices: release.value.failures.map((item) => item.serviceName),
+  result: effectiveReleaseStatus.value,
+  failedStep: release.value.steps.find((item) => ['FAILED', 'PARTIAL_FAILED'].includes(item.status))?.name || '',
+  lastAction: actionRecords.value.at(-1)?.action || '',
+  lastActionAt: actionRecords.value.at(-1)?.occurredAt || '',
+})
+const affectedServiceLabel = computed(() => {
+  const services = auditSummary.value.affectedServices ?? []
+  return services.length > 0 ? services.join('、') : '未记录'
+})
+const releaseSourceLabel = computed(() => {
+  if (release.value.releaseSource === 'LOCAL_HARBOR_IMAGE') return '本地 Harbor 镜像'
+  if (release.value.releaseSource === 'JENKINS_JOB') return 'Jenkins Job'
+  return '服务'
+})
+const releaseImageLabel = computed(() => {
+  if (release.value.imageRepository && release.value.imageTag) return `${release.value.imageRepository}:${release.value.imageTag}`
+  return release.value.imageRepository || release.value.imageTag || '等待镜像信息'
+})
+const releaseSourceSummary = computed(() => {
+  if (release.value.releaseSource === 'LOCAL_HARBOR_IMAGE') return `选择镜像 ${releaseImageLabel.value}`
+  if (release.value.releaseSource === 'JENKINS_JOB') return `构建任务 ${release.value.buildId || '待生成'}`
+  return '由项目 Agent 执行镜像同步与 tag 更新'
+})
 const completedStepFoot = computed(() => {
   if (runtimeState.value === 'WAITING_CONFIRM' || runtimeState.value === 'PENDING_CONFIRM') return '当前卡在人工确认'
   if (runtimeStep.value) return `当前执行：${runtimeStep.value}`
@@ -346,5 +434,49 @@ onUnmounted(() => {
   margin: 16px 0 0;
   color: var(--el-text-color-regular);
   line-height: 1.6;
+}
+
+.source-grid,
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.source-item,
+.audit-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.source-item.wide,
+.audit-item.wide {
+  grid-column: span 2;
+}
+
+.source-item span,
+.audit-item span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.source-item strong,
+.source-item a,
+.audit-item strong {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .source-grid,
+  .audit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-item.wide,
+  .audit-item.wide {
+    grid-column: span 1;
+  }
 }
 </style>

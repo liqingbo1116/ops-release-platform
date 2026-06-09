@@ -45,6 +45,6 @@ func (s *Server) Run() error {
 		return fmt.Errorf("integration init failed: %w", err)
 	}
 
-	router := api.NewRouter(queue, integrations)
+	router := api.NewRouter(queue, agent.NewProtocolStore(), integrations)
 	return router.Run(fmt.Sprintf(":%s", s.config.Port))
 }

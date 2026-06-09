@@ -26,8 +26,10 @@ export type CreateReleaseResult = {
   status: string
   executionMode?: string
   agentTaskId?: string
+  releaseSource?: 'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE'
   buildId?: string
   buildStatus?: string
+  buildUrl?: string
   createdAt: string
 }
 
@@ -59,7 +61,13 @@ export function createRelease(body: CreateReleaseRequest) {
   }
   return Promise.resolve<CreateReleaseResult>({
     id: 'REL-20260607-MOCK',
-    status: 'PENDING_CONFIRM',
+    status: body.releaseSource === 'LOCAL_HARBOR_IMAGE' ? 'PENDING_IMAGE_SYNC' : 'JENKINS_QUEUED',
+    executionMode: body.releaseSource === 'LOCAL_HARBOR_IMAGE' ? 'AGENT_IMAGE_SYNC' : 'JENKINS_AGENT',
+    agentTaskId: 'REL-20260607-MOCK',
+    releaseSource: body.releaseSource,
+    buildId: body.releaseSource === 'LOCAL_HARBOR_IMAGE' ? 'SYNC-MOCK-20260607' : 'BUILD-MOCK-20260607',
+    buildStatus: body.releaseSource === 'LOCAL_HARBOR_IMAGE' ? 'SUCCESS' : 'QUEUED',
+    buildUrl: body.releaseSource === 'JENKINS_JOB' ? 'https://jenkins.local/job/mock-service-release/1' : undefined,
     createdAt: new Date().toISOString(),
   })
 }

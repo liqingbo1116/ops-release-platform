@@ -7,7 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
+	"ops-release-platform/backend/internal/agent"
+	"ops-release-platform/backend/internal/domain"
 	"ops-release-platform/backend/internal/integration"
+	"ops-release-platform/backend/internal/repository"
 )
 
 func TestCoreMockAPIs(t *testing.T) {
@@ -34,7 +39,7 @@ func TestCoreMockAPIs(t *testing.T) {
 		{name: "release detail", method: http.MethodGet, path: "/api/releases/REL-20260607-031", statusCode: http.StatusOK},
 		{name: "created release detail", method: http.MethodGet, path: "/api/releases/REL-20260607-MOCK", statusCode: http.StatusOK},
 		{name: "deploy tasks", method: http.MethodGet, path: "/api/deploy-tasks", statusCode: http.StatusOK},
-		{name: "create deploy task", method: http.MethodPost, path: "/api/deploy-tasks", body: `{"type":"SERVICE_DEPLOYMENT","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x"}`, statusCode: http.StatusCreated},
+		{name: "create deploy task", method: http.MethodPost, path: "/api/deploy-tasks", body: `{"type":"SERVICE_DEPLOYMENT","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x"}`, statusCode: http.StatusCreated},
 		{name: "deploy detail", method: http.MethodGet, path: "/api/deploy-tasks/DEP-20260607-009", statusCode: http.StatusOK},
 		{name: "created deploy detail", method: http.MethodGet, path: "/api/deploy-tasks/DEP-20260607-MOCK", statusCode: http.StatusOK},
 		{name: "auth login", method: http.MethodPost, path: "/api/auth/login", body: `{"username":"admin","password":"mock"}`, statusCode: http.StatusOK},
@@ -77,6 +82,183 @@ func TestAgentTaskStatusWithoutRedis(t *testing.T) {
 	}
 	if response.Code != "OK" {
 		t.Fatalf("expected OK response, got %s", response.Code)
+	}
+}
+
+func TestAgentProtocolMockFlow(t *testing.T) {
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected release create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var createPayload struct {
+		Data struct {
+			AgentTaskID string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createPayload.Data.AgentTaskID == "" {
+		t.Fatal("expected agent task id")
+	}
+
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"version":"1.3.3","capabilities":["image-sync","kubectl","http-check"]}`))
+	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRecorder := httptest.NewRecorder()
+	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
+	if heartbeatRecorder.Code != http.StatusOK {
+		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	}
+
+	pullRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/tasks/pull", strings.NewReader(`{}`))
+	pullRequest.Header.Set("Content-Type", "application/json")
+	pullRecorder := httptest.NewRecorder()
+	router.ServeHTTP(pullRecorder, pullRequest)
+	if pullRecorder.Code != http.StatusOK {
+		t.Fatalf("expected pull status 200, got %d: %s", pullRecorder.Code, pullRecorder.Body.String())
+	}
+	var pullPayload struct {
+		Data struct {
+			Task struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+				Step   string `json:"step"`
+			} `json:"task"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(pullRecorder.Body.Bytes(), &pullPayload); err != nil {
+		t.Fatalf("decode pull response: %v", err)
+	}
+	if pullPayload.Data.Task.ID != createPayload.Data.AgentTaskID || pullPayload.Data.Task.Status != "RUNNING" {
+		t.Fatalf("unexpected pulled task: %+v", pullPayload.Data.Task)
+	}
+
+	stepRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/steps", strings.NewReader(`{"step":"sync-image","status":"RUNNING"}`))
+	stepRequest.Header.Set("Content-Type", "application/json")
+	stepRecorder := httptest.NewRecorder()
+	router.ServeHTTP(stepRecorder, stepRequest)
+	if stepRecorder.Code != http.StatusOK {
+		t.Fatalf("expected step status 200, got %d: %s", stepRecorder.Code, stepRecorder.Body.String())
+	}
+
+	logRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/logs", strings.NewReader(`{"line":"sync image mock log"}`))
+	logRequest.Header.Set("Content-Type", "application/json")
+	logRecorder := httptest.NewRecorder()
+	router.ServeHTTP(logRecorder, logRequest)
+	if logRecorder.Code != http.StatusOK {
+		t.Fatalf("expected log status 200, got %d: %s", logRecorder.Code, logRecorder.Body.String())
+	}
+
+	resultRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/result", strings.NewReader(`{"status":"SUCCESS","message":"release mock flow finished"}`))
+	resultRequest.Header.Set("Content-Type", "application/json")
+	resultRecorder := httptest.NewRecorder()
+	router.ServeHTTP(resultRecorder, resultRequest)
+	if resultRecorder.Code != http.StatusOK {
+		t.Fatalf("expected result status 200, got %d: %s", resultRecorder.Code, resultRecorder.Body.String())
+	}
+
+	statusRequest := httptest.NewRequest(http.MethodGet, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/status", nil)
+	statusRecorder := httptest.NewRecorder()
+	router.ServeHTTP(statusRecorder, statusRequest)
+	if statusRecorder.Code != http.StatusOK {
+		t.Fatalf("expected status query 200, got %d: %s", statusRecorder.Code, statusRecorder.Body.String())
+	}
+	var statusPayload struct {
+		Data struct {
+			Status map[string]string `json:"status"`
+			Logs   []string          `json:"logs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(statusRecorder.Body.Bytes(), &statusPayload); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
+	if statusPayload.Data.Status["status"] != "SUCCESS" || statusPayload.Data.Status["step"] != "finished" {
+		t.Fatalf("unexpected status payload: %+v", statusPayload.Data.Status)
+	}
+	if len(statusPayload.Data.Logs) != 2 {
+		t.Fatalf("expected reported log and result message, got %+v", statusPayload.Data.Logs)
+	}
+}
+
+func TestReleaseFailureActionsUpdateAgentTaskStatus(t *testing.T) {
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected release create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var createPayload struct {
+		Data struct {
+			AgentTaskID string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	retryRequest := httptest.NewRequest(http.MethodPost, "/api/releases/"+createPayload.Data.AgentTaskID+"/retry", nil)
+	retryRecorder := httptest.NewRecorder()
+	router.ServeHTTP(retryRecorder, retryRequest)
+	if retryRecorder.Code != http.StatusOK {
+		t.Fatalf("expected retry status 200, got %d: %s", retryRecorder.Code, retryRecorder.Body.String())
+	}
+	assertAgentStatus(t, router, createPayload.Data.AgentTaskID, "retry", "RUNNING")
+
+	rollbackRequest := httptest.NewRequest(http.MethodPost, "/api/releases/"+createPayload.Data.AgentTaskID+"/rollback", nil)
+	rollbackRecorder := httptest.NewRecorder()
+	router.ServeHTTP(rollbackRecorder, rollbackRequest)
+	if rollbackRecorder.Code != http.StatusOK {
+		t.Fatalf("expected rollback status 200, got %d: %s", rollbackRecorder.Code, rollbackRecorder.Body.String())
+	}
+	assertAgentStatus(t, router, createPayload.Data.AgentTaskID, "rollback", "ROLLED_BACK")
+}
+
+func TestDeployStepActionsUpdateAgentTaskStatus(t *testing.T) {
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{"type":"SERVICE_DEPLOYMENT","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","serviceIds":["svc-web"]}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected deploy create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var createPayload struct {
+		Data struct {
+			AgentTaskID string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		action string
+		status string
+	}{
+		{name: "retry", action: "retry", status: "RUNNING"},
+		{name: "skip", action: "skip", status: "SKIPPED"},
+		{name: "confirm", action: "confirm", status: "SUCCESS"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks/"+createPayload.Data.AgentTaskID+"/steps/step-2/"+tt.action, nil)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected step action status 200, got %d: %s", recorder.Code, recorder.Body.String())
+			}
+			assertAgentStatus(t, router, createPayload.Data.AgentTaskID, "step-2", tt.status)
+		})
 	}
 }
 
@@ -145,7 +327,7 @@ func TestCreateReleaseReturnsAgentTaskID(t *testing.T) {
 
 func TestCreateDeployTaskReturnsAgentTaskID(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{"type":"SERVICE_DEPLOYMENT","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{"type":"SERVICE_DEPLOYMENT","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x"}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -288,6 +470,10 @@ func TestCreateBaselineReturnsRuntimeSnapshot(t *testing.T) {
 			SourceEnvironmentID string `json:"sourceEnvironmentId"`
 			Status              string `json:"status"`
 			ServiceCount        int    `json:"serviceCount"`
+			SnapshotSource      string `json:"snapshotSource"`
+			SnapshotCollectedAt string `json:"snapshotCollectedAt"`
+			SnapshotMode        string `json:"snapshotMode"`
+			SnapshotTaskID      string `json:"snapshotTaskId"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
@@ -301,6 +487,9 @@ func TestCreateBaselineReturnsRuntimeSnapshot(t *testing.T) {
 	}
 	if payload.Data.ID == "" || payload.Data.ServiceCount == 0 {
 		t.Fatalf("expected generated baseline snapshot, got %+v", payload.Data)
+	}
+	if payload.Data.SnapshotSource == "" || payload.Data.SnapshotCollectedAt == "" || payload.Data.SnapshotMode != "MOCK_RUNTIME" || payload.Data.SnapshotTaskID == "" {
+		t.Fatalf("expected runtime snapshot metadata, got %+v", payload.Data)
 	}
 }
 
@@ -383,9 +572,22 @@ func TestCreateDeployTaskRejectsAgentEnvironmentMismatch(t *testing.T) {
 	}
 }
 
-func TestCreateReleaseRejectsMissingInTargetServiceSelection(t *testing.T) {
+func TestCreateReleaseRejectsSourceBaseline(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","serviceIds":["svc-web"],"jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","serviceIds":["svc-user"],"jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCreateDeployRequiresSourceBaseline(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{"type":"SERVICE_DEPLOYMENT","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","serviceIds":["svc-web"]}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -409,6 +611,46 @@ func TestCreateDeployRejectsNeedUpdateServiceSelection(t *testing.T) {
 	}
 }
 
+func TestCreateReleaseReturnsForbiddenWithoutEnvironmentPermission(t *testing.T) {
+	router := newPermissionTestRouter(t, domain.CurrentUser{
+		ID:          "user-viewer",
+		Username:    "viewer",
+		DisplayName: "只读用户",
+		Roles:       []string{"VIEWER"},
+		Permissions: []string{},
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	assertErrorResponse(t, recorder.Body.Bytes(), "FORBIDDEN", "environment permission denied")
+}
+
+func TestCreateDeployTaskReturnsForbiddenWithoutEnvironmentPermission(t *testing.T) {
+	router := newPermissionTestRouter(t, domain.CurrentUser{
+		ID:          "user-viewer",
+		Username:    "viewer",
+		DisplayName: "只读用户",
+		Roles:       []string{"VIEWER"},
+		Permissions: []string{},
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/deploy-tasks", strings.NewReader(`{"type":"SERVICE_DEPLOYMENT","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","serviceIds":["svc-project-x-web"]}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	assertErrorResponse(t, recorder.Body.Bytes(), "FORBIDDEN", "environment permission denied")
+}
+
 func TestUnknownRoute(t *testing.T) {
 	router := newTestRouter()
 	request := httptest.NewRequest(http.MethodGet, "/api/missing", nil)
@@ -422,7 +664,21 @@ func TestUnknownRoute(t *testing.T) {
 }
 
 func newTestRouter() http.Handler {
-	return NewRouter(nil, integration.NewMockSuite())
+	return NewRouter(nil, agent.NewProtocolStore(), integration.NewMockSuite())
+}
+
+func newPermissionTestRouter(t *testing.T, user domain.CurrentUser) http.Handler {
+	t.Helper()
+	repo, err := repository.NewMockRepository()
+	if err != nil {
+		t.Fatalf("load mock repository: %v", err)
+	}
+	repo.SetCurrentUserForTest(user)
+	handler := NewHandler(repo, nil, agent.NewProtocolStore(), integration.NewMockSuite())
+	router := gin.New()
+	router.POST("/api/releases", handler.CreateRelease)
+	router.POST("/api/deploy-tasks", handler.CreateDeployTask)
+	return router
 }
 
 func assertOKResponse(t *testing.T, payload []byte) {
@@ -436,5 +692,44 @@ func assertOKResponse(t *testing.T, payload []byte) {
 	}
 	if response.RequestID == "" {
 		t.Fatal("expected requestId")
+	}
+}
+
+func assertErrorResponse(t *testing.T, payload []byte, code string, message string) {
+	t.Helper()
+	var response Response
+	if err := json.Unmarshal(payload, &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != code || response.Message != message {
+		t.Fatalf("expected %s %q, got %+v", code, message, response)
+	}
+	if response.RequestID == "" {
+		t.Fatal("expected requestId")
+	}
+}
+
+func assertAgentStatus(t *testing.T, router http.Handler, taskID string, step string, status string) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/agent-tasks/"+taskID+"/status", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected agent status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Status map[string]string `json:"status"`
+			Logs   []string          `json:"logs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
+	if payload.Data.Status["step"] != step || payload.Data.Status["status"] != status {
+		t.Fatalf("expected step %s status %s, got %+v", step, status, payload.Data.Status)
+	}
+	if len(payload.Data.Logs) == 0 {
+		t.Fatalf("expected action log, got %+v", payload.Data.Logs)
 	}
 }

@@ -13,6 +13,9 @@ type BaselineListItem = {
   status: string
   purpose: string
   lockedAt?: string
+  snapshotSource?: string
+  snapshotCollectedAt?: string
+  snapshotMode?: string
 }
 
 type BaselineDetailItem = {
@@ -26,6 +29,10 @@ type BaselineDetailItem = {
   createdAt?: string
   purpose?: string
   lockedAt?: string
+  snapshotSource?: string
+  snapshotCollectedAt?: string
+  snapshotMode?: string
+  snapshotTaskId?: string
   items: Array<{
     serviceId: string
     serviceName: string

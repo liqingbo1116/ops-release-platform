@@ -32,6 +32,36 @@
     </div>
 
     <el-card v-loading="loading" shadow="never">
+      <template #header><strong>审计与影响范围</strong></template>
+      <div class="audit-grid">
+        <div class="audit-item">
+          <span>操作人</span>
+          <strong>{{ auditSummary.operator || '-' }}</strong>
+        </div>
+        <div class="audit-item">
+          <span>目标环境</span>
+          <strong>{{ auditSummary.targetEnvironmentName || deploy.targetEnvironmentName }}</strong>
+        </div>
+        <div class="audit-item">
+          <span>执行结果</span>
+          <StatusTag :status="auditSummary.result || effectiveDeployStatus" />
+        </div>
+        <div class="audit-item">
+          <span>失败步骤</span>
+          <strong>{{ auditSummary.failedStep || '无' }}</strong>
+        </div>
+        <div class="audit-item wide">
+          <span>影响服务</span>
+          <strong>{{ affectedServiceLabel }}</strong>
+        </div>
+        <div class="audit-item wide">
+          <span>最后动作</span>
+          <strong>{{ auditSummary.lastAction || '-' }} / {{ auditSummary.lastActionAt || '-' }}</strong>
+        </div>
+      </div>
+    </el-card>
+
+    <el-card v-loading="loading" shadow="never">
       <template #header><strong>执行记录</strong></template>
       <el-table :data="actionRecords" class="wide-table">
         <el-table-column prop="occurredAt" label="时间" min-width="180" />
@@ -149,6 +179,19 @@ const displaySteps = computed(() => {
 })
 const completedStepCount = computed(() => displaySteps.value.filter((item) => item.status === 'SUCCESS').length)
 const actionRecords = computed(() => deploy.value.actionRecords ?? [])
+const auditSummary = computed(() => deploy.value.auditSummary ?? {
+  operator: actionRecords.value[0]?.operator || '',
+  targetEnvironmentName: deploy.value.targetEnvironmentName,
+  affectedServices: [],
+  result: effectiveDeployStatus.value,
+  failedStep: displaySteps.value.find((item) => ['FAILED', 'PARTIAL_FAILED'].includes(item.status))?.name || '',
+  lastAction: actionRecords.value.at(-1)?.action || '',
+  lastActionAt: actionRecords.value.at(-1)?.occurredAt || '',
+})
+const affectedServiceLabel = computed(() => {
+  const services = auditSummary.value.affectedServices ?? []
+  return services.length > 0 ? services.join('、') : '未记录'
+})
 const progressFoot = computed(() => `${completedStepCount.value}/${deploy.value.steps.length} 步完成`)
 const stepSummaryFoot = computed(() => {
   const manualStepCount = deploy.value.steps.filter((item) => item.type === 'MANUAL_CONFIRM').length
@@ -289,3 +332,41 @@ onUnmounted(() => {
   }
 })
 </script>
+
+<style scoped>
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.audit-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.audit-item.wide {
+  grid-column: span 2;
+}
+
+.audit-item span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.audit-item strong {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .audit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-item.wide {
+    grid-column: span 1;
+  }
+}
+</style>

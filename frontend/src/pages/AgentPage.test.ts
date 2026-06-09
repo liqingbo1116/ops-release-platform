@@ -1,0 +1,92 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const { listAgents } = vi.hoisted(() => ({
+  listAgents: vi.fn(),
+}))
+
+vi.mock('@/api/agents', () => ({
+  listAgents,
+}))
+
+import AgentPage from './AgentPage.vue'
+
+describe('AgentPage', () => {
+  beforeEach(() => {
+    listAgents.mockReset()
+    listAgents.mockResolvedValue([
+      {
+        id: 'agent-project-x',
+        name: 'agent-project-x',
+        environmentId: 'env-project-x-prod',
+        environmentName: '项目 X 生产',
+        version: '1.3.2',
+        status: 'ONLINE',
+        capabilities: ['image-sync', 'kubectl', 'shell', 'http-check'],
+        lastHeartbeatAt: '2026-06-07T12:40:12+08:00',
+        currentTaskId: 'REL-20260607-031',
+      },
+      {
+        id: 'agent-project-z',
+        name: 'agent-project-z',
+        environmentId: 'env-project-z-prod',
+        environmentName: '项目 Z 生产',
+        version: '1.2.8',
+        status: 'OFFLINE',
+        capabilities: ['kubectl', 'shell'],
+        lastHeartbeatAt: '2026-06-07T12:31:00+08:00',
+        currentTaskId: null,
+      },
+    ])
+  })
+
+  it('shows Agent readiness, heartbeat, capabilities, recent task, and offline blocker', async () => {
+    const wrapper = mount(AgentPage, {
+      global: {
+        stubs: {
+          AgentRegisterDrawer: true,
+          MetricCard: { template: '<div>{{ label }} {{ value }} {{ foot }}</div>', props: ['label', 'value', 'foot'] },
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(listAgents).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('Linux 主机 + docker compose')
+    expect(wrapper.text()).toContain('agent-project-x')
+    expect(wrapper.text()).toContain('项目 X 生产')
+    expect(wrapper.text()).toContain('image-sync / kubectl / shell / http-check')
+    expect(wrapper.text()).toContain('REL-20260607-031')
+    expect(wrapper.text()).toContain('1 个 Agent 离线')
+  })
+
+  it('filters agents by environment and capability', async () => {
+    const wrapper = mount(AgentPage, {
+      global: {
+        stubs: {
+          AgentRegisterDrawer: true,
+          MetricCard: true,
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('input').setValue('project-z')
+    expect(wrapper.text()).toContain('agent-project-z')
+    expect(wrapper.text()).not.toContain('agent-project-x')
+
+    await wrapper.get('input').setValue('image-sync')
+    expect(wrapper.text()).toContain('agent-project-x')
+    expect(wrapper.text()).not.toContain('agent-project-z')
+  })
+})

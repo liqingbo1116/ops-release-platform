@@ -96,13 +96,20 @@
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | id | string | 是 | 部署任务 ID |
+| type | enum | 是 | V1 固定为 SERVICE_DEPLOYMENT |
 | productId | string | 是 | 产品 |
 | targetEnvironmentId | string | 是 | 目标环境 |
-| sourceType | enum | 是 | BASELINE / PACKAGE / SCRIPT |
-| sourceRef | string | 是 | 基线 ID、部署包或脚本引用 |
+| sourceBaselineId | string | 是 | 来源基线 ID |
+| sourceType | enum | 是 | V1 使用 BASELINE |
+| sourceRef | string | 是 | 来源基线 ID |
+| missingServiceCount | int | 是 | 目标环境缺失服务数 |
+| serviceNames | string[] | 是 | 本次首次部署的服务名 |
 | status | enum | 是 | 部署任务状态 |
 | currentStepId | string | 否 | 当前步骤 |
 | progress | int | 是 | 0-100 |
+| agentName | string | 是 | 执行 Agent |
+| agentTaskId | string | 是 | Agent 任务 ID |
+| nextAction | string | 否 | 给用户的下一步处理提示 |
 | createdBy | string | 是 | 创建人 |
 | createdAt | datetime | 是 | 创建时间 |
 

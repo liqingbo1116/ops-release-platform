@@ -41,6 +41,9 @@ type Baseline struct {
 	Status                string `json:"status"`
 	Purpose               string `json:"purpose"`
 	LockedAt              string `json:"lockedAt,omitempty"`
+	SnapshotSource        string `json:"snapshotSource,omitempty"`
+	SnapshotCollectedAt   string `json:"snapshotCollectedAt,omitempty"`
+	SnapshotMode          string `json:"snapshotMode,omitempty"`
 }
 
 type BaselineItem struct {
@@ -67,6 +70,10 @@ type BaselineDetail struct {
 	CreatedAt             string         `json:"createdAt,omitempty"`
 	Purpose               string         `json:"purpose,omitempty"`
 	LockedAt              string         `json:"lockedAt,omitempty"`
+	SnapshotSource        string         `json:"snapshotSource,omitempty"`
+	SnapshotCollectedAt   string         `json:"snapshotCollectedAt,omitempty"`
+	SnapshotMode          string         `json:"snapshotMode,omitempty"`
+	SnapshotTaskID        string         `json:"snapshotTaskId,omitempty"`
 	Items                 []BaselineItem `json:"items"`
 }
 
@@ -126,10 +133,24 @@ type ReleaseReport struct {
 	Summary             string `json:"summary"`
 }
 
+type AuditSummary struct {
+	Operator              string   `json:"operator"`
+	TargetEnvironmentName string   `json:"targetEnvironmentName"`
+	AffectedServices      []string `json:"affectedServices"`
+	Result                string   `json:"result"`
+	FailedStep            string   `json:"failedStep,omitempty"`
+	LastAction            string   `json:"lastAction"`
+	LastActionAt          string   `json:"lastActionAt"`
+}
+
 type ReleaseOrder struct {
 	ID                    string `json:"id"`
 	Type                  string `json:"type"`
-	SourceBaselineID      string `json:"sourceBaselineId"`
+	SourceBaselineID      string `json:"sourceBaselineId,omitempty"`
+	ReleaseSource         string `json:"releaseSource,omitempty"`
+	BuildID               string `json:"buildId,omitempty"`
+	ImageRepository       string `json:"imageRepository,omitempty"`
+	ImageTag              string `json:"imageTag,omitempty"`
 	TargetEnvironmentName string `json:"targetEnvironmentName"`
 	Status                string `json:"status"`
 	Progress              int    `json:"progress"`
@@ -139,7 +160,15 @@ type ReleaseOrder struct {
 type ReleaseDetail struct {
 	ID                    string           `json:"id"`
 	Type                  string           `json:"type"`
-	SourceBaselineID      string           `json:"sourceBaselineId"`
+	SourceBaselineID      string           `json:"sourceBaselineId,omitempty"`
+	ReleaseSource         string           `json:"releaseSource,omitempty"`
+	ExecutionMode         string           `json:"executionMode,omitempty"`
+	BuildID               string           `json:"buildId,omitempty"`
+	BuildStatus           string           `json:"buildStatus,omitempty"`
+	BuildURL              string           `json:"buildUrl,omitempty"`
+	ImageRepository       string           `json:"imageRepository,omitempty"`
+	ImageTag              string           `json:"imageTag,omitempty"`
+	ImageDigest           string           `json:"imageDigest,omitempty"`
 	TargetEnvironmentName string           `json:"targetEnvironmentName"`
 	Status                string           `json:"status"`
 	Progress              int              `json:"progress"`
@@ -149,17 +178,25 @@ type ReleaseDetail struct {
 	Failures              []ReleaseFailure `json:"failures"`
 	ActionRecords         []ActionRecord   `json:"actionRecords"`
 	Report                *ReleaseReport   `json:"report,omitempty"`
+	AuditSummary          *AuditSummary    `json:"auditSummary,omitempty"`
 	Logs                  []string         `json:"logs"`
 }
 
 type DeployTask struct {
-	ID                    string `json:"id"`
-	ProductName           string `json:"productName"`
-	TargetEnvironmentName string `json:"targetEnvironmentName"`
-	Source                string `json:"source"`
-	CurrentStep           string `json:"currentStep"`
-	Progress              int    `json:"progress"`
-	Status                string `json:"status"`
+	ID                    string   `json:"id"`
+	Type                  string   `json:"type,omitempty"`
+	ProductName           string   `json:"productName"`
+	TargetEnvironmentName string   `json:"targetEnvironmentName"`
+	SourceBaselineID      string   `json:"sourceBaselineId,omitempty"`
+	Source                string   `json:"source"`
+	MissingServiceCount   int      `json:"missingServiceCount,omitempty"`
+	ServiceNames          []string `json:"serviceNames,omitempty"`
+	CurrentStep           string   `json:"currentStep"`
+	Progress              int      `json:"progress"`
+	Status                string   `json:"status"`
+	AgentName             string   `json:"agentName,omitempty"`
+	AgentTaskID           string   `json:"agentTaskId,omitempty"`
+	NextAction            string   `json:"nextAction,omitempty"`
 }
 
 type DeployStep struct {
@@ -171,16 +208,17 @@ type DeployStep struct {
 }
 
 type DeployDetail struct {
-	ID                    string       `json:"id"`
-	ProductName           string       `json:"productName"`
-	TargetEnvironmentName string       `json:"targetEnvironmentName"`
-	Source                string       `json:"source"`
-	Status                string       `json:"status"`
-	Progress              int          `json:"progress"`
-	AgentTaskID           string       `json:"agentTaskId"`
-	Steps                 []DeployStep `json:"steps"`
+	ID                    string         `json:"id"`
+	ProductName           string         `json:"productName"`
+	TargetEnvironmentName string         `json:"targetEnvironmentName"`
+	Source                string         `json:"source"`
+	Status                string         `json:"status"`
+	Progress              int            `json:"progress"`
+	AgentTaskID           string         `json:"agentTaskId"`
+	Steps                 []DeployStep   `json:"steps"`
 	ActionRecords         []ActionRecord `json:"actionRecords"`
-	Logs                  []string     `json:"logs"`
+	AuditSummary          *AuditSummary  `json:"auditSummary,omitempty"`
+	Logs                  []string       `json:"logs"`
 }
 
 type CurrentUser struct {

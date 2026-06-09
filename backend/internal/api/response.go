@@ -49,6 +49,14 @@ func BadRequest(c *gin.Context, message string) {
 	})
 }
 
+func Forbidden(c *gin.Context, message string) {
+	c.JSON(http.StatusForbidden, Response{
+		Code:      "FORBIDDEN",
+		Message:   message,
+		RequestID: requestID(),
+	})
+}
+
 func requestID() string {
 	return fmt.Sprintf("req-%s", time.Now().Format("20060102-150405.000000"))
 }

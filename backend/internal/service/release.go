@@ -10,18 +10,21 @@ import (
 )
 
 var (
-	ErrInvalidReleaseType      = errors.New("invalid release type")
-	ErrInvalidDeployType       = errors.New("invalid deploy type")
-	ErrAgentNotFound           = errors.New("agent not found")
-	ErrAgentOffline            = errors.New("agent offline")
-	ErrAgentEnvironment        = errors.New("agent environment mismatch")
-	ErrBaselineNotFound        = errors.New("baseline not found")
-	ErrInvalidServiceSelection = errors.New("invalid service selection")
-	ErrJenkinsTrigger          = errors.New("jenkins trigger failed")
-	ErrRegistryImageCheck      = errors.New("registry image check failed")
-	ErrRegistryImageSync       = errors.New("registry image sync failed")
-	ErrImageNotFound           = errors.New("release image not found")
-	ErrWorkloadProbe           = errors.New("kubernetes workload probe failed")
+	ErrInvalidReleaseType         = errors.New("invalid release type")
+	ErrInvalidDeployType          = errors.New("invalid deploy type")
+	ErrAgentNotFound              = errors.New("agent not found")
+	ErrAgentOffline               = errors.New("agent offline")
+	ErrAgentEnvironment           = errors.New("agent environment mismatch")
+	ErrEnvironmentPermission      = errors.New("environment permission denied")
+	ErrBaselineNotFound           = errors.New("baseline not found")
+	ErrReleaseBaselineUnsupported = errors.New("release baseline unsupported")
+	ErrDeployBaselineRequired     = errors.New("deploy baseline required")
+	ErrInvalidServiceSelection    = errors.New("invalid service selection")
+	ErrJenkinsTrigger             = errors.New("jenkins trigger failed")
+	ErrRegistryImageCheck         = errors.New("registry image check failed")
+	ErrRegistryImageSync          = errors.New("registry image sync failed")
+	ErrImageNotFound              = errors.New("release image not found")
+	ErrWorkloadProbe              = errors.New("kubernetes workload probe failed")
 )
 
 type EnqueueFunc func(ctx context.Context, id string, taskType string, action string)
@@ -34,22 +37,31 @@ type DiffReader interface {
 	GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool)
 }
 
+type PermissionReader interface {
+	HasEnvironmentAction(environmentID string, action string) bool
+}
+
 type ReleaseCreator struct {
 	integrations integration.Suite
 	agents       AgentReader
 	diffReader   DiffReader
+	permissions  PermissionReader
 	enqueue      EnqueueFunc
 	now          func() time.Time
 }
 
-func NewReleaseCreator(integrations integration.Suite, agents AgentReader, diffReader DiffReader, enqueue EnqueueFunc) *ReleaseCreator {
-	return &ReleaseCreator{
+func NewReleaseCreator(integrations integration.Suite, agents AgentReader, diffReader DiffReader, enqueue EnqueueFunc, permissions ...PermissionReader) *ReleaseCreator {
+	creator := &ReleaseCreator{
 		integrations: integrations,
 		agents:       agents,
 		diffReader:   diffReader,
 		enqueue:      enqueue,
 		now:          time.Now,
 	}
+	if len(permissions) > 0 {
+		creator.permissions = permissions[0]
+	}
+	return creator
 }
 
 type CreateReleaseRequest struct {
@@ -95,12 +107,11 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 	if err := c.validateAgent(request.AgentID, request.TargetEnvironmentID); err != nil {
 		return CreateReleaseResult{}, err
 	}
+	if err := c.validateEnvironmentPermission(request.TargetEnvironmentID, "release"); err != nil {
+		return CreateReleaseResult{}, err
+	}
 	if request.SourceBaselineID != "" {
-		allowedServiceIDs, err := c.resolveServiceSelection(request.SourceBaselineID, request.TargetEnvironmentID, request.ServiceIDs, "NEED_UPDATE")
-		if err != nil {
-			return CreateReleaseResult{}, err
-		}
-		request.ServiceIDs = allowedServiceIDs
+		return CreateReleaseResult{}, ErrReleaseBaselineUnsupported
 	}
 
 	id := "REL-20260607-MOCK"
@@ -206,13 +217,17 @@ func (c *ReleaseCreator) CreateDeployTask(ctx context.Context, request CreateDep
 	if err := c.validateAgent(request.AgentID, request.TargetEnvironmentID); err != nil {
 		return CreateDeployTaskResult{}, err
 	}
-	if request.SourceBaselineID != "" {
-		allowedServiceIDs, err := c.resolveServiceSelection(request.SourceBaselineID, request.TargetEnvironmentID, request.ServiceIDs, "MISSING_IN_TARGET")
-		if err != nil {
-			return CreateDeployTaskResult{}, err
-		}
-		request.ServiceIDs = allowedServiceIDs
+	if err := c.validateEnvironmentPermission(request.TargetEnvironmentID, "deploy"); err != nil {
+		return CreateDeployTaskResult{}, err
 	}
+	if request.SourceBaselineID == "" {
+		return CreateDeployTaskResult{}, ErrDeployBaselineRequired
+	}
+	allowedServiceIDs, err := c.resolveServiceSelection(request.SourceBaselineID, request.TargetEnvironmentID, request.ServiceIDs, "MISSING_IN_TARGET")
+	if err != nil {
+		return CreateDeployTaskResult{}, err
+	}
+	request.ServiceIDs = allowedServiceIDs
 
 	if c.integrations.Kubernetes != nil {
 		if _, err := c.integrations.Kubernetes.ListWorkloads(ctx, request.TargetEnvironmentID); err != nil {
@@ -253,6 +268,16 @@ func (c *ReleaseCreator) validateAgent(agentID string, environmentID string) err
 		return ErrAgentOffline
 	}
 	return nil
+}
+
+func (c *ReleaseCreator) validateEnvironmentPermission(environmentID string, action string) error {
+	if c.permissions == nil {
+		return nil
+	}
+	if c.permissions.HasEnvironmentAction(environmentID, action) {
+		return nil
+	}
+	return ErrEnvironmentPermission
 }
 
 func (c *ReleaseCreator) resolveServiceSelection(sourceBaselineID string, targetEnvironmentID string, requestedServiceIDs []string, expectedStatus string) ([]string, error) {
