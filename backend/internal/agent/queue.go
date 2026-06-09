@@ -19,10 +19,13 @@ type Queue struct {
 }
 
 type Task struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	Action    string    `json:"action"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID            string            `json:"id"`
+	Type          string            `json:"type"`
+	Action        string            `json:"action"`
+	AgentID       string            `json:"agentId,omitempty"`
+	EnvironmentID string            `json:"environmentId,omitempty"`
+	Payload       map[string]string `json:"payload,omitempty"`
+	CreatedAt     time.Time         `json:"createdAt"`
 }
 
 func NewQueue(addr string) (*Queue, error) {

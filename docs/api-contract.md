@@ -195,7 +195,7 @@ Response data：
 }
 ```
 
-平台不得依赖访问项目环境 Agent endpoint，也不得向 Agent 主动推送任务。项目环境默认平台不可连通，Agent 只支持出站访问平台 API。平台侧历史 mock 阶段曾使用 `/api/agents/{id}/tasks/pull` 模拟协议队列；V1 可将该能力收口为 `/api/agent-tasks/lease` 或等价的任务领取/租约接口。
+平台不得依赖访问项目环境 Agent endpoint，也不得向 Agent 主动推送任务。项目环境默认平台不可连通，Agent 只支持出站访问平台 API。V1 当前使用 `/api/agent-tasks/lease` 作为任务领取/租约接口；平台侧历史 mock 阶段的 `/api/agents/{id}/tasks/pull` 仅保留兼容，不作为项目环境发版/部署主链路。
 
 ## 基线
 

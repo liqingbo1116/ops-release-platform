@@ -185,6 +185,83 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 	}
 }
 
+func TestAgentTaskLeaseFlow(t *testing.T) {
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected release create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var createPayload struct {
+		Data struct {
+			AgentTaskID string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createPayload.Data.AgentTaskID == "" {
+		t.Fatal("expected agent task id")
+	}
+
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"version":"v1-mock","capabilities":["mock-executor","image-sync","kubectl","http-check"]}`))
+	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRecorder := httptest.NewRecorder()
+	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
+	if heartbeatRecorder.Code != http.StatusOK {
+		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	}
+
+	leaseRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"env-project-x-prod","maxTasks":1,"leaseSeconds":300}`))
+	leaseRequest.Header.Set("Content-Type", "application/json")
+	leaseRequest.Header.Set("X-Forwarded-Proto", "https")
+	leaseRequest.Header.Set("X-Forwarded-Host", "platform.example.com")
+	leaseRecorder := httptest.NewRecorder()
+	router.ServeHTTP(leaseRecorder, leaseRequest)
+	if leaseRecorder.Code != http.StatusOK {
+		t.Fatalf("expected lease status 200, got %d: %s", leaseRecorder.Code, leaseRecorder.Body.String())
+	}
+	var leasePayload struct {
+		Data struct {
+			Leased  bool   `json:"leased"`
+			LeaseID string `json:"leaseId"`
+			Task    struct {
+				ID            string `json:"id"`
+				Status        string `json:"status"`
+				AgentID       string `json:"agentId"`
+				EnvironmentID string `json:"environmentId"`
+				LeaseID       string `json:"leaseId"`
+				Callback      struct {
+					StepURL   string `json:"stepUrl"`
+					LogURL    string `json:"logUrl"`
+					ResultURL string `json:"resultUrl"`
+				} `json:"callback"`
+			} `json:"task"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(leaseRecorder.Body.Bytes(), &leasePayload); err != nil {
+		t.Fatalf("decode lease response: %v", err)
+	}
+	if !leasePayload.Data.Leased || leasePayload.Data.Task.ID != createPayload.Data.AgentTaskID {
+		t.Fatalf("unexpected lease payload: %+v", leasePayload.Data)
+	}
+	if leasePayload.Data.LeaseID == "" || leasePayload.Data.Task.LeaseID != leasePayload.Data.LeaseID || leasePayload.Data.Task.Status != "RUNNING" {
+		t.Fatalf("expected running leased task, got %+v", leasePayload.Data)
+	}
+	if leasePayload.Data.Task.AgentID != "agent-project-x" || leasePayload.Data.Task.EnvironmentID != "env-project-x-prod" {
+		t.Fatalf("unexpected task binding: %+v", leasePayload.Data.Task)
+	}
+	if leasePayload.Data.Task.Callback.StepURL == "" || leasePayload.Data.Task.Callback.LogURL == "" || leasePayload.Data.Task.Callback.ResultURL == "" {
+		t.Fatalf("expected callback urls, got %+v", leasePayload.Data.Task.Callback)
+	}
+	if !strings.HasPrefix(leasePayload.Data.Task.Callback.ResultURL, "https://platform.example.com/api/agent-tasks/") {
+		t.Fatalf("unexpected callback base url: %+v", leasePayload.Data.Task.Callback)
+	}
+}
+
 func TestReleaseFailureActionsUpdateAgentTaskStatus(t *testing.T) {
 	router := newTestRouter()
 

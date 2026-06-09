@@ -12,16 +12,40 @@ type ProtocolStore struct {
 }
 
 type ProtocolTask struct {
-	ID        string            `json:"id"`
-	Type      string            `json:"type"`
-	Action    string            `json:"action"`
-	Status    string            `json:"status"`
-	Step      string            `json:"step"`
-	AgentID   string            `json:"agentId,omitempty"`
-	Payload   map[string]string `json:"payload,omitempty"`
-	CreatedAt time.Time         `json:"createdAt"`
-	UpdatedAt time.Time         `json:"updatedAt"`
-	Logs      []string          `json:"-"`
+	ID            string            `json:"id"`
+	Type          string            `json:"type"`
+	Action        string            `json:"action"`
+	Status        string            `json:"status"`
+	Step          string            `json:"step"`
+	AgentID       string            `json:"agentId,omitempty"`
+	EnvironmentID string            `json:"environmentId,omitempty"`
+	LeaseID       string            `json:"leaseId,omitempty"`
+	LeaseUntil    time.Time         `json:"leaseUntil,omitempty"`
+	Payload       map[string]string `json:"payload,omitempty"`
+	Callback      Callback          `json:"callback,omitempty"`
+	CreatedAt     time.Time         `json:"createdAt"`
+	UpdatedAt     time.Time         `json:"updatedAt"`
+	Logs          []string          `json:"-"`
+}
+
+type Callback struct {
+	StepURL   string `json:"stepUrl,omitempty"`
+	LogURL    string `json:"logUrl,omitempty"`
+	ResultURL string `json:"resultUrl,omitempty"`
+}
+
+type LeaseRequest struct {
+	AgentID       string
+	EnvironmentID string
+	MaxTasks      int
+	LeaseSeconds  int
+	CallbackBase  string
+}
+
+type LeaseResult struct {
+	Leased  bool          `json:"leased"`
+	LeaseID string        `json:"leaseId,omitempty"`
+	Task    *ProtocolTask `json:"task"`
 }
 
 func NewProtocolStore() *ProtocolStore {
@@ -34,13 +58,16 @@ func (s *ProtocolStore) Enqueue(task Task) ProtocolTask {
 
 	now := time.Now()
 	protocolTask := &ProtocolTask{
-		ID:        task.ID,
-		Type:      task.Type,
-		Action:    task.Action,
-		Status:    "PENDING",
-		Step:      "queued",
-		CreatedAt: task.CreatedAt,
-		UpdatedAt: now,
+		ID:            task.ID,
+		Type:          task.Type,
+		Action:        task.Action,
+		Status:        "PENDING",
+		Step:          "queued",
+		AgentID:       task.AgentID,
+		EnvironmentID: task.EnvironmentID,
+		Payload:       task.Payload,
+		CreatedAt:     task.CreatedAt,
+		UpdatedAt:     now,
 	}
 	if protocolTask.CreatedAt.IsZero() {
 		protocolTask.CreatedAt = now
@@ -50,12 +77,29 @@ func (s *ProtocolStore) Enqueue(task Task) ProtocolTask {
 }
 
 func (s *ProtocolStore) Pull(agentID string) (ProtocolTask, bool) {
+	result := s.Lease(LeaseRequest{AgentID: agentID, LeaseSeconds: 300})
+	if !result.Leased || result.Task == nil {
+		return ProtocolTask{}, false
+	}
+	return *result.Task, true
+}
+
+func (s *ProtocolStore) Lease(request LeaseRequest) LeaseResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if request.LeaseSeconds <= 0 {
+		request.LeaseSeconds = 300
+	}
 	pending := make([]*ProtocolTask, 0)
 	for _, task := range s.tasks {
 		if task.Status == "PENDING" {
+			if task.AgentID != "" && task.AgentID != request.AgentID {
+				continue
+			}
+			if task.EnvironmentID != "" && request.EnvironmentID != "" && task.EnvironmentID != request.EnvironmentID {
+				continue
+			}
 			pending = append(pending, task)
 		}
 	}
@@ -63,15 +107,23 @@ func (s *ProtocolStore) Pull(agentID string) (ProtocolTask, bool) {
 		return pending[i].CreatedAt.Before(pending[j].CreatedAt)
 	})
 	if len(pending) == 0 {
-		return ProtocolTask{}, false
+		return LeaseResult{Leased: false, Task: nil}
 	}
 
 	task := pending[0]
-	task.AgentID = agentID
+	task.AgentID = request.AgentID
 	task.Status = "RUNNING"
-	task.Step = "pulled"
+	task.Step = "leased"
+	task.LeaseID = "lease-" + task.ID
+	task.LeaseUntil = time.Now().Add(time.Duration(request.LeaseSeconds) * time.Second)
+	task.Callback = Callback{
+		StepURL:   request.CallbackBase + "/api/agent-tasks/" + task.ID + "/steps",
+		LogURL:    request.CallbackBase + "/api/agent-tasks/" + task.ID + "/logs",
+		ResultURL: request.CallbackBase + "/api/agent-tasks/" + task.ID + "/result",
+	}
 	task.UpdatedAt = time.Now()
-	return *task, true
+	copyTask := *task
+	return LeaseResult{Leased: true, LeaseID: task.LeaseID, Task: &copyTask}
 }
 
 func (s *ProtocolStore) ReportStep(taskID string, step string, status string) (ProtocolTask, bool) {
@@ -127,13 +179,15 @@ func (s *ProtocolStore) Status(taskID string) (map[string]string, []string, bool
 		return nil, nil, false
 	}
 	status := map[string]string{
-		"taskId":    task.ID,
-		"type":      task.Type,
-		"action":    task.Action,
-		"status":    task.Status,
-		"step":      task.Step,
-		"agentId":   task.AgentID,
-		"updatedAt": task.UpdatedAt.Format(time.RFC3339),
+		"taskId":        task.ID,
+		"type":          task.Type,
+		"action":        task.Action,
+		"status":        task.Status,
+		"step":          task.Step,
+		"agentId":       task.AgentID,
+		"environmentId": task.EnvironmentID,
+		"leaseId":       task.LeaseID,
+		"updatedAt":     task.UpdatedAt.Format(time.RFC3339),
 	}
 	logs := append([]string(nil), task.Logs...)
 	return status, logs, true

@@ -50,4 +50,4 @@ Agent -> 平台：上报日志片段
 Agent -> 平台：上报最终结果
 ```
 
-开发期可以实现 `mock-agent-worker`，模拟 Agent 执行镜像同步、kubectl、shell 和健康检查。
+开发期既保留平台侧 `mock-agent-worker`，也提供独立远程 Agent 的 mock executor。独立 Agent 在真实外部组件准备好之前只做模拟执行：通过出站请求领取任务，模拟镜像同步、kubectl、shell 和健康检查，再通过平台回调接口上报步骤、日志和最终结果。该模式用于先验证项目环境不可直连条件下的远程发版/部署链路。

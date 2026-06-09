@@ -153,6 +153,47 @@ func (h *Handler) PullAgentTask(c *gin.Context) {
 	})
 }
 
+func (h *Handler) LeaseAgentTask(c *gin.Context) {
+	var request struct {
+		AgentID       string `json:"agentId"`
+		EnvironmentID string `json:"environmentId"`
+		MaxTasks      int    `json:"maxTasks"`
+		LeaseSeconds  int    `json:"leaseSeconds"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid lease request")
+		return
+	}
+	if request.AgentID == "" {
+		BadRequest(c, "agentId is required")
+		return
+	}
+	agentItem, ok := h.repo.GetAgent(request.AgentID)
+	if !ok {
+		NotFound(c, "agent not found")
+		return
+	}
+	if agentItem.Status != "ONLINE" {
+		BadRequest(c, "agent must be ONLINE")
+		return
+	}
+	if request.EnvironmentID != "" && agentItem.EnvironmentID != request.EnvironmentID {
+		BadRequest(c, "agent does not belong to target environment")
+		return
+	}
+	result := h.protocol.Lease(agent.LeaseRequest{
+		AgentID:       agentItem.ID,
+		EnvironmentID: request.EnvironmentID,
+		MaxTasks:      request.MaxTasks,
+		LeaseSeconds:  request.LeaseSeconds,
+		CallbackBase:  requestBaseURL(c),
+	})
+	if result.Leased && result.Task != nil {
+		h.repo.AssignAgentTask(agentItem.ID, result.Task.ID)
+	}
+	OK(c, result)
+}
+
 func (h *Handler) ReportAgentTaskStep(c *gin.Context) {
 	var request struct {
 		Step   string `json:"step"`
@@ -486,11 +527,16 @@ func (h *Handler) enqueue(ctx interface{ Request() *http.Request }, id string, t
 	})
 }
 
-func (h *Handler) enqueueTask(ctx context.Context, id string, taskType string, action string) {
+func (h *Handler) enqueueTask(ctx context.Context, id string, taskType string, action string, agentID string, environmentID string) {
 	task := agent.Task{
-		ID:        id,
-		Type:      taskType,
-		Action:    action,
+		ID:            id,
+		Type:          taskType,
+		Action:        action,
+		AgentID:       agentID,
+		EnvironmentID: environmentID,
+		Payload: map[string]string{
+			"source": "platform",
+		},
 		CreatedAt: time.Now(),
 	}
 	if h.protocol != nil {
@@ -500,6 +546,18 @@ func (h *Handler) enqueueTask(ctx context.Context, id string, taskType string, a
 		return
 	}
 	_ = h.queue.Enqueue(ctx, task)
+}
+
+func requestBaseURL(c *gin.Context) string {
+	scheme := c.GetHeader("X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "http"
+	}
+	host := c.GetHeader("X-Forwarded-Host")
+	if host == "" {
+		host = c.Request.Host
+	}
+	return scheme + "://" + host
 }
 
 func paginate[T any](items []T, c *gin.Context) domain.PageResult[T] {

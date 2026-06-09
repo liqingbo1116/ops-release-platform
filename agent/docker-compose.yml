@@ -1,0 +1,9 @@
+services:
+  ops-agent:
+    build:
+      context: .
+    env_file:
+      - .env
+    restart: unless-stopped
+    ports:
+      - "${AGENT_HEALTH_PORT:-18080}:18080"

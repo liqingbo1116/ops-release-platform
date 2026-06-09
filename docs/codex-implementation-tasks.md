@@ -138,16 +138,23 @@
   - 运行态快照与基线生成 mock 链路已完成并推送
   - 差异结果到服务发布/新增部署的端到端 mock 验证已完成并推送
   - 失败动作、审计影响范围、环境/Agent 准备状态 mock-first 验证已完成并推送
+- 当前本地未提交阶段：
+  - 已补齐独立 Agent 可运行进程：`agent/cmd/agent`
+  - 已补齐 Agent 配置读取、健康检查、心跳上报、任务租约领取、回调上报客户端
+  - 已补齐远程 Agent mock executor，先模拟 Jenkins、Harbor、K8s 执行步骤
+  - 已补齐 `agent/Dockerfile`、`agent/docker-compose.yml`、`agent/.env.example`
+  - 已补齐平台 `/api/agent-tasks/lease` 主动领取/租约接口
+  - 已补齐发布/部署任务入队时的 `agentId`、`environmentId`、payload 绑定
+  - 已补齐 Agent 租约领取后回调步骤、日志、最终结果的本地回归测试
 - 当前缺口：
-  - 远程 Agent 只有目录骨架，尚无可运行进程
-  - 尚无 Agent Dockerfile
-  - 尚无远程 Agent docker-compose 部署模板
-  - 尚无真实 Agent 主动领取任务链路
-  - 因此真实远程发版/部署测试不能开始
+  - 独立 Agent 包尚未在真实远程 Linux 主机用 `docker compose` 验证
+  - 尚未完成跨主机网络下的心跳、租约领取、mock 日志、最终结果回传验收
+  - 尚未接入真实 Jenkins、Harbor/Registry、Kubernetes
+  - 因此真实远程发版/部署测试仍需等 Agent 远程验证和外部组件准备完成后开始
 - 默认下一步：
-  - 优先实现远程 Agent 独立部署包
-  - 然后实现 Agent 主动领取任务链路
-  - 再用远程 Agent mock executor 做跨主机发版/部署闭环验证
+  - 先在远程 Linux 主机部署 `agent/docker-compose.yml`
+  - 验证 Agent 只通过出站访问平台 API 完成心跳、任务领取、mock 执行、日志和结果回传
+  - 再收口发布/部署详情页对远程 Agent 回调状态的展示
   - Jenkins、Harbor/Registry、Kubernetes 和测试样例准备完成后，再进入真实执行联调
 
 ## 已完成的平台侧 mock-first Agent 协议
@@ -162,7 +169,7 @@
 - 任务状态查询：详情页可读取 Agent 回传状态和日志
 - Agent 管理页：从后端 Agent 列表读取在线状态、心跳和当前任务
 
-当前实现仍是平台侧 mock 协议，并不代表远程 Agent 已可独立部署。真实 Agent 进程、Agent 主动领取任务链路、真实 Jenkins、真实 Harbor、真实 Kubernetes 尚未接入。下一步必须先补齐可远程部署 Agent 和任务领取链路。
+当前实现已具备本地可运行的独立 Agent、Dockerfile、远程 `docker compose` 模板和 Agent 主动领取/租约链路。下一步必须先把该 Agent 部署到远程 Linux 主机验证出站链路；真实 Jenkins、真实 Harbor、真实 Kubernetes 仍未接入。
 
 ## 已完成的运行态快照与基线生成 mock 链路
 

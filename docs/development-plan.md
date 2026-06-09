@@ -109,27 +109,31 @@ V1 最低交付目标：
 - Agent 只支持出站访问平台 API：主动领取/租约获取任务 payload，并主动上报心跳、服务列表、镜像版本、运行态快照、任务状态、日志和最终结果。
 - V1 Agent 部署方式固定为项目环境侧 Linux 主机 + `docker compose`，不要求先把 Agent 自身部署进 Kubernetes。
 
-### 当前缺口
+### 当前状态
 
-- `agent/` 目录目前只有模块骨架，没有可运行的 Agent 进程。
-- 暂无 Agent 专用 `Dockerfile`。
-- 暂无远程 Agent `docker-compose.yml`。
-- 暂无真实 Agent 出站任务领取/租约链路。
-- 因此真实项目环境发版/部署测试尚不能开始。
+- 已有可运行的独立 Agent 进程：`agent/cmd/agent`。
+- 已有 Agent 配置读取、健康检查、心跳上报、任务租约领取客户端、步骤/日志/结果回传客户端。
+- 已有 Agent mock executor，可在不依赖 Jenkins、Harbor、Kubernetes 的情况下模拟执行并回传结果。
+- 已有 Agent 专用 `Dockerfile`、`docker-compose.yml` 和 `.env.example`。
+- 已有平台侧 `/api/agent-tasks/lease` 出站任务租约接口，创建发布/部署任务时会绑定 `agentId` 与 `environmentId`。
+- 本地验证已通过：
+  - `agent`: `go test ./...`
+  - `backend`: `go test ./...`
+- 真实项目环境发版/部署测试仍需先在远程 Linux 主机上部署 Agent，并验证 Agent 到平台 API 的出站连通性。
 
 ### V1 后续执行顺序
 
-1. 远程 Agent 独立部署包
+1. 远程 Agent 独立部署包（本地实现已完成，待远程主机验证）
    - 交付：可运行 Agent 进程、配置读取、健康检查、任务领取客户端、结果回传客户端、`agent/Dockerfile`、远程 Agent `docker-compose.yml`、`.env.example`。
    - 用户视角：环境负责人可以在远程 Linux 主机执行 `docker compose up -d` 启动 Agent，平台可以看到 Agent 在线或健康。
    - 环境准备：Linux 主机、`docker`、`docker compose`、Agent 到平台 API 的出站连通性。
    - 不需要：Jenkins、Harbor/Registry、Kubernetes。
-2. Agent 主动领取/租约任务链路
+2. Agent 主动领取/租约任务链路（本地实现已完成，待远程主机验证）
    - 交付：环境与 Agent 绑定、待执行任务 payload、领取/租约接口、领取确认、租约超时、幂等执行键、状态/日志/结果回传。
    - 用户视角：提交发布/部署后，详情页能看到任务被远程 Agent 领取、执行和回传结果。
    - 环境准备：第 1 步 Agent 可远程运行，Agent 可访问平台 API，可重复提交的 mock 发布/部署任务。
    - 不需要：Jenkins、Harbor/Registry、Kubernetes。
-3. 远程 Agent mock executor
+3. 远程 Agent mock executor（本地实现已完成，待远程主机验证）
    - 交付：Agent 领取任务后模拟 Jenkins 构建、Harbor 同步、K8s 部署/更新、健康检查，并回传步骤、日志、失败原因和最终结果。
    - 用户视角：平台提交任务后，远程进程实际收到并模拟执行，详情页展示远程 Agent 回传内容。
    - 环境准备：Agent 主机和网络连通性。
@@ -207,14 +211,15 @@ V1 最低交付目标：
   - 已补齐环境管理页与 Agent 管理页的 mock-first 用户视角准备状态：环境页从 API/mock fallback 读取状态，显示真实联调前置依赖；Agent 页显示 Linux + `docker compose` 部署假设，并在 Agent 离线时提示对应项目环境远程发布/部署会被阻断
   - 已补齐失败动作与 Agent 任务状态一致性：发布重试、发布回滚、部署步骤重试/跳过/人工确认都会同步更新 mock Agent task status，详情页轮询可看到对应结果
 - 当前明确缺口：
-  - `agent/` 目录目前只有模块骨架，没有可运行的 Agent 进程
-  - 暂无 Agent 专用 `Dockerfile`
-  - 暂无远程 Agent `docker-compose.yml`
-  - 暂无真实 Agent 出站任务领取链路
-  - 因此真实远程环境发版/部署测试尚不能开始
+  - 独立 Agent 本地实现、Dockerfile、docker-compose 模板、出站任务租约接口和 Agent mock executor 已完成
+  - 当前缺口是尚未在真实远程 Linux 主机验证 Agent `docker compose` 部署
+  - 尚未完成跨主机出站网络下的心跳、任务租约领取、mock 执行日志和最终结果回传验收
+  - 尚未接入真实 Jenkins、Harbor/Registry、Kubernetes
+  - 真实远程环境发版/部署测试尚不能开始，必须先完成 Agent 远程部署验证
 - 下一步默认进入：
-  - 优先实现远程 Agent 独立部署包和 Agent 主动领取任务链路
-  - 在 Jenkins、Harbor、Kubernetes 尚未准备好时，先用远程 Agent mock executor 验证跨主机执行、日志回传和结果回传
+  - 在远程 Linux 主机或远程等价环境中部署 `agent/docker-compose.yml`
+  - 验证 Agent 心跳、任务租约领取、mock 执行日志和最终结果都能回传平台
+  - 在 Jenkins、Harbor、Kubernetes 尚未准备好时，继续只用远程 Agent mock executor 验证跨主机执行、日志回传和结果回传
 
 ### V1 用户视角功能主线
 

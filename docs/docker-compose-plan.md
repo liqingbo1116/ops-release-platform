@@ -29,3 +29,23 @@ MOCK_INTEGRATIONS=true
 ```
 
 开发阶段可以先只提交 compose 文件和空服务，等前后端工程生成后再补 Dockerfile。
+
+## 远程 Agent docker-compose
+
+V1 项目环境 Agent 不跟随平台主 `docker-compose.yml` 部署。Agent 独立运行在项目环境侧或可访问项目环境的 Linux 主机上，使用 `agent/docker-compose.yml` 启动。
+
+最小准备条件：
+
+- Linux 主机
+- `docker`
+- `docker compose`
+- Agent 主机可以出站访问平台 API
+- 平台不需要访问 Agent 端口
+
+当前 Agent 部署文件：
+
+- `agent/Dockerfile`
+- `agent/docker-compose.yml`
+- `agent/.env.example`
+
+真实 Jenkins、Harbor/Registry、Kubernetes 准备好之前，Agent 使用 mock executor 验证心跳、任务领取、步骤日志和最终结果回传。

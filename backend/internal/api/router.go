@@ -49,6 +49,7 @@ func NewRouter(queue *agent.Queue, protocol *agent.ProtocolStore, integrations i
 	api.POST("/agents/register-token", handler.CreateAgentRegisterToken)
 	api.POST("/agents/:id/heartbeat", handler.AgentHeartbeat)
 	api.POST("/agents/:id/tasks/pull", handler.PullAgentTask)
+	api.POST("/agent-tasks/lease", handler.LeaseAgentTask)
 	api.POST("/agent-tasks/:id/steps", handler.ReportAgentTaskStep)
 	api.POST("/agent-tasks/:id/logs", handler.AppendAgentTaskLog)
 	api.POST("/agent-tasks/:id/result", handler.ReportAgentTaskResult)

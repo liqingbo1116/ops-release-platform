@@ -33,20 +33,27 @@ Latest pushed milestone:
 
 ## Current Local Work
 
-- No uncommitted V1 implementation work is tracked here.
-- Current gap for V1 remote release/deploy:
-  - the repository has only an empty Agent module skeleton under `agent/`
-  - there is no standalone Agent process yet
-  - there is no Agent `Dockerfile`
-  - there is no remote Agent `docker-compose.yml`
-  - there is no real Agent outbound task lease/pull implementation
-  - without those items, real remote project-environment release/deploy testing cannot start
+- Local uncommitted V1 implementation work exists for environment-preparation-before-real-integration:
+  - standalone Agent process under `agent/cmd/agent`
+  - Agent config, heartbeat, outbound task lease client, callback reporter, health endpoint
+  - remote Agent mock executor
+  - `agent/Dockerfile`, `agent/docker-compose.yml`, and `agent/.env.example`
+  - platform `/api/agent-tasks/lease` task lease endpoint with callback URLs
+  - release/deploy task enqueue binding to `agentId` and `environmentId`
+  - backend regression test for Agent task lease flow
+- Validation:
+  - `go test ./...` passed in `agent`
+  - `go test ./...` passed in `backend`
+- Remaining before real remote project-environment release/deploy testing:
+  - deploy Agent package on a real remote Linux host and verify outbound connectivity to platform API
+  - harden task lease timeout/idempotency/failure display as needed after remote verification
+  - keep Jenkins/Harbor/Kubernetes real integration blocked until those environments and samples are prepared
 
 ## Current Step
 
-- V1 mainline must now continue at step 1:
-  - build an independently deployable remote Agent package
-  - switch task delivery from platform-side mock assumptions to real Agent outbound task lease/pull delivery
+- V1 mainline is currently between step 3 and step 4:
+  - steps 1-3 have local implementation and tests
+  - next step is remote `docker compose` Agent verification against the platform API, then release/deploy detail closure against remote Agent callbacks
 - Completed and pushed mock-first status:
   - release/deploy detail closure
   - Agent protocol mock closure
@@ -60,22 +67,22 @@ Latest pushed milestone:
   - frontend unit tests passed on 2026-06-09: 10 files, 39 tests
   - frontend build passed on 2026-06-09 with existing dependency annotation warnings only
 - Next default step:
-  - implement remote Agent docker-compose deployment package and Agent outbound task lease/pull protocol before real Jenkins/Harbor/K8s integration
+  - run the Agent from `agent/docker-compose.yml` on a remote Linux host or local remote-like host and verify heartbeat, lease, mock execution logs, and final result through platform APIs
 
 ## V1 Implementation Baseline
 
 This is the authoritative order for subsequent development. V1 only targets project-environment iterative release and target-missing service deployment. Do not move optimization, broad refactors, or UI polish ahead of this path unless they block build, tests, or the V1 flow.
 
-1. Standalone remote Agent package.
-2. Agent outbound task lease/pull protocol.
-3. Remote Agent mock executor.
+1. Standalone remote Agent package. Local implementation completed; remote host verification pending.
+2. Agent outbound task lease/pull protocol. Local implementation completed; remote host verification pending.
+3. Remote Agent mock executor. Local implementation completed; remote host verification pending.
 4. Release/deploy detail closure against remote Agent callbacks.
 5. Real release integration through Jenkins and Harbor/Registry.
 6. Real deployment integration through Kubernetes.
 7. Remote project-environment deploy/manage V1 acceptance.
 8. Audit, permission, and persistence completion.
 
-Current step is step 1: standalone remote Agent package.
+Current step is step 4: release/deploy detail closure against remote Agent callbacks, with remote Agent deployment verification as the first action.
 
 ## V1 Mainline Goal
 
@@ -106,7 +113,7 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 
 ## Recommended Development Path
 
-1. Build remote Agent deployment package.
+1. Build remote Agent deployment package. Locally implemented.
    - implement standalone Agent process under `agent/`
    - add Agent config loading and validation
    - add `agent/Dockerfile`
@@ -121,7 +128,7 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
      - `docker`
      - `docker compose`
      - network path from Agent to platform API
-2. Complete Agent outbound task lease/pull protocol.
+2. Complete Agent outbound task lease/pull protocol. Locally implemented.
    - Agent registration and environment binding
    - Agent leases/pulls release/deploy task payload and execution data from the platform API
    - idempotency key for repeated execution
@@ -137,7 +144,7 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
      - `docker compose`
      - outbound connectivity from Agent to platform API
      - repeatable test service
-3. Complete mock executor in remote Agent.
+3. Complete mock executor in remote Agent. Locally implemented.
    - no Jenkins/Harbor/K8s dependency yet
    - Agent leases/pulls release/deploy payloads
    - Agent simulates execution steps and callbacks
@@ -226,24 +233,19 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 
 ## Next Suggested Tasks
 
-1. Implement the standalone Agent deployable package:
-   - `agent/cmd/agent`
-   - config module
-   - health endpoint
-   - task lease/pull client
-   - callback reporter
-   - `agent/Dockerfile`
-   - remote Agent compose template
-2. Implement Agent outbound task lease/pull dispatch:
-   - bind environment to Agent identity
-   - create pending task payload after release/deploy creation
-   - track lease/running status
-   - show lease or execution failure in release/deploy detail
-3. Implement remote mock executor:
-   - simulate Jenkins build/release steps
-   - simulate Harbor sync steps
-   - simulate K8s deploy/update/health-check steps
-   - report logs and final result back to platform
+1. Verify the standalone Agent deployable package:
+   - copy `agent/.env.example` to `.env` on an Agent host and fill non-secret identifiers
+   - run `docker compose up -d` from `agent/`
+   - verify `/healthz`
+   - verify heartbeat reaches `/api/agents/{id}/heartbeat`
+2. Verify Agent outbound task lease/pull dispatch:
+   - create a project-environment release/deploy task
+   - verify `/api/agent-tasks/lease` returns the bound task only to the matching Agent/environment
+   - verify task status changes to leased/running and logs appear through callback APIs
+3. Close release/deploy detail against remote Agent callbacks:
+   - show lease state and callback-driven logs
+   - show lease/execution failure reasons
+   - keep retry/skip/manual-confirm/rollback state consistent with Agent task status
 4. Keep the current scope narrow:
    - existing service release/update
    - target-missing service first deployment

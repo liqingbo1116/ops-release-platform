@@ -27,7 +27,7 @@ var (
 	ErrWorkloadProbe              = errors.New("kubernetes workload probe failed")
 )
 
-type EnqueueFunc func(ctx context.Context, id string, taskType string, action string)
+type EnqueueFunc func(ctx context.Context, id string, taskType string, action string, agentID string, environmentID string)
 
 type AgentReader interface {
 	GetAgent(id string) (domain.Agent, bool)
@@ -133,7 +133,7 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 			if err != nil {
 				return CreateReleaseResult{}, ErrRegistryImageSync
 			}
-			c.enqueueIfNeeded(ctx, id, "release", "harbor-image-sync")
+			c.enqueueIfNeeded(ctx, id, "release", "harbor-image-sync", request.AgentID, request.TargetEnvironmentID)
 			return CreateReleaseResult{
 				ID:            id,
 				Status:        "RUNNING",
@@ -145,7 +145,7 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 				CreatedAt:     c.now().Format(time.RFC3339),
 			}, nil
 		}
-		c.enqueueIfNeeded(ctx, id, "release", "harbor-image-sync")
+		c.enqueueIfNeeded(ctx, id, "release", "harbor-image-sync", request.AgentID, request.TargetEnvironmentID)
 		return CreateReleaseResult{
 			ID:            id,
 			Status:        "PENDING_IMAGE_SYNC",
@@ -169,7 +169,7 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 		if err != nil {
 			return CreateReleaseResult{}, ErrJenkinsTrigger
 		}
-		c.enqueueIfNeeded(ctx, id, "release", "project-agent-sync")
+		c.enqueueIfNeeded(ctx, id, "release", "project-agent-sync", request.AgentID, request.TargetEnvironmentID)
 		return CreateReleaseResult{
 			ID:            id,
 			Status:        "JENKINS_QUEUED",
@@ -183,7 +183,7 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 		}, nil
 	}
 
-	c.enqueueIfNeeded(ctx, id, "release", "create")
+	c.enqueueIfNeeded(ctx, id, "release", "create", request.AgentID, request.TargetEnvironmentID)
 	return CreateReleaseResult{
 		ID:            id,
 		Status:        "PENDING_CONFIRM",
@@ -236,7 +236,7 @@ func (c *ReleaseCreator) CreateDeployTask(ctx context.Context, request CreateDep
 	}
 
 	id := "DEP-20260607-MOCK"
-	c.enqueueIfNeeded(ctx, id, "deploy", "create")
+	c.enqueueIfNeeded(ctx, id, "deploy", "create", request.AgentID, request.TargetEnvironmentID)
 	return CreateDeployTaskResult{
 		ID:            id,
 		Status:        "PENDING",
@@ -246,11 +246,11 @@ func (c *ReleaseCreator) CreateDeployTask(ctx context.Context, request CreateDep
 	}, nil
 }
 
-func (c *ReleaseCreator) enqueueIfNeeded(ctx context.Context, id string, taskType string, action string) {
+func (c *ReleaseCreator) enqueueIfNeeded(ctx context.Context, id string, taskType string, action string, agentID string, environmentID string) {
 	if c.enqueue == nil {
 		return
 	}
-	c.enqueue(ctx, id, taskType, action)
+	c.enqueue(ctx, id, taskType, action, agentID, environmentID)
 }
 
 func (c *ReleaseCreator) validateAgent(agentID string, environmentID string) error {
