@@ -27,45 +27,53 @@ Use this skill to keep project progress explicit and avoid losing the current de
 ## Priority Strategy
 
 - The default priority is V1 feature closure, not optimization work.
-- The V1 delivery bar is: the platform must at least support remote project-environment deployment and management.
+- The V1 delivery bar is: the platform must at least support project-environment deployment and management.
 - If the next task is about real Jenkins, Harbor/Registry, Kubernetes, or Agent integration, call out the required environment prerequisites before implementation continues.
+- Environment access is a hard rule:
+  - local environments are platform-direct by default and must not require Agent
+  - project environments are not assumed reachable from the platform and must use Agent
+  - Agent only communicates outbound to the platform API; the platform must not call Agent endpoints or push tasks to Agent
 - Assume the V1 Agent deployment model unless docs are explicitly changed:
   - Linux host
   - `docker compose`
   - Agent operates remote Kubernetes, but is not itself required to run in Kubernetes
+  - Agent must be independently deployable before V1 remote release/deploy can be accepted
+  - Agent leases/pulls release/deploy task payloads from the platform and reports heartbeat, service list, image versions, status, logs, and final result back to the platform
 - Treat the following path as the mainline unless the user explicitly reprioritizes:
-  - project environment management
-  - Agent registration and status
-  - runtime snapshot collection or mock-equivalent collection flow
-  - baseline generation and lock
-  - baseline-to-target diff
-  - release creation for target-existing services
-  - deploy task creation for target-missing services
-  - remote execution through Agent task flow
-  - release/deploy logs, retry states, and audit visibility
+  - remote Agent deployment package
+  - Agent outbound task lease/pull flow
+  - remote Agent mock executor
+  - release/deploy detail closure against Agent callbacks
+  - real release integration through Jenkins and Harbor/Registry
+  - real deployment integration through Kubernetes
+  - remote project environment deploy/manage V1 acceptance
+  - audit, permission, and persistence completion
 - Performance tuning, bundle optimization, warning cleanup, refactor-only cleanup, and UI polish should be scheduled after the mainline unless they block build, test, or feature delivery.
 - When the user says `继续` or `继续开发`, select the next unfinished item on this mainline before taking optimization work.
 
 ## V1 Ordered Path
 
-1. Release/deploy detail closure.
-2. Agent protocol completion.
-3. Runtime snapshot and baseline generation flow.
-4. Baseline lock and baseline detail persistence/display.
-5. Backend-owned diff classification and action generation.
-6. Release management closure:
-   - single-service release
-   - multi-service release
-   - baseline diff release
-   - remote Agent execution state updates
-7. Deployment management closure for remote project environments:
-   - deploy task creation for missing services
-   - step orchestration
-   - retry / skip / manual confirm support
-   - detail logs and result display
-8. Audit and permission completion for the above flows.
-9. Product/service management and image management features that are required to operate the above flows.
-10. Non-functional optimization work after V1 functional closure.
+1. Remote Agent deployment package for Linux + `docker compose`.
+2. Agent outbound task lease/pull protocol:
+   - Agent registration and environment binding
+   - Agent leases/pulls task payload and execution data from the platform API
+   - Agent reports heartbeat, step status, logs, and final result
+3. Remote Agent mock executor that runs outside the platform process and reports mock steps/logs/results.
+4. Release/deploy detail closure against remote Agent callbacks:
+   - `agentTaskId`
+   - lease state
+   - steps, logs, failure reasons, retry/skip/manual-confirm/rollback visibility
+5. Real release integration:
+   - Jenkins-triggered release
+   - Harbor/Registry image selection/sync
+   - workload tag update through Agent
+6. Real deployment integration:
+   - runtime snapshot collection
+   - target-missing service deployment
+   - workload update and health check
+7. Remote project-environment deploy/manage V1 acceptance.
+8. Audit, permission, and persistence completion for the above flows.
+9. Non-functional optimization work after V1 functional closure.
 
 ## User-View Acceptance Path
 
@@ -73,12 +81,12 @@ When reconciling TODO with implementation, prefer checking whether the user can 
 
 1. log in and enter the platform
 2. view remote environments and Agent status
-3. generate or inspect a baseline from a source environment
-4. compare source baseline with target environment
-5. create a release for target-existing services
-6. create a deploy task for target-missing services
-7. track execution state, logs, failure reasons, and action history in detail pages
-8. observe Agent online status, recent heartbeat, and recent task result
+3. verify the remote Agent can be deployed by `docker compose` and connects outbound to the platform
+4. create a release for target-existing services
+5. create a deploy task for target-missing services
+6. track execution state, logs, failure reasons, and action history in detail pages
+7. verify real Jenkins/Harbor release only after those environments are ready
+8. verify real Kubernetes deployment only after cluster/manifests are ready
 9. verify audit and environment-level permission boundaries after the above flow works
 
 If the user asks “现在到哪一步了” or “下一步做什么”, answer against this user-view path and the ordered V1 path together.

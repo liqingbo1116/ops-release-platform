@@ -36,13 +36,18 @@ type JenkinsAdapter interface {
 
 ## Agent 通信边界
 
+环境分为本地环境与项目环境。本地环境按平台侧可连通处理，可以由平台后端通过 adapter 直接访问本地 Jenkins、Harbor、Kubernetes 或 mock adapter，不需要 Agent。项目环境按平台侧不可连通处理，必须通过 Agent 接入；平台不得依赖访问项目环境 Agent endpoint，也不得向 Agent 主动推送任务。
+
+项目环境由 Agent 主动出站访问平台 API，平台只负责登记待执行任务、保存状态和展示结果。Agent 负责主动领取/租约获取任务，并主动上报心跳、服务列表、镜像版本、步骤状态、日志和最终结果。
+
 MVP 后端提供任务队列接口：
 
 ```text
 Agent -> 平台：心跳
-Agent -> 平台：拉取任务
+Agent -> 平台：领取/租约获取任务
 Agent -> 平台：上报任务步骤状态
 Agent -> 平台：上报日志片段
+Agent -> 平台：上报最终结果
 ```
 
 开发期可以实现 `mock-agent-worker`，模拟 Agent 执行镜像同步、kubectl、shell 和健康检查。

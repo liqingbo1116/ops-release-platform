@@ -54,7 +54,7 @@ Response data：
 
 ### POST /api/environments/{id}/check
 
-触发连接测试。项目环境由 Agent 执行。
+触发连接测试。本地环境由平台 adapter 直连执行，不需要 Agent；项目环境由 Agent 出站领取任务后执行。
 
 Response data：
 
@@ -152,28 +152,50 @@ Request：
 }
 ```
 
-### POST /api/agents/{id}/tasks/pull
+### POST /api/agent-tasks/lease
 
-Agent 主动拉取待执行任务。V1 mock 阶段从内存协议队列读取任务；后续真实 Agent 接入时保持该协议形态。
+Agent 主动向平台领取待执行发布/部署任务。V1 项目环境发版/部署采用 Agent 出站模型：Agent 独立部署在项目环境内或可访问项目环境的 Linux 主机上，平台创建发布/部署任务后只在平台侧登记任务；Agent 通过可访问的平台 API 主动领取任务、上报执行状态并回传结果。本地环境默认平台 adapter 直连，不走该 Agent 前置。
+
+Request：
+
+```json
+{
+  "agentId": "agent-project-x",
+  "environmentId": "env-project-x-prod",
+  "maxTasks": 1,
+  "leaseSeconds": 300
+}
+```
 
 Response data：
 
 ```json
 {
+  "leased": true,
+  "leaseId": "lease-REL-20260607-MOCK-001",
   "task": {
     "id": "REL-20260607-MOCK",
     "type": "release",
     "action": "jenkins_agent_release",
-    "status": "RUNNING",
-    "step": "pulled",
     "agentId": "agent-project-x",
-    "createdAt": "2026-06-09T14:30:00+08:00",
-    "updatedAt": "2026-06-09T14:30:05+08:00"
+    "environmentId": "env-project-x-prod",
+    "services": [
+      {
+        "name": "order-api",
+        "namespace": "prod",
+        "image": "harbor.local/project-x/order-api:20260609-001"
+      }
+    ],
+    "callback": {
+      "stepUrl": "https://platform.local/api/agent-tasks/REL-20260607-MOCK/steps",
+      "logUrl": "https://platform.local/api/agent-tasks/REL-20260607-MOCK/logs",
+      "resultUrl": "https://platform.local/api/agent-tasks/REL-20260607-MOCK/result"
+    }
   }
 }
 ```
 
-无待执行任务时返回 `{"task": null}`。
+平台不得依赖访问项目环境 Agent endpoint，也不得向 Agent 主动推送任务。项目环境默认平台不可连通，Agent 只支持出站访问平台 API。平台侧历史 mock 阶段曾使用 `/api/agents/{id}/tasks/pull` 模拟协议队列；V1 可将该能力收口为 `/api/agent-tasks/lease` 或等价的任务领取/租约接口。
 
 ## 基线
 
@@ -276,7 +298,7 @@ Response item：
 - `JENKINS_JOB`：选择与 Jenkins 视图或特征 job 关联后的 Jenkins Job，执行构建 jar/dist、制作镜像并推送到本地 Harbor。
 - `LOCAL_HARBOR_IMAGE`：扫描本地 Harbor 上该服务的镜像版本，选择镜像 tag 发版；该路径不需要选择或触发 Jenkins Job。
 
-上述两种来源最终都需要通过项目环境中运行的 Agent 同步到项目环境，完成项目 Harbor 镜像同步和 workload tag 更新。本地环境现阶段仍维持 GitOps。
+上述两种来源最终都需要通过项目环境中运行的 Agent 同步到项目环境，完成项目 Harbor 镜像同步和 workload tag 更新。本地环境默认由平台侧直连链路或现有 GitOps 链路处理，不需要 Agent。
 
 Request：
 
@@ -443,7 +465,7 @@ Response data：
 
 ### POST /api/agent-tasks/{id}/steps
 
-Agent 回传当前步骤状态。
+Agent 回调平台，回传当前步骤状态。
 
 Request：
 
@@ -456,7 +478,7 @@ Request：
 
 ### POST /api/agent-tasks/{id}/logs
 
-Agent 追加任务日志。
+Agent 回调平台，追加任务日志。
 
 Request：
 
@@ -468,7 +490,7 @@ Request：
 
 ### POST /api/agent-tasks/{id}/result
 
-Agent 回传最终执行结果。`SUCCESS` 或 `FAILED` 会释放 Agent 当前任务占用。
+Agent 回调平台，回传最终执行结果。`SUCCESS` 或 `FAILED` 会释放 Agent 当前任务占用。
 
 Request：
 
