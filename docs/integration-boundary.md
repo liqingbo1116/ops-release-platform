@@ -51,3 +51,11 @@ Agent -> 平台：上报最终结果
 ```
 
 开发期既保留平台侧 `mock-agent-worker`，也提供独立远程 Agent 的 mock executor。独立 Agent 在真实外部组件准备好之前只做模拟执行：通过出站请求领取任务，模拟镜像同步、kubectl、shell 和健康检查，再通过平台回调接口上报步骤、日志和最终结果。该模式用于先验证项目环境不可直连条件下的远程发版/部署链路。
+
+V1 Agent 协议约束：
+
+- Agent 以 `docker compose` 部署在项目环境侧 Linux 主机，不作为 Kubernetes 内 workload 前置。
+- Agent 当前只支持 `AGENT_MODE=mock`，真实 Jenkins、Harbor、Kubernetes executor 在环境准备后再接入。
+- Agent 当前只支持 `AGENT_MAX_TASKS=1`，平台同一时间只向同一 Agent 下发一个运行中租约任务。
+- 平台会回收过期租约并允许任务重新租约，避免 Agent 进程退出或网络中断后任务永久停留在运行态。
+- 远程 Agent mock 验证阶段只需要 Agent 主机、Docker/Compose 和到平台 API 的出站网络，不需要 Jenkins、Harbor、Kubernetes。

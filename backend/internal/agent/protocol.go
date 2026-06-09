@@ -45,6 +45,7 @@ type LeaseRequest struct {
 type LeaseResult struct {
 	Leased  bool          `json:"leased"`
 	LeaseID string        `json:"leaseId,omitempty"`
+	Message string        `json:"message,omitempty"`
 	Task    *ProtocolTask `json:"task"`
 }
 
@@ -91,13 +92,37 @@ func (s *ProtocolStore) Lease(request LeaseRequest) LeaseResult {
 	if request.LeaseSeconds <= 0 {
 		request.LeaseSeconds = 300
 	}
+	if request.MaxTasks <= 0 {
+		request.MaxTasks = 1
+	}
+	if request.MaxTasks > 1 {
+		request.MaxTasks = 1
+	}
+	now := time.Now()
 	pending := make([]*ProtocolTask, 0)
 	for _, task := range s.tasks {
-		if task.Status == "PENDING" {
-			if task.AgentID != "" && task.AgentID != request.AgentID {
+		if task.AgentID != "" && task.AgentID != request.AgentID {
+			continue
+		}
+		if task.EnvironmentID != "" && request.EnvironmentID != "" && task.EnvironmentID != request.EnvironmentID {
+			continue
+		}
+		if task.Status == "RUNNING" {
+			if task.LeaseUntil.IsZero() || task.LeaseUntil.After(now) {
+				if task.AgentID == request.AgentID {
+					return LeaseResult{Leased: false, Message: "agent already has a running leased task", Task: nil}
+				}
 				continue
 			}
-			if task.EnvironmentID != "" && request.EnvironmentID != "" && task.EnvironmentID != request.EnvironmentID {
+			task.Status = "PENDING"
+			task.Step = "lease-expired"
+			task.LeaseID = ""
+			task.LeaseUntil = time.Time{}
+			task.Logs = append(task.Logs, "previous lease expired; task returned to pending queue")
+			task.UpdatedAt = now
+		}
+		if task.Status == "PENDING" {
+			if task.AgentID != "" && task.AgentID != request.AgentID {
 				continue
 			}
 			pending = append(pending, task)
@@ -115,13 +140,13 @@ func (s *ProtocolStore) Lease(request LeaseRequest) LeaseResult {
 	task.Status = "RUNNING"
 	task.Step = "leased"
 	task.LeaseID = "lease-" + task.ID
-	task.LeaseUntil = time.Now().Add(time.Duration(request.LeaseSeconds) * time.Second)
+	task.LeaseUntil = now.Add(time.Duration(request.LeaseSeconds) * time.Second)
 	task.Callback = Callback{
 		StepURL:   request.CallbackBase + "/api/agent-tasks/" + task.ID + "/steps",
 		LogURL:    request.CallbackBase + "/api/agent-tasks/" + task.ID + "/logs",
 		ResultURL: request.CallbackBase + "/api/agent-tasks/" + task.ID + "/result",
 	}
-	task.UpdatedAt = time.Now()
+	task.UpdatedAt = now
 	copyTask := *task
 	return LeaseResult{Leased: true, LeaseID: task.LeaseID, Task: &copyTask}
 }

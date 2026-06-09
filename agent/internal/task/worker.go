@@ -36,7 +36,7 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) pollOnce(ctx context.Context) {
-	lease, err := w.client.Lease(ctx, leaseSeconds)
+	lease, err := w.client.Lease(ctx, w.cfg.MaxTasks, leaseSeconds)
 	if err != nil {
 		if ctx.Err() == nil {
 			log.Printf("lease task failed: %v", err)

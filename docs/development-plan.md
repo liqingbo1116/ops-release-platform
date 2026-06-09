@@ -116,6 +116,8 @@ V1 最低交付目标：
 - 已有 Agent mock executor，可在不依赖 Jenkins、Harbor、Kubernetes 的情况下模拟执行并回传结果。
 - 已有 Agent 专用 `Dockerfile`、`docker-compose.yml` 和 `.env.example`。
 - 已有平台侧 `/api/agent-tasks/lease` 出站任务租约接口，创建发布/部署任务时会绑定 `agentId` 与 `environmentId`。
+- 已有任务租约超时回收、同一 Agent 单任务租约约束和重复领取防并发策略。
+- 已有 `agent/README.md` 说明远程 Agent docker-compose 部署、配置和 mock 验证流程。
 - 本地验证已通过：
   - `agent`: `go test ./...`
   - `backend`: `go test ./...`
@@ -211,8 +213,8 @@ V1 最低交付目标：
   - 已补齐环境管理页与 Agent 管理页的 mock-first 用户视角准备状态：环境页从 API/mock fallback 读取状态，显示真实联调前置依赖；Agent 页显示 Linux + `docker compose` 部署假设，并在 Agent 离线时提示对应项目环境远程发布/部署会被阻断
   - 已补齐失败动作与 Agent 任务状态一致性：发布重试、发布回滚、部署步骤重试/跳过/人工确认都会同步更新 mock Agent task status，详情页轮询可看到对应结果
 - 当前明确缺口：
-  - 独立 Agent 本地实现、Dockerfile、docker-compose 模板、出站任务租约接口和 Agent mock executor 已完成
-  - 当前缺口是尚未在真实远程 Linux 主机验证 Agent `docker compose` 部署
+  - 独立 Agent 本地实现、Dockerfile、docker-compose 模板、出站任务租约接口、租约超时回收、单任务租约约束和 Agent mock executor 已完成
+  - 当前缺口是尚未在真实远程 Linux 主机验证 Agent `docker compose` 部署与跨主机出站回传
   - 尚未完成跨主机出站网络下的心跳、任务租约领取、mock 执行日志和最终结果回传验收
   - 尚未接入真实 Jenkins、Harbor/Registry、Kubernetes
   - 真实远程环境发版/部署测试尚不能开始，必须先完成 Agent 远程部署验证
@@ -384,7 +386,8 @@ V1 最低交付目标：
 - `GET /api/agent-tasks/{id}/status` 已优先读取 Agent mock 协议状态，未命中时再降级 Redis/mock 静态状态
 - Agent 管理页已使用后端 Agent 列表数据展示在线状态、心跳、当前任务
 - 环境管理页已使用后端环境列表数据展示项目环境网络模式、Agent 状态、环境阻断提示和真实联调前置条件
-- 真实 Agent 进程和 Agent 主动领取任务链路尚未实现
+- 真实 Agent 进程、Agent 主动领取任务链路、租约超时回收和单任务租约策略已本地实现
+- 当前仍需在远程 Linux 主机验证 Agent `docker compose` 部署、心跳、租约领取、mock 执行日志和最终结果回传
 - 真实 Jenkins、Harbor、K8s 联调必须等待远程 Agent 可部署且任务领取链路打通
 
 进入本阶段前需要准备：
@@ -408,7 +411,7 @@ V1 最低交付目标：
 下一步需要做什么：
 
 - mock-first 已打通平台侧任务与 Agent 状态展示的最小闭环
-- 后续真实验证时，需要先完成远程 Agent 可部署包和 Agent 主动领取任务链路
+- 后续真实验证时，需要先在远程 Linux 主机验证远程 Agent 可部署包和 Agent 主动领取任务链路
 - 运行态快照与基线生成 mock 链路已补齐用户可见元数据
 - 在 Jenkins、Harbor、Kubernetes 准备完成前，可先用远程 Agent mock executor 验证跨主机任务领取和结果回传
 

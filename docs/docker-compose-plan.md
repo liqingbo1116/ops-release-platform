@@ -47,5 +47,14 @@ V1 项目环境 Agent 不跟随平台主 `docker-compose.yml` 部署。Agent 独
 - `agent/Dockerfile`
 - `agent/docker-compose.yml`
 - `agent/.env.example`
+- `agent/README.md`
 
 真实 Jenkins、Harbor/Registry、Kubernetes 准备好之前，Agent 使用 mock executor 验证心跳、任务领取、步骤日志和最终结果回传。
+
+V1 约束：
+
+- `AGENT_MODE=mock`
+- `AGENT_MAX_TASKS=1`
+- 同一 Agent 同一时间只执行一个租约任务
+- 租约过期后平台可重新下发任务，避免 Agent 重启或网络中断后任务永久卡住
+- `agent/docker-compose.yml` 包含 `/healthz` healthcheck，可先验证容器健康再验证平台侧心跳

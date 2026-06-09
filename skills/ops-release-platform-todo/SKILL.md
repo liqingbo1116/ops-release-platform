@@ -57,6 +57,7 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - audit, permission, and persistence completion
 - Performance tuning, bundle optimization, warning cleanup, refactor-only cleanup, and UI polish should be scheduled after the mainline unless they block build, test, or feature delivery.
 - When the user says `继续` or `继续开发`, select the next unfinished item on this mainline before taking optimization work.
+- Before Jenkins/Harbor/Kubernetes are ready, continue only with mock-first V1 closure: Agent docker-compose deployability, outbound lease/pull behavior, mock executor callbacks, release/deploy detail visibility, and tests/docs for those behaviors.
 
 ## V1 Ordered Path
 

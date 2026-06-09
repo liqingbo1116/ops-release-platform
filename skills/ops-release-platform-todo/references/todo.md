@@ -29,31 +29,36 @@ Always verify this file against `git status --short --branch`, `git log -1 --one
 
 Latest pushed milestone:
 
-- `3d15562 完成V1 mock-first发布部署闭环`
+- `d84d7f3 feat: add v1 remote agent lease flow`
 
 ## Current Local Work
 
-- Local uncommitted V1 implementation work exists for environment-preparation-before-real-integration:
-  - standalone Agent process under `agent/cmd/agent`
-  - Agent config, heartbeat, outbound task lease client, callback reporter, health endpoint
-  - remote Agent mock executor
-  - `agent/Dockerfile`, `agent/docker-compose.yml`, and `agent/.env.example`
-  - platform `/api/agent-tasks/lease` task lease endpoint with callback URLs
-  - release/deploy task enqueue binding to `agentId` and `environmentId`
-  - backend regression test for Agent task lease flow
-- Validation:
-  - `go test ./...` passed in `agent`
+- Local uncommitted V1 environment-preparation-before-real-integration work:
+  - hardened platform task lease behavior with V1 single-task policy
+  - repeated lease by the same Agent now returns an explicit empty lease while a task is still running
+  - expired leases are returned to the pending queue and can be leased again
+  - Agent config now validates `AGENT_MAX_TASKS=1`
+  - Agent reporter sends configured `maxTasks`
+  - `agent/docker-compose.yml` includes `/healthz` healthcheck
+  - `agent/.env.example` includes `AGENT_MAX_TASKS=1`
+  - `agent/README.md` documents docker-compose deployment and mock verification
+  - docs and this TODO are being updated to reflect the completed pre-environment work
+- Validation for current local work:
   - `go test ./...` passed in `backend`
+  - `go test ./...` passed in `agent`
+  - `git diff --check` passed
+  - `docker compose -f agent/docker-compose.yml config` could not run in the current local environment because `docker` is not installed; run it on the Agent host before remote verification
 - Remaining before real remote project-environment release/deploy testing:
   - deploy Agent package on a real remote Linux host and verify outbound connectivity to platform API
-  - harden task lease timeout/idempotency/failure display as needed after remote verification
+  - verify heartbeat, lease, mock execution logs, final result, duplicate lease behavior, and expired lease retry across host/network boundary
   - keep Jenkins/Harbor/Kubernetes real integration blocked until those environments and samples are prepared
 
 ## Current Step
 
-- V1 mainline is currently between step 3 and step 4:
-  - steps 1-3 have local implementation and tests
-  - next step is remote `docker compose` Agent verification against the platform API, then release/deploy detail closure against remote Agent callbacks
+- V1 mainline is currently at remote Agent verification:
+  - steps 1-4 are locally implemented for mock-first pre-environment development
+  - next step is remote `docker compose` Agent verification against the platform API
+  - real Jenkins/Harbor/Kubernetes integration must wait for environment readiness
 - Completed and pushed mock-first status:
   - release/deploy detail closure
   - Agent protocol mock closure
@@ -67,16 +72,16 @@ Latest pushed milestone:
   - frontend unit tests passed on 2026-06-09: 10 files, 39 tests
   - frontend build passed on 2026-06-09 with existing dependency annotation warnings only
 - Next default step:
-  - run the Agent from `agent/docker-compose.yml` on a remote Linux host or local remote-like host and verify heartbeat, lease, mock execution logs, and final result through platform APIs
+  - run the Agent from `agent/docker-compose.yml` on a remote Linux host or local remote-like host and verify heartbeat, lease, duplicate lease protection, expired lease retry, mock execution logs, and final result through platform APIs
 
 ## V1 Implementation Baseline
 
 This is the authoritative order for subsequent development. V1 only targets project-environment iterative release and target-missing service deployment. Do not move optimization, broad refactors, or UI polish ahead of this path unless they block build, tests, or the V1 flow.
 
 1. Standalone remote Agent package. Local implementation completed; remote host verification pending.
-2. Agent outbound task lease/pull protocol. Local implementation completed; remote host verification pending.
+2. Agent outbound task lease/pull protocol. Local implementation completed with single-task lease and expired lease recovery; remote host verification pending.
 3. Remote Agent mock executor. Local implementation completed; remote host verification pending.
-4. Release/deploy detail closure against remote Agent callbacks.
+4. Release/deploy detail closure against remote Agent callbacks. Local implementation completed for mock callbacks; remote host verification pending.
 5. Real release integration through Jenkins and Harbor/Registry.
 6. Real deployment integration through Kubernetes.
 7. Remote project-environment deploy/manage V1 acceptance.

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -260,6 +261,65 @@ func TestAgentTaskLeaseFlow(t *testing.T) {
 	if !strings.HasPrefix(leasePayload.Data.Task.Callback.ResultURL, "https://platform.example.com/api/agent-tasks/") {
 		t.Fatalf("unexpected callback base url: %+v", leasePayload.Data.Task.Callback)
 	}
+}
+
+func TestAgentTaskLeaseReturnsEmptyWhenAgentAlreadyRunningTask(t *testing.T) {
+	router := newTestRouter()
+	taskID := createReleaseAgentTask(t, router)
+	heartbeatAgent(t, router, "agent-project-x")
+
+	firstLease := leaseAgentTask(t, router, `{"agentId":"agent-project-x","environmentId":"env-project-x-prod","maxTasks":1,"leaseSeconds":300}`)
+	if !firstLease.Data.Leased || firstLease.Data.Task.ID != taskID {
+		t.Fatalf("expected first lease for created task, got %+v", firstLease.Data)
+	}
+
+	secondLease := leaseAgentTask(t, router, `{"agentId":"agent-project-x","environmentId":"env-project-x-prod","maxTasks":1,"leaseSeconds":300}`)
+	if secondLease.Data.Leased || secondLease.Data.Task != nil {
+		t.Fatalf("expected empty lease while task is running, got %+v", secondLease.Data)
+	}
+	if secondLease.Data.Message == "" {
+		t.Fatalf("expected running task message, got %+v", secondLease.Data)
+	}
+}
+
+func TestAgentTaskLeaseRejectsInvalidAgentState(t *testing.T) {
+	router := newTestRouter()
+	_ = createReleaseAgentTask(t, router)
+
+	offlineRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-z","environmentId":"env-project-z-prod","maxTasks":1,"leaseSeconds":300}`))
+	offlineRequest.Header.Set("Content-Type", "application/json")
+	offlineRecorder := httptest.NewRecorder()
+	router.ServeHTTP(offlineRecorder, offlineRequest)
+	if offlineRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected offline agent lease status 400, got %d: %s", offlineRecorder.Code, offlineRecorder.Body.String())
+	}
+
+	mismatchRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"env-project-z-prod","maxTasks":1,"leaseSeconds":300}`))
+	mismatchRequest.Header.Set("Content-Type", "application/json")
+	mismatchRecorder := httptest.NewRecorder()
+	router.ServeHTTP(mismatchRecorder, mismatchRequest)
+	if mismatchRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected mismatch lease status 400, got %d: %s", mismatchRecorder.Code, mismatchRecorder.Body.String())
+	}
+}
+
+func TestAgentTaskExpiredLeaseCanBeLeasedAgain(t *testing.T) {
+	router := newTestRouter()
+	taskID := createReleaseAgentTask(t, router)
+	heartbeatAgent(t, router, "agent-project-x")
+
+	firstLease := leaseAgentTask(t, router, `{"agentId":"agent-project-x","environmentId":"env-project-x-prod","maxTasks":1,"leaseSeconds":1}`)
+	if !firstLease.Data.Leased || firstLease.Data.Task.ID != taskID {
+		t.Fatalf("expected first lease for created task, got %+v", firstLease.Data)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+
+	secondLease := leaseAgentTask(t, router, `{"agentId":"agent-project-x","environmentId":"env-project-x-prod","maxTasks":1,"leaseSeconds":300}`)
+	if !secondLease.Data.Leased || secondLease.Data.Task.ID != taskID {
+		t.Fatalf("expected expired task to be leased again, got %+v", secondLease.Data)
+	}
+	assertAgentStatus(t, router, taskID, "leased", "RUNNING")
 }
 
 func TestReleaseFailureActionsUpdateAgentTaskStatus(t *testing.T) {
@@ -738,6 +798,71 @@ func TestUnknownRoute(t *testing.T) {
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", recorder.Code)
 	}
+}
+
+type leaseResponsePayload struct {
+	Data struct {
+		Leased  bool   `json:"leased"`
+		LeaseID string `json:"leaseId"`
+		Message string `json:"message"`
+		Task    *struct {
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			AgentID       string `json:"agentId"`
+			EnvironmentID string `json:"environmentId"`
+			LeaseID       string `json:"leaseId"`
+		} `json:"task"`
+	} `json:"data"`
+}
+
+func createReleaseAgentTask(t *testing.T, router http.Handler) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected release create status 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			AgentTaskID string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if payload.Data.AgentTaskID == "" {
+		t.Fatal("expected agent task id")
+	}
+	return payload.Data.AgentTaskID
+}
+
+func heartbeatAgent(t *testing.T, router http.Handler, agentID string) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/heartbeat", strings.NewReader(`{"version":"v1-mock","capabilities":["mock-executor","image-sync","kubectl","http-check"]}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected heartbeat status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func leaseAgentTask(t *testing.T, router http.Handler, body string) leaseResponsePayload {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected lease status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload leaseResponsePayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode lease response: %v", err)
+	}
+	return payload
 }
 
 func newTestRouter() http.Handler {

@@ -59,12 +59,12 @@ func (c *Client) Heartbeat(ctx context.Context, version string, capabilities []s
 	}, nil)
 }
 
-func (c *Client) Lease(ctx context.Context, leaseSeconds int) (LeaseResponse, error) {
+func (c *Client) Lease(ctx context.Context, maxTasks int, leaseSeconds int) (LeaseResponse, error) {
 	var response apiResponse[LeaseResponse]
 	err := c.post(ctx, "/api/agent-tasks/lease", map[string]any{
 		"agentId":       c.agentID,
 		"environmentId": c.environmentID,
-		"maxTasks":      1,
+		"maxTasks":      maxTasks,
 		"leaseSeconds":  leaseSeconds,
 	}, &response)
 	if err != nil {

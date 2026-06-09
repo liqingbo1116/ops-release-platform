@@ -18,6 +18,7 @@ type Config struct {
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
 	HTTPTimeout       time.Duration
+	MaxTasks          int
 	Capabilities      []string
 }
 
@@ -32,6 +33,7 @@ func Load() (Config, error) {
 		PollInterval:      secondsEnv("AGENT_POLL_INTERVAL_SECONDS", 5),
 		HeartbeatInterval: secondsEnv("AGENT_HEARTBEAT_INTERVAL_SECONDS", 15),
 		HTTPTimeout:       secondsEnv("AGENT_HTTP_TIMEOUT_SECONDS", 10),
+		MaxTasks:          intEnv("AGENT_MAX_TASKS", 1),
 		Capabilities:      splitCSV(envWithDefault("AGENT_CAPABILITIES", "mock-executor,image-sync,kubectl,http-check")),
 	}
 	if cfg.AgentID == "" {
@@ -46,6 +48,9 @@ func Load() (Config, error) {
 	if cfg.Mode != "mock" {
 		return Config{}, errors.New("only AGENT_MODE=mock is supported before Jenkins/Harbor/K8s integration")
 	}
+	if cfg.MaxTasks != 1 {
+		return Config{}, errors.New("only AGENT_MAX_TASKS=1 is supported in v1")
+	}
 	return cfg, nil
 }
 
@@ -58,15 +63,19 @@ func envWithDefault(key string, fallback string) string {
 }
 
 func secondsEnv(key string, fallback int) time.Duration {
+	return time.Duration(intEnv(key, fallback)) * time.Second
+}
+
+func intEnv(key string, fallback int) int {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
-		return time.Duration(fallback) * time.Second
+		return fallback
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil || value <= 0 {
-		return time.Duration(fallback) * time.Second
+		return fallback
 	}
-	return time.Duration(value) * time.Second
+	return value
 }
 
 func splitCSV(raw string) []string {
