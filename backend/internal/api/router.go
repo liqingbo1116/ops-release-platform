@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"ops-release-platform/backend/internal/agent"
 	"ops-release-platform/backend/internal/integration"
@@ -12,7 +13,7 @@ import (
 	"ops-release-platform/backend/internal/repository"
 )
 
-func NewRouter(queue *agent.Queue, protocol *agent.ProtocolStore, integrations integration.Suite) *gin.Engine {
+func NewRouter(repo repository.Store, queue *agent.Queue, protocol *agent.ProtocolStore, integrations integration.Suite) *gin.Engine {
 	router := gin.Default()
 	router.Use(middleware.CORS())
 	router.NoRoute(NoRoute)
@@ -28,10 +29,6 @@ func NewRouter(queue *agent.Queue, protocol *agent.ProtocolStore, integrations i
 		OK(c, gin.H{"status": "ok"})
 	})
 
-	repo, err := repository.NewMockRepository()
-	if err != nil {
-		log.Fatalf("load mock repository: %v", err)
-	}
 	handler := NewHandler(repo, queue, protocol, integrations)
 
 	api.POST("/auth/login", handler.Login)
@@ -43,6 +40,9 @@ func NewRouter(queue *agent.Queue, protocol *agent.ProtocolStore, integrations i
 	api.GET("/changelog", handler.ListChangelog)
 
 	api.GET("/environments", handler.ListEnvironments)
+	api.GET("/environments/:id", handler.GetEnvironment)
+	api.POST("/environments", handler.CreateEnvironment)
+	api.PUT("/environments/:id", handler.UpdateEnvironment)
 	api.POST("/environments/:id/check", handler.CheckEnvironment)
 
 	api.GET("/agents", handler.ListAgents)
@@ -75,4 +75,15 @@ func NewRouter(queue *agent.Queue, protocol *agent.ProtocolStore, integrations i
 	api.GET("/agent-tasks/:id/status", handler.GetAgentTaskStatus)
 
 	return router
+}
+
+func BuildRepository(db *gorm.DB) repository.Store {
+	mockRepo, err := repository.NewMockRepository()
+	if err != nil {
+		log.Fatalf("load mock repository: %v", err)
+	}
+	if db == nil {
+		return mockRepo
+	}
+	return repository.NewDatabaseStore(db, mockRepo)
 }

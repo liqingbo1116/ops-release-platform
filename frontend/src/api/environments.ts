@@ -1,12 +1,65 @@
 import { environmentMockData } from './mockData/environment'
-import { getData, type PageResult, useMockApi } from './client'
+import { getData, postData, putData, type PageResult, useMockApi } from './client'
 
-export type EnvironmentInfo = (typeof environmentMockData.environments)[number]
+export type EnvironmentInfo = {
+  id: string
+  name: string
+  code: string
+  type: 'LOCAL' | 'PROJECT'
+  networkMode: 'DIRECT' | 'AGENT'
+  status: string
+  agentStatus: string
+  lastCheckAt: string
+}
+
+export type EnvironmentPayload = Pick<EnvironmentInfo, 'id' | 'name' | 'code' | 'type' | 'networkMode'> & {
+  status?: string
+}
+
+export type EnvironmentCheckResult = {
+  environmentId: string
+  status: string
+  checkedAt: string
+  checks: Array<{
+    name: string
+    status: string
+    message: string
+  }>
+}
+
+function normalizeEnvironment(item: {
+  id: string
+  name: string
+  code: string
+  type: string
+  networkMode: string
+  status: string
+  agentStatus: string
+  lastCheckAt: string
+}): EnvironmentInfo {
+  return {
+    ...item,
+    type: item.type === 'LOCAL' ? 'LOCAL' : 'PROJECT',
+    networkMode: item.networkMode === 'DIRECT' ? 'DIRECT' : 'AGENT',
+  }
+}
 
 export async function listEnvironments(): Promise<EnvironmentInfo[]> {
   if (!useMockApi) {
     const result = await getData<PageResult<EnvironmentInfo>>('/api/environments')
-    return result.items
+    return result.items.map(normalizeEnvironment)
   }
-  return Promise.resolve(environmentMockData.environments)
+  return Promise.resolve(environmentMockData.environments.map(normalizeEnvironment))
+}
+
+export async function createEnvironment(payload: EnvironmentPayload): Promise<EnvironmentInfo> {
+  return normalizeEnvironment(await postData<EnvironmentInfo>('/api/environments', payload))
+}
+
+export async function updateEnvironment(id: string, payload: Partial<EnvironmentPayload>): Promise<EnvironmentInfo> {
+  return normalizeEnvironment(await putData<EnvironmentInfo>(`/api/environments/${id}`, payload))
+}
+
+export async function checkEnvironment(id: string): Promise<EnvironmentCheckResult> {
+  return postData<EnvironmentCheckResult>(`/api/environments/${id}/check`)
 }

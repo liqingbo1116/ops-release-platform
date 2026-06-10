@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,14 +18,14 @@ import (
 )
 
 type Handler struct {
-	repo         *repository.MockRepository
+	repo         repository.Store
 	queue        *agent.Queue
 	protocol     *agent.ProtocolStore
 	integrations integration.Suite
 	service      *service.ReleaseCreator
 }
 
-func NewHandler(repo *repository.MockRepository, queue *agent.Queue, protocol *agent.ProtocolStore, integrations integration.Suite) *Handler {
+func NewHandler(repo repository.Store, queue *agent.Queue, protocol *agent.ProtocolStore, integrations integration.Suite) *Handler {
 	if protocol == nil {
 		protocol = agent.NewProtocolStore()
 	}
@@ -68,6 +70,47 @@ func (h *Handler) ListEnvironments(c *gin.Context) {
 	OK(c, paginate(h.repo.ListEnvironments(c.Query("keyword")), c))
 }
 
+func (h *Handler) GetEnvironment(c *gin.Context) {
+	environment, ok := h.repo.GetEnvironment(c.Param("id"))
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	OK(c, environment)
+}
+
+func (h *Handler) CreateEnvironment(c *gin.Context) {
+	var request domain.Environment
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid environment request")
+		return
+	}
+	environment, err := h.repo.CreateEnvironment(request)
+	if err != nil {
+		BadRequest(c, "invalid environment request")
+		return
+	}
+	Created(c, environment)
+}
+
+func (h *Handler) UpdateEnvironment(c *gin.Context) {
+	var request domain.Environment
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid environment request")
+		return
+	}
+	environment, ok, err := h.repo.UpdateEnvironment(c.Param("id"), request)
+	if err != nil {
+		BadRequest(c, "invalid environment request")
+		return
+	}
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	OK(c, environment)
+}
+
 func (h *Handler) CheckEnvironment(c *gin.Context) {
 	environmentID := c.Param("id")
 	checks := make([]integration.IntegrationCheck, 0, 2)
@@ -100,10 +143,25 @@ func (h *Handler) ListAgents(c *gin.Context) {
 }
 
 func (h *Handler) CreateAgentRegisterToken(c *gin.Context) {
-	token := "agt_7f92c1b8_20260607"
+	var request struct {
+		EnvironmentID string `json:"environmentId"`
+		TTLMinutes    int    `json:"ttlMinutes"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid register token request")
+		return
+	}
+	if request.EnvironmentID == "" {
+		BadRequest(c, "environmentId is required")
+		return
+	}
+	if request.TTLMinutes <= 0 {
+		request.TTLMinutes = 10
+	}
+	token := "agt_" + request.EnvironmentID + "_" + strconv.FormatInt(time.Now().Unix(), 10)
 	Created(c, gin.H{
 		"token":     token,
-		"expiresAt": time.Now().Add(10 * time.Minute).Format(time.RFC3339),
+		"expiresAt": time.Now().Add(time.Duration(request.TTLMinutes) * time.Minute).Format(time.RFC3339),
 		"installCommand": "curl -fsSL https://platform.local/agent/install.sh | bash -s -- --token " +
 			token + " --server https://platform.local",
 	})
@@ -111,14 +169,26 @@ func (h *Handler) CreateAgentRegisterToken(c *gin.Context) {
 
 func (h *Handler) AgentHeartbeat(c *gin.Context) {
 	var request struct {
-		Version      string   `json:"version"`
-		Capabilities []string `json:"capabilities"`
+		EnvironmentID string   `json:"environmentId"`
+		Version       string   `json:"version"`
+		Capabilities  []string `json:"capabilities"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid heartbeat request")
 		return
 	}
-	agentItem, ok := h.repo.UpdateAgentHeartbeat(c.Param("id"), request.Version, request.Capabilities)
+	agentID := c.Param("id")
+	request.EnvironmentID = strings.TrimSpace(request.EnvironmentID)
+	if request.EnvironmentID != "" {
+		if _, exists := h.repo.GetEnvironment(request.EnvironmentID); !exists {
+			BadRequest(c, "environment not found")
+			return
+		}
+	}
+	agentItem, ok := h.repo.UpdateAgentHeartbeat(agentID, request.EnvironmentID, request.Version, request.Capabilities)
+	if !ok && request.EnvironmentID != "" {
+		agentItem, ok = h.repo.UpsertAgent(agentID, request.EnvironmentID, request.Version, request.Capabilities, "ONLINE")
+	}
 	if !ok {
 		NotFound(c, "agent not found")
 		return
@@ -168,6 +238,7 @@ func (h *Handler) LeaseAgentTask(c *gin.Context) {
 		BadRequest(c, "agentId is required")
 		return
 	}
+	request.EnvironmentID = strings.TrimSpace(request.EnvironmentID)
 	agentItem, ok := h.repo.GetAgent(request.AgentID)
 	if !ok {
 		NotFound(c, "agent not found")
@@ -178,7 +249,12 @@ func (h *Handler) LeaseAgentTask(c *gin.Context) {
 		return
 	}
 	if request.EnvironmentID != "" && agentItem.EnvironmentID != request.EnvironmentID {
-		BadRequest(c, "agent does not belong to target environment")
+		BadRequest(c, fmt.Sprintf(
+			"agent does not belong to target environment: agentId=%s requestedEnvironmentId=%s boundEnvironmentId=%s",
+			agentItem.ID,
+			request.EnvironmentID,
+			agentItem.EnvironmentID,
+		))
 		return
 	}
 	result := h.protocol.Lease(agent.LeaseRequest{

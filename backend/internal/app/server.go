@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 
+	"gorm.io/gorm"
+
 	"ops-release-platform/backend/internal/agent"
 	"ops-release-platform/backend/internal/api"
 	"ops-release-platform/backend/internal/config"
@@ -21,10 +23,13 @@ func NewServer(cfg config.Config) *Server {
 }
 
 func (s *Server) Run() error {
+	var database *gorm.DB
 	if s.config.DatabaseDSN != "" {
-		if _, err := repository.ConnectAndMigrate(s.config.DatabaseDSN); err != nil {
+		db, err := repository.ConnectAndMigrate(s.config.DatabaseDSN)
+		if err != nil {
 			return fmt.Errorf("database migration failed: %w", err)
 		}
+		database = db
 		log.Println("database migration completed")
 	}
 
@@ -45,6 +50,7 @@ func (s *Server) Run() error {
 		return fmt.Errorf("integration init failed: %w", err)
 	}
 
-	router := api.NewRouter(queue, agent.NewProtocolStore(), integrations)
+	repo := api.BuildRepository(database)
+	router := api.NewRouter(repo, queue, agent.NewProtocolStore(), integrations)
 	return router.Run(fmt.Sprintf(":%s", s.config.Port))
 }

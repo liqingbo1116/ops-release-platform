@@ -2,12 +2,11 @@
   <el-drawer v-model="visible" :title="environment ? `${environment.name} / 连接配置` : '连接配置'" size="420px">
     <div v-if="environment" class="drawer-stack">
       <div class="kv"><span>环境编码</span><strong>{{ environment.code }}</strong></div>
+      <div class="kv"><span>环境类型</span><strong>{{ environment.type === 'PROJECT' ? '项目环境' : '本地环境' }}</strong></div>
       <div class="kv"><span>网络模式</span><strong>{{ environment.networkMode === 'AGENT' ? 'Agent 模式' : '平台直连' }}</strong></div>
-      <div class="kv"><span>K8s 集群</span><span class="mono">https://10.12.8.21:6443</span></div>
-      <div class="kv"><span>Harbor</span><span class="mono">harbor.project.local</span></div>
-      <div class="kv"><span>Nacos</span><span class="mono">nacos.project.local:8848</span></div>
       <div class="kv"><span>Agent</span><StatusTag :status="environment.agentStatus" /></div>
-      <el-button type="primary">执行连接测试</el-button>
+      <div class="kv"><span>最近测试</span><span>{{ environment.lastCheckAt || '-' }}</span></div>
+      <el-button type="primary" :loading="checking" @click="emit('check', environment.id)">执行连接测试</el-button>
     </div>
   </el-drawer>
 </template>
@@ -16,14 +15,21 @@
 import StatusTag from './StatusTag.vue'
 
 type Environment = {
+  id: string
   name: string
   code: string
+  type: string
   networkMode: string
   agentStatus: string
+  lastCheckAt: string
 }
 
 const visible = defineModel<boolean>('visible', { required: true })
+const emit = defineEmits<{
+  check: [id: string]
+}>()
 defineProps<{
   environment: Environment | null
+  checking?: boolean
 }>()
 </script>

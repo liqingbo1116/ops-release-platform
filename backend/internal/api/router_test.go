@@ -301,6 +301,14 @@ func TestAgentTaskLeaseRejectsInvalidAgentState(t *testing.T) {
 	if mismatchRecorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected mismatch lease status 400, got %d: %s", mismatchRecorder.Code, mismatchRecorder.Body.String())
 	}
+
+	trimmedRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"  env-project-x-prod  ","maxTasks":1,"leaseSeconds":300}`))
+	trimmedRequest.Header.Set("Content-Type", "application/json")
+	trimmedRecorder := httptest.NewRecorder()
+	router.ServeHTTP(trimmedRecorder, trimmedRequest)
+	if trimmedRecorder.Code != http.StatusOK {
+		t.Fatalf("expected trimmed environment lease status 200, got %d: %s", trimmedRecorder.Code, trimmedRecorder.Body.String())
+	}
 }
 
 func TestAgentTaskExpiredLeaseCanBeLeasedAgain(t *testing.T) {
@@ -320,6 +328,98 @@ func TestAgentTaskExpiredLeaseCanBeLeasedAgain(t *testing.T) {
 		t.Fatalf("expected expired task to be leased again, got %+v", secondLease.Data)
 	}
 	assertAgentStatus(t, router, taskID, "leased", "RUNNING")
+}
+
+func TestEnvironmentCRUD(t *testing.T) {
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-new-prod","name":"新生产环境","code":"new-prod","type":"PROJECT","networkMode":"AGENT","status":"HEALTHY"}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create environment status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/environments/env-new-prod", nil)
+	getRecorder := httptest.NewRecorder()
+	router.ServeHTTP(getRecorder, getRequest)
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("expected get environment status 200, got %d: %s", getRecorder.Code, getRecorder.Body.String())
+	}
+
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/environments/env-new-prod", strings.NewReader(`{"name":"新生产环境-已更新","status":"MAINTENANCE"}`))
+	updateRequest.Header.Set("Content-Type", "application/json")
+	updateRecorder := httptest.NewRecorder()
+	router.ServeHTTP(updateRecorder, updateRequest)
+	if updateRecorder.Code != http.StatusOK {
+		t.Fatalf("expected update environment status 200, got %d: %s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+}
+
+func TestAgentHeartbeatRejectsUnknownEnvironment(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/agents/agent-new/heartbeat", strings.NewReader(`{"environmentId":"env-missing","version":"v1-mock","capabilities":["mock-executor"]}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected heartbeat status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "environment not found")
+}
+
+func TestAgentHeartbeatRebindsExistingAgentEnvironment(t *testing.T) {
+	router := newTestRouter()
+
+	createEnvironmentRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-project-xjzt-test","name":"项目X联调环境","code":"project-xjzt-test","type":"PROJECT","networkMode":"AGENT","status":"HEALTHY"}`))
+	createEnvironmentRequest.Header.Set("Content-Type", "application/json")
+	createEnvironmentRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createEnvironmentRecorder, createEnvironmentRequest)
+	if createEnvironmentRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create environment status 201, got %d: %s", createEnvironmentRecorder.Code, createEnvironmentRecorder.Body.String())
+	}
+
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"environmentId":"env-project-xjzt-test","version":"v1-mock","capabilities":["mock-executor","http-check"]}`))
+	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRecorder := httptest.NewRecorder()
+	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
+	if heartbeatRecorder.Code != http.StatusOK {
+		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	}
+
+	leaseRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"env-project-xjzt-test","maxTasks":1,"leaseSeconds":300}`))
+	leaseRequest.Header.Set("Content-Type", "application/json")
+	leaseRecorder := httptest.NewRecorder()
+	router.ServeHTTP(leaseRecorder, leaseRequest)
+	if leaseRecorder.Code != http.StatusOK {
+		t.Fatalf("expected rebind lease status 200, got %d: %s", leaseRecorder.Code, leaseRecorder.Body.String())
+	}
+
+	agentRequest := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	agentRecorder := httptest.NewRecorder()
+	router.ServeHTTP(agentRecorder, agentRequest)
+	if agentRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list agents status 200, got %d: %s", agentRecorder.Code, agentRecorder.Body.String())
+	}
+
+	var payload struct {
+		Data struct {
+			Items []domain.Agent `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(agentRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode agent list response: %v", err)
+	}
+	for _, item := range payload.Data.Items {
+		if item.ID == "agent-project-x" {
+			if item.EnvironmentID != "env-project-xjzt-test" {
+				t.Fatalf("expected rebound environment id, got %+v", item)
+			}
+			return
+		}
+	}
+	t.Fatal("expected rebound agent in list")
 }
 
 func TestReleaseFailureActionsUpdateAgentTaskStatus(t *testing.T) {
@@ -866,7 +966,11 @@ func leaseAgentTask(t *testing.T, router http.Handler, body string) leaseRespons
 }
 
 func newTestRouter() http.Handler {
-	return NewRouter(nil, agent.NewProtocolStore(), integration.NewMockSuite())
+	repo, err := repository.NewMockRepository()
+	if err != nil {
+		panic(err)
+	}
+	return NewRouter(repo, nil, agent.NewProtocolStore(), integration.NewMockSuite())
 }
 
 func newPermissionTestRouter(t *testing.T, user domain.CurrentUser) http.Handler {

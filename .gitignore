@@ -13,4 +13,5 @@ redis_data/
 Thumbs.db
 
 agent/bin/
+backend/server
 .secrets/

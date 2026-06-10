@@ -54,8 +54,9 @@ func NewClient(baseURL string, agentID string, environmentID string, token strin
 
 func (c *Client) Heartbeat(ctx context.Context, version string, capabilities []string) error {
 	return c.post(ctx, fmt.Sprintf("/api/agents/%s/heartbeat", c.agentID), map[string]any{
-		"version":      version,
-		"capabilities": capabilities,
+		"environmentId": c.environmentID,
+		"version":       version,
+		"capabilities":  capabilities,
 	}, nil)
 }
 

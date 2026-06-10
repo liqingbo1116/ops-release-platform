@@ -72,6 +72,56 @@ func (r *MockRepository) ListEnvironments(query string) []domain.Environment {
 	})
 }
 
+func (r *MockRepository) GetEnvironment(id string) (domain.Environment, bool) {
+	return r.getEnvironment(id)
+}
+
+func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Environment, error) {
+	item := domain.Environment{
+		ID:          strings.TrimSpace(input.ID),
+		Name:        strings.TrimSpace(input.Name),
+		Code:        strings.TrimSpace(input.Code),
+		Type:        strings.TrimSpace(input.Type),
+		NetworkMode: strings.TrimSpace(input.NetworkMode),
+		Status:      firstNonEmpty(strings.TrimSpace(input.Status), "HEALTHY"),
+		AgentStatus: "UNBOUND",
+		LastCheckAt: "",
+	}
+	if item.ID == "" || item.Name == "" || item.Code == "" || item.Type == "" || item.NetworkMode == "" {
+		return domain.Environment{}, fmt.Errorf("missing required fields")
+	}
+	if _, exists := r.getEnvironment(item.ID); exists {
+		return domain.Environment{}, fmt.Errorf("environment already exists")
+	}
+	r.environments = append(r.environments, item)
+	return item, nil
+}
+
+func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) (domain.Environment, bool, error) {
+	for index := range r.environments {
+		if r.environments[index].ID != id {
+			continue
+		}
+		if value := strings.TrimSpace(input.Name); value != "" {
+			r.environments[index].Name = value
+		}
+		if value := strings.TrimSpace(input.Code); value != "" {
+			r.environments[index].Code = value
+		}
+		if value := strings.TrimSpace(input.Type); value != "" {
+			r.environments[index].Type = value
+		}
+		if value := strings.TrimSpace(input.NetworkMode); value != "" {
+			r.environments[index].NetworkMode = value
+		}
+		if value := strings.TrimSpace(input.Status); value != "" {
+			r.environments[index].Status = value
+		}
+		return r.environments[index], true, nil
+	}
+	return domain.Environment{}, false, nil
+}
+
 func (r *MockRepository) ListAgents(query string) []domain.Agent {
 	return filter(r.agents, query, func(item domain.Agent) string {
 		return item.ID + " " + item.Name + " " + item.EnvironmentName + " " + strings.Join(item.Capabilities, " ") + " " + item.Status
@@ -87,13 +137,51 @@ func (r *MockRepository) GetAgent(id string) (domain.Agent, bool) {
 	return domain.Agent{}, false
 }
 
-func (r *MockRepository) UpdateAgentHeartbeat(id string, version string, capabilities []string) (domain.Agent, bool) {
+func (r *MockRepository) UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool) {
+	for index := range r.agents {
+		if r.agents[index].ID != id {
+			continue
+		}
+		r.agents[index].EnvironmentID = environmentID
+		r.agents[index].EnvironmentName = r.resolveEnvironmentName(environmentID)
+		if version != "" {
+			r.agents[index].Version = version
+		}
+		if len(capabilities) > 0 {
+			r.agents[index].Capabilities = capabilities
+		}
+		if status != "" {
+			r.agents[index].Status = status
+		}
+		now := time.Now().Format(time.RFC3339)
+		r.agents[index].LastHeartbeatAt = now
+		return r.agents[index], true
+	}
+	agent := domain.Agent{
+		ID:              id,
+		Name:            id,
+		EnvironmentID:   environmentID,
+		EnvironmentName: r.resolveEnvironmentName(environmentID),
+		Version:         firstNonEmpty(version, "dev"),
+		Status:          firstNonEmpty(status, "ONLINE"),
+		Capabilities:    append([]string(nil), capabilities...),
+		LastHeartbeatAt: time.Now().Format(time.RFC3339),
+	}
+	r.agents = append(r.agents, agent)
+	return agent, true
+}
+
+func (r *MockRepository) UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string) (domain.Agent, bool) {
 	for index := range r.agents {
 		if r.agents[index].ID != id {
 			continue
 		}
 		r.agents[index].Status = "ONLINE"
 		r.agents[index].LastHeartbeatAt = time.Now().Format(time.RFC3339)
+		if environmentID != "" {
+			r.agents[index].EnvironmentID = environmentID
+			r.agents[index].EnvironmentName = r.resolveEnvironmentName(environmentID)
+		}
 		if version != "" {
 			r.agents[index].Version = version
 		}
@@ -392,6 +480,13 @@ func (r *MockRepository) resolveBaselineEnvironment(baseline domain.Baseline) (d
 	return domain.Environment{}, false
 }
 
+func (r *MockRepository) resolveEnvironmentName(id string) string {
+	if environment, ok := r.getEnvironment(id); ok {
+		return environment.Name
+	}
+	return id
+}
+
 func buildRuntimeSnapshotItems(seed string) []domain.BaselineItem {
 	prefix := sanitizeSeed(seed)
 	return []domain.BaselineItem{
@@ -520,6 +615,15 @@ func sanitizeSeed(seed string) string {
 		return "runtime"
 	}
 	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func max(a, b int) int {

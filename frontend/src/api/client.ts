@@ -74,6 +74,15 @@ export async function postData<T>(url: string, body?: unknown): Promise<T> {
   }
 }
 
+export async function putData<T>(url: string, body?: unknown): Promise<T> {
+  try {
+    const response = await apiClient.put<ApiResponse<T>>(url, body ?? {})
+    return response.data.data
+  } catch (error) {
+    throw normalizeError(error)
+  }
+}
+
 export async function getDataWithParams<T>(url: string, params?: Record<string, unknown>): Promise<T> {
   try {
     const response = await apiClient.get<ApiResponse<T>>(url, { params })

@@ -1,0 +1,30 @@
+package repository
+
+import "ops-release-platform/backend/internal/domain"
+
+type Store interface {
+	ListEnvironments(query string) []domain.Environment
+	GetEnvironment(id string) (domain.Environment, bool)
+	CreateEnvironment(input domain.Environment) (domain.Environment, error)
+	UpdateEnvironment(id string, input domain.Environment) (domain.Environment, bool, error)
+	ListAgents(query string) []domain.Agent
+	GetAgent(id string) (domain.Agent, bool)
+	UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool)
+	UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string) (domain.Agent, bool)
+	AssignAgentTask(id string, taskID string) (domain.Agent, bool)
+	GetCurrentUser() domain.CurrentUser
+	ListUsers(query string) []domain.User
+	ListRoles(query string) []domain.Role
+	ListPermissions(query string) []domain.EnvironmentPermission
+	ListChangelog(query string) []domain.ChangelogEntry
+	CreateBaseline(sourceEnvironmentID string, name string, purpose string) (domain.BaselineDetail, error)
+	ListBaselines(query string) []domain.Baseline
+	GetBaselineDetail(id string) (domain.BaselineDetail, bool)
+	LockBaseline(id string) (domain.BaselineDetail, bool)
+	GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool)
+	ListReleases(query string) []domain.ReleaseOrder
+	GetReleaseDetail(id string) (domain.ReleaseDetail, bool)
+	ListDeployTasks(query string) []domain.DeployTask
+	GetDeployDetail(id string) (domain.DeployDetail, bool)
+	HasEnvironmentAction(environmentID string, action string) bool
+}

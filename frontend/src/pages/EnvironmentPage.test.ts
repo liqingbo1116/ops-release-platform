@@ -1,19 +1,40 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { listEnvironments } = vi.hoisted(() => ({
+const { listEnvironments, createEnvironment, updateEnvironment, checkEnvironment } = vi.hoisted(() => ({
   listEnvironments: vi.fn(),
+  createEnvironment: vi.fn(),
+  updateEnvironment: vi.fn(),
+  checkEnvironment: vi.fn(),
 }))
 
 vi.mock('@/api/environments', () => ({
   listEnvironments,
+  createEnvironment,
+  updateEnvironment,
+  checkEnvironment,
 }))
+
+vi.mock('element-plus', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('element-plus')>()
+  return {
+    ...actual,
+    ElMessage: {
+      success: vi.fn(),
+      warning: vi.fn(),
+      error: vi.fn(),
+    },
+  }
+})
 
 import EnvironmentPage from './EnvironmentPage.vue'
 
 describe('EnvironmentPage', () => {
   beforeEach(() => {
     listEnvironments.mockReset()
+    createEnvironment.mockReset()
+    updateEnvironment.mockReset()
+    checkEnvironment.mockReset()
     listEnvironments.mockResolvedValue([
       {
         id: 'env-local-prod',
@@ -68,7 +89,7 @@ describe('EnvironmentPage', () => {
     expect(wrapper.text()).toContain('项目环境')
     expect(wrapper.text()).toContain('Agent 模式')
     expect(wrapper.text()).toContain('ONLINE')
-    expect(wrapper.text()).toContain('真实联调前需要准备 Agent Linux 主机')
+    expect(wrapper.text()).toContain('先维护真实环境，再校验 agent 绑定')
     expect(wrapper.text()).toContain('1 个项目环境 Agent 未就绪')
   })
 
