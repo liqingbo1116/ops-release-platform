@@ -1,8 +1,11 @@
 package config
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +25,11 @@ type Config struct {
 	Capabilities      []string
 }
 
-func Load() (Config, error) {
+func Load(configFile string) (Config, error) {
+	if err := loadEnvFile(configFile); err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		AgentID:           strings.TrimSpace(os.Getenv("AGENT_ID")),
 		EnvironmentID:     strings.TrimSpace(os.Getenv("AGENT_ENVIRONMENT_ID")),
@@ -52,6 +59,54 @@ func Load() (Config, error) {
 		return Config{}, errors.New("only AGENT_MAX_TASKS=1 is supported in v1")
 	}
 	return cfg, nil
+}
+
+func loadEnvFile(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+
+	file, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return fmt.Errorf("open config file %s: %w", path, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			return fmt.Errorf("parse config file %s line %d: missing '='", path, lineNo)
+		}
+
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return fmt.Errorf("parse config file %s line %d: empty key", path, lineNo)
+		}
+
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("set env %s from %s: %w", key, path, err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read config file %s: %w", path, err)
+	}
+
+	return nil
 }
 
 func envWithDefault(key string, fallback string) string {

@@ -42,7 +42,8 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - Agent only communicates outbound to the platform API; the platform must not call Agent endpoints or push tasks to Agent
 - Assume the V1 Agent deployment model unless docs are explicitly changed:
   - Linux host
-  - `docker compose`
+  - direct binary startup during development verification
+  - `docker compose` for formal deployment
   - Agent operates remote Kubernetes, but is not itself required to run in Kubernetes
   - Agent must be independently deployable before V1 remote release/deploy can be accepted
   - Agent leases/pulls release/deploy task payloads from the platform and reports heartbeat, service list, image versions, status, logs, and final result back to the platform
@@ -57,11 +58,11 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - audit, permission, and persistence completion
 - Performance tuning, bundle optimization, warning cleanup, refactor-only cleanup, and UI polish should be scheduled after the mainline unless they block build, test, or feature delivery.
 - When the user says `继续` or `继续开发`, select the next unfinished item on this mainline before taking optimization work.
-- Before Jenkins/Harbor/Kubernetes are ready, continue only with mock-first V1 closure: Agent docker-compose deployability, outbound lease/pull behavior, mock executor callbacks, release/deploy detail visibility, and tests/docs for those behaviors.
+- Before Jenkins/Harbor/Kubernetes are ready, continue only with mock-first V1 closure: Agent development-time direct startup, formal docker-compose deployability, outbound lease/pull behavior, mock executor callbacks, release/deploy detail visibility, and tests/docs for those behaviors.
 
 ## V1 Ordered Path
 
-1. Remote Agent deployment package for Linux + `docker compose`.
+1. Remote Agent deployment package for Linux, with direct binary startup for development and `docker compose` for formal deployment.
 2. Agent outbound task lease/pull protocol:
    - Agent registration and environment binding
    - Agent leases/pulls task payload and execution data from the platform API
@@ -89,7 +90,7 @@ When reconciling TODO with implementation, prefer checking whether the user can 
 
 1. log in and enter the platform
 2. view remote environments and Agent status
-3. verify the remote Agent can be deployed by `docker compose` and connects outbound to the platform
+3. verify the remote Agent can start by direct binary in development and can be formally deployed by `docker compose`, both with outbound connectivity to the platform
 4. create a release for target-existing services
 5. create a deploy task for target-missing services
 6. track execution state, logs, failure reasons, and action history in detail pages
@@ -110,7 +111,7 @@ If the user asks “现在到哪一步了” or “下一步做什么”, answer
   - Jenkins
   - Harbor or compatible registry
   - Kubernetes
-  - remote Agent Linux host with `docker compose`
+  - remote Agent Linux host with direct binary startup for development and `docker compose` for formal deployment
 - Do not store credentials, server addresses, SSH details, or connection strings in TODO files.
 - For architectural questions, use `ops-release-platform-architecture`.
 - For commit/push workflow, use `ops-release-platform-dev` and `docs/git-submit-workflow.md`.

@@ -11,3 +11,6 @@ redis_data/
 
 .DS_Store
 Thumbs.db
+
+agent/bin/
+.secrets/

@@ -54,8 +54,9 @@ Agent -> 平台：上报最终结果
 
 V1 Agent 协议约束：
 
-- Agent 以 `docker compose` 部署在项目环境侧 Linux 主机，不作为 Kubernetes 内 workload 前置。
+- 研发阶段 Agent 优先以直接构建出的二进制在 Linux 主机上启动，便于远程调试和验证。
+- 正式部署阶段 Agent 以 `docker compose` 部署在项目环境侧 Linux 主机，不作为 Kubernetes 内 workload 前置。
 - Agent 当前只支持 `AGENT_MODE=mock`，真实 Jenkins、Harbor、Kubernetes executor 在环境准备后再接入。
 - Agent 当前只支持 `AGENT_MAX_TASKS=1`，平台同一时间只向同一 Agent 下发一个运行中租约任务。
 - 平台会回收过期租约并允许任务重新租约，避免 Agent 进程退出或网络中断后任务永久停留在运行态。
-- 远程 Agent mock 验证阶段只需要 Agent 主机、Docker/Compose 和到平台 API 的出站网络，不需要 Jenkins、Harbor、Kubernetes。
+- 远程 Agent mock 验证阶段需要 Agent 主机、到平台 API 的出站网络；正式部署验收再补 `Docker/Compose` 路径验证，不需要 Jenkins、Harbor、Kubernetes。

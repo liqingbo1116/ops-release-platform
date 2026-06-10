@@ -13,15 +13,21 @@ During development:
 
 - Start frontend locally with npm commands.
 - Start backend locally with `go run`.
+- Start the standalone Agent by building the binary with Go and running it directly with `-f <config-file>` when Agent-side development or remote-like verification is needed.
 - Do not start frontend or backend through docker-compose.
-- PostgreSQL and Redis use the remote development services recorded in `.secrets/`.
+- Do not treat `agent/docker-compose.yml` as the default development entrypoint for the Agent during development.
+- PostgreSQL and Redis must use the fixed remote development services recorded in `.secrets/local-dev-env.ps1`.
+- Do not silently fall back to local PostgreSQL, local Redis, docker-compose PostgreSQL/Redis, or empty backend env when `.secrets/local-dev-env.ps1` is expected for development.
+
+For formal remote deployment, the Agent still uses the packaged `docker compose` path on the project-environment Linux host.
 
 ## Workflow
 
 1. Read `references/deployment.md`.
 2. Check `.secrets/local-dev-env.ps1` exists before starting backend.
-3. Use npm/go commands for local frontend/backend runtime.
-4. Use docker-compose only for explicit infrastructure/deployment tasks, not for normal frontend/backend development.
+3. Treat missing `.secrets/local-dev-env.ps1` as a blocker for normal backend development startup and ask the user to restore it instead of inventing replacement connection settings.
+4. Use npm/go commands for local frontend/backend runtime, and use `go build` output for Agent runtime.
+5. Use docker-compose only for explicit infrastructure/deployment tasks during development; keep it as the formal Agent deployment path.
 
 ## Security
 

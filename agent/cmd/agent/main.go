@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -18,7 +19,10 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
+	configFile := flag.String("f", "", "path to agent config file")
+	flag.Parse()
+
+	cfg, err := config.Load(*configFile)
 	if err != nil {
 		log.Fatalf("load agent config: %v", err)
 	}

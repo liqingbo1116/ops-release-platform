@@ -39,9 +39,11 @@ Latest pushed milestone:
   - expired leases are returned to the pending queue and can be leased again
   - Agent config now validates `AGENT_MAX_TASKS=1`
   - Agent reporter sends configured `maxTasks`
+  - Agent binary now supports `-f <config-file>` for direct remote startup during development
   - `agent/docker-compose.yml` includes `/healthz` healthcheck
   - `agent/.env.example` includes `AGENT_MAX_TASKS=1`
-  - `agent/README.md` documents docker-compose deployment and mock verification
+  - `agent/README.md` documents direct binary startup, `-f` config loading, docker-compose deployment, and mock verification
+  - deployment skill/docs now define direct Agent binary startup as the default development-time runtime, while preserving docker-compose as the formal deployment path
   - docs and this TODO are being updated to reflect the completed pre-environment work
 - Validation for current local work:
   - `go test ./...` passed in `backend`
@@ -57,7 +59,7 @@ Latest pushed milestone:
 
 - V1 mainline is currently at remote Agent verification:
   - steps 1-4 are locally implemented for mock-first pre-environment development
-  - next step is remote `docker compose` Agent verification against the platform API
+  - next step is remote Agent binary verification against the platform API during development, before formal docker-compose deployment verification
   - real Jenkins/Harbor/Kubernetes integration must wait for environment readiness
 - Completed and pushed mock-first status:
   - release/deploy detail closure
@@ -95,7 +97,7 @@ V1 must prioritize functional closure over optimization work. The minimum accept
 
 - the platform can manage project environments
 - the platform can create and track project-environment deployment/release tasks
-- Agent can be deployed independently to a project environment by `docker compose`
+- Agent can be started directly by binary during development and deployed by docker-compose in formal project environments
 - remote Agent can lease/pull release/deploy task payloads and required execution data from the platform API
 - Agent-driven execution and status reporting are visible end to end
 
@@ -109,7 +111,8 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
   - Agent only communicates outbound to the platform API; the platform must not call Agent endpoints or push tasks to Agent
 - V1 Agent deployment model:
   - Linux host
-  - `docker compose`
+  - direct binary startup is the preferred development-time path
+  - `docker compose` is the formal packaged deployment path
   - Agent is outside Kubernetes
   - Agent does not need to expose an endpoint reachable by the platform
   - Agent connects outbound to the platform API to lease/pull tasks and report heartbeat, service list, image versions, step status, logs, and final result
@@ -121,12 +124,14 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 1. Build remote Agent deployment package. Locally implemented.
    - implement standalone Agent process under `agent/`
    - add Agent config loading and validation
+   - support direct binary startup with `-f <config-file>`
    - add `agent/Dockerfile`
    - add remote Agent `docker-compose.yml`
    - add `.env.example` without secrets
    - add health endpoint and concise logs
    - user-visible outcomes:
-     - environment owner can deploy Agent on a Linux host with `docker compose up -d`
+     - developers can start Agent on a Linux host directly from the built binary during development
+     - environment owner can deploy Agent on a Linux host with `docker compose` in formal use
      - platform can show the Agent as registered or reachable
    - external readiness:
      - Linux host
@@ -224,7 +229,7 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 
 - Before work moves from mock flow to real integration, the required external environment must be called out explicitly.
 - The default components to request early are:
-  - remote Agent Linux host with `docker compose` for leasing/pulling task payloads and reporting logs/results
+  - remote Agent Linux host for development-time direct binary startup and formal docker-compose deployment, leasing/pulling task payloads, and reporting logs/results
   - Jenkins for build and release job execution
   - Harbor or compatible registry for image query, sync, and push/pull verification
   - Kubernetes for runtime snapshot, workload deploy/update, and health verification
@@ -239,8 +244,10 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 ## Next Suggested Tasks
 
 1. Verify the standalone Agent deployable package:
-   - copy `agent/.env.example` to `.env` on an Agent host and fill non-secret identifiers
-   - run `docker compose up -d` from `agent/`
+   - build `agent/cmd/agent` into a binary
+   - copy `agent/.env.example` to an Agent config file on the host and fill non-secret identifiers
+   - run the Agent with `-f <config-file>` for development-time verification
+   - then verify the formal `docker compose` deployment path
    - verify `/healthz`
    - verify heartbeat reaches `/api/agents/{id}/heartbeat`
 2. Verify Agent outbound task lease/pull dispatch:
@@ -256,8 +263,9 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
    - target-missing service first deployment
    - remote project environment task tracking
 5. Before remote Agent verification, prepare:
-   - one Linux host for Agent
-   - `docker` and `docker compose`
+  - one Linux host for Agent
+  - Go toolchain or a prebuilt Agent binary for development-time direct startup
+  - `docker` and `docker compose` for formal deployment verification
    - platform API connectivity from Agent host
    - one repeatable test project or service
 6. Before real Jenkins/Harbor/K8s integration, also prepare:
