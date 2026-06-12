@@ -48,40 +48,28 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - Agent must be independently deployable before V1 remote release/deploy can be accepted
   - Agent leases/pulls release/deploy task payloads from the platform and reports heartbeat, service list, image versions, status, logs, and final result back to the platform
 - Treat the following path as the mainline unless the user explicitly reprioritizes:
-  - remote Agent deployment package
-  - Agent outbound task lease/pull flow
-  - remote Agent mock executor
-  - release/deploy detail closure against Agent callbacks
-  - real release integration through Jenkins and Harbor/Registry
-  - real deployment integration through Kubernetes
-  - remote project environment deploy/manage V1 acceptance
-  - audit, permission, and persistence completion
+  - environment management
+  - Agent management
+  - release creation
+  - baseline management
+  - deployment execution
+  - release/deployment detail
+  - auth and permissions
+  - final mock cleanup
 - Performance tuning, bundle optimization, warning cleanup, refactor-only cleanup, and UI polish should be scheduled after the mainline unless they block build, test, or feature delivery.
 - When the user says `继续` or `继续开发`, select the next unfinished item on this mainline before taking optimization work.
-- Before Jenkins/Harbor/Kubernetes are ready, continue only with mock-first V1 closure: Agent development-time direct startup, formal docker-compose deployability, outbound lease/pull behavior, mock executor callbacks, release/deploy detail visibility, and tests/docs for those behaviors.
+- Each phase must use real data before it is considered complete. If Jenkins, Harbor/Registry, Kubernetes, PostgreSQL, Redis, Agent runtime, or another required tool is needed to replace mock and is not ready, stop at that phase and record the blocker.
 
 ## V1 Ordered Path
 
-1. Remote Agent deployment package for Linux, with direct binary startup for development and `docker compose` for formal deployment.
-2. Agent outbound task lease/pull protocol:
-   - Agent registration and environment binding
-   - Agent leases/pulls task payload and execution data from the platform API
-   - Agent reports heartbeat, step status, logs, and final result
-3. Remote Agent mock executor that runs outside the platform process and reports mock steps/logs/results.
-4. Release/deploy detail closure against remote Agent callbacks:
-   - `agentTaskId`
-   - lease state
-   - steps, logs, failure reasons, retry/skip/manual-confirm/rollback visibility
-5. Real release integration:
-   - Jenkins-triggered release
-   - Harbor/Registry image selection/sync
-   - workload tag update through Agent
-6. Real deployment integration:
-   - runtime snapshot collection
-   - target-missing service deployment
-   - workload update and health check
-7. Remote project-environment deploy/manage V1 acceptance.
-8. Audit, permission, and persistence completion for the above flows.
+1. Environment management: real backend/database data for list, detail, create, update, status, and dependency visibility.
+2. Agent management: real registration, heartbeat, environment binding, online status, and task lease data.
+3. Release creation: real environments, agents, service sources, and version sources.
+4. Baseline management: real baseline list, detail, source metadata, and service snapshot source.
+5. Deployment execution: real Agent execution against the target infrastructure.
+6. Release/deployment detail: persisted real task status, steps, logs, and results.
+7. Auth and permissions: real login, users, roles, permissions, and environment-level authorization.
+8. Final mock cleanup: remove remaining runtime mock handlers, mock repositories, page fallbacks, and mock-only mainline dependencies.
 9. Non-functional optimization work after V1 functional closure.
 
 ## User-View Acceptance Path

@@ -499,33 +499,17 @@ func TestDeployStepActionsUpdateAgentTaskStatus(t *testing.T) {
 	}
 }
 
-func TestEnvironmentCheckUsesMockIntegrations(t *testing.T) {
+func TestEnvironmentCheckRejectsMockIntegrations(t *testing.T) {
 	router := newTestRouter()
 	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-project-x-prod/check", nil)
 	recorder := httptest.NewRecorder()
 
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	var payload struct {
-		Code string `json:"code"`
-		Data struct {
-			EnvironmentID string                         `json:"environmentId"`
-			Status        string                         `json:"status"`
-			Checks        []integration.IntegrationCheck `json:"checks"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if payload.Code != "OK" || payload.Data.EnvironmentID != "env-project-x-prod" {
-		t.Fatalf("unexpected response: %+v", payload)
-	}
-	if payload.Data.Status != "HEALTHY" || len(payload.Data.Checks) != 2 {
-		t.Fatalf("expected healthy k8s and registry checks, got %+v", payload.Data)
-	}
+	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "real environment integrations are not configured")
 }
 
 func TestCreateReleaseReturnsAgentTaskID(t *testing.T) {

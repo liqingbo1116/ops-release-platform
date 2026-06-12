@@ -17,6 +17,13 @@ type Suite struct {
 	Kubernetes KubernetesAdapter
 }
 
+func (s Suite) IsMock() bool {
+	_, jenkinsMock := s.Jenkins.(MockJenkinsAdapter)
+	_, registryMock := s.Registry.(MockRegistryAdapter)
+	_, kubernetesMock := s.Kubernetes.(MockKubernetesAdapter)
+	return jenkinsMock || registryMock || kubernetesMock
+}
+
 type JenkinsAdapter interface {
 	TriggerBuild(ctx context.Context, req BuildRequest) (BuildResult, error)
 	GetBuildStatus(ctx context.Context, buildID string) (BuildStatus, error)

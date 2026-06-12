@@ -78,18 +78,18 @@ Latest pushed milestone:
 
 ## V1 Implementation Baseline
 
-This is the authoritative order for subsequent development. V1 only targets project-environment iterative release and target-missing service deployment. Do not move optimization, broad refactors, or UI polish ahead of this path unless they block build, tests, or the V1 flow.
+This is the authoritative order for subsequent development. Each phase must use real data before it is considered complete. If a required external tool or runtime environment is not ready, stop at that phase and do not move on.
 
-1. Standalone remote Agent package. Local implementation completed; remote host verification pending.
-2. Agent outbound task lease/pull protocol. Local implementation completed with single-task lease and expired lease recovery; remote host verification pending.
-3. Remote Agent mock executor. Local implementation completed; remote host verification pending.
-4. Release/deploy detail closure against remote Agent callbacks. Local implementation completed for mock callbacks; remote host verification pending.
-5. Real release integration through Jenkins and Harbor/Registry.
-6. Real deployment integration through Kubernetes.
-7. Remote project-environment deploy/manage V1 acceptance.
-8. Audit, permission, and persistence completion.
+1. Environment management.
+2. Agent management.
+3. Release creation.
+4. Baseline management.
+5. Deployment execution.
+6. Release/deployment detail.
+7. Auth and permissions.
+8. Final mock cleanup.
 
-Current step is step 4: release/deploy detail closure against remote Agent callbacks, with remote Agent deployment verification as the first action.
+Current step is step 1: Environment management. Do not move to Agent management until environment list/detail/create/update/status/dependency visibility use real backend data and the phase-1 mock/fallback boundary is removed or explicitly recorded as blocked by missing real integrations.
 
 ## V1 Mainline Goal
 

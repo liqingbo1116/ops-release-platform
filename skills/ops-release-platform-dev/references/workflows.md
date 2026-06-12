@@ -188,7 +188,9 @@ git diff --cached --check
 
 ## External Integrations
 
-- Use mock adapters by default.
+- For the V1 mainline, do not use mock adapters as the completion standard for any phase.
+- Mock adapters are only allowed for isolated scaffolding or when the user explicitly asks for a mock-only experiment.
+- If Jenkins, Harbor/Registry, Kubernetes, Agent runtime, PostgreSQL, Redis, or another real dependency is required to replace mock data and is not ready, record the blocker and stop at that phase.
 - Keep business/API code dependent on interfaces from `backend/internal/integration`.
 - Do not call Jenkins, Harbor, Kubernetes, GitLab, ArgoCD, or Nacos SDKs directly from handlers.
 - Real adapters require an explicit user request and must avoid committing credentials.

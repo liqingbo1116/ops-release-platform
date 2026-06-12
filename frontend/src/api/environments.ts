@@ -1,5 +1,4 @@
-import { environmentMockData } from './mockData/environment'
-import { getData, postData, putData, type PageResult, useMockApi } from './client'
+import { getData, postData, putData, type PageResult } from './client'
 
 export type EnvironmentInfo = {
   id: string
@@ -45,11 +44,8 @@ function normalizeEnvironment(item: {
 }
 
 export async function listEnvironments(): Promise<EnvironmentInfo[]> {
-  if (!useMockApi) {
-    const result = await getData<PageResult<EnvironmentInfo>>('/api/environments')
-    return result.items.map(normalizeEnvironment)
-  }
-  return Promise.resolve(environmentMockData.environments.map(normalizeEnvironment))
+  const result = await getData<PageResult<EnvironmentInfo>>('/api/environments')
+  return result.items.map(normalizeEnvironment)
 }
 
 export async function createEnvironment(payload: EnvironmentPayload): Promise<EnvironmentInfo> {

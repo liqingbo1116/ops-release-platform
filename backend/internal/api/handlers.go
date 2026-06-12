@@ -113,6 +113,14 @@ func (h *Handler) UpdateEnvironment(c *gin.Context) {
 
 func (h *Handler) CheckEnvironment(c *gin.Context) {
 	environmentID := c.Param("id")
+	if _, ok := h.repo.GetEnvironment(environmentID); !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	if h.integrations.IsMock() {
+		BadRequest(c, "real environment integrations are not configured")
+		return
+	}
 	checks := make([]integration.IntegrationCheck, 0, 2)
 	if h.integrations.Kubernetes != nil {
 		check, err := h.integrations.Kubernetes.CheckConnection(c.Request.Context(), environmentID)

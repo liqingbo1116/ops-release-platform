@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-06-08
+Last updated: 2026-06-12
 
 Always verify with `git status --short --branch` and `git log -1 --oneline`; this file is an onboarding aid, not a substitute for checking the working tree.
 
@@ -22,28 +22,28 @@ Latest pushed commit at time of this note:
 
 ## Current Local Work
 
-Phase 4 adapter preparation is currently implemented locally and not yet committed:
+V1 mainline development is in phase 1: Environment management.
 
-- Added backend integration interfaces for Jenkins, Registry/Harbor, and Kubernetes.
-- Added mock integration suite and adapter tests.
-- Wired environment connection check through mock Kubernetes and Registry adapters.
-- Added `INTEGRATION_MODE=mock` config.
-- Updated README and docker-compose with integration mode notes.
-- Wired service release and service deployment creation through the integration suite:
-  - `LOCAL_HARBOR_IMAGE` release now probes and syncs via `RegistryAdapter`
-  - deployment task creation now probes target workloads via `KubernetesAdapter`
-  - handler error mapping now distinguishes Jenkins, registry, image-not-found, and workload probe failures
-  - added backend service/API tests for these flows
+Completed in phase 1 local work:
 
-Validation already run for this local work:
+- Frontend environment API list no longer imports or falls back to mock data; it calls `/api/environments`.
+- Backend runtime requires real `DATABASE_DSN` and `REDIS_ADDR` before startup.
+- Backend runtime wires `DatabaseStore` directly for the main repository, so environment list/detail/create/update use PostgreSQL-backed data in normal runtime.
+- Environment dependency check now rejects mock integrations instead of returning fake healthy Kubernetes/Registry checks.
 
-- Historical local validation before this iteration:
-  - `go test ./...` passed.
-  - `npm run test:unit` passed.
-  - `npm run build` passed.
-- Current iteration:
-  - `go test ./...` and targeted Go tests were started but remained in dependency download/compile stage in the current environment, so no final pass/fail result was produced yet.
-- `docker compose config` could not run because local Docker command was unavailable.
+Still blocking phase 1 completion:
+
+- Real Kubernetes and Registry integration adapters/configuration are not implemented yet.
+- Environment dependency visibility cannot be marked complete until those real adapters are available and configured.
+- Do not move to phase 2 Agent management until environment dependency checks use real integrations or the phase-1 scope is explicitly reduced.
+
+Validation for this local work:
+
+- Targeted frontend environment tests passed before the latest environment-check hardening:
+  - `npm run test:unit -- src/api/environments.test.ts src/pages/EnvironmentPage.test.ts`
+- Targeted backend app/API tests passed before the latest environment-check hardening:
+  - `go test ./internal/app ./internal/api`
+- Rerun targeted backend and frontend validation after any follow-up edits.
 
 ## Known Warnings
 
