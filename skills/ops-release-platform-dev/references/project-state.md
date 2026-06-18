@@ -22,34 +22,38 @@ Latest pushed commit at time of this note:
 
 ## Current Local Work
 
-V1 mainline development is closing phase 1: Environment management. Do not advance to release creation until the environment page uses platform-maintained K8s/Harbor/Jenkins resource data and environment creation/editing follows the rules below.
+V1 mainline has been reset around resource-first delivery. Current phase is phase 1: Resource management. Do not advance to environment completion, release creation, or baseline work until K8s/Harbor/Jenkins resources use user-oriented forms, system-owned status, real probe cache, refresh actions, and Agent-based remote probing.
 
-Completed in phase 1:
+Existing foundation:
 
 - Frontend environment API list no longer imports or falls back to mock data; it calls `/api/environments`.
 - Backend runtime requires real `DATABASE_DSN` and `REDIS_ADDR` before startup.
 - Backend runtime wires `DatabaseStore` directly for the main repository, so environment list/detail/create/update use PostgreSQL-backed data in normal runtime.
 - Environment dependency check now rejects mock integrations instead of returning fake healthy Kubernetes/Registry checks.
-- K8s clusters, Harbor registries, and Jenkins instances are now platform-maintained resource master data.
+- K8s clusters, Harbor registries, and Jenkins instances have an initial platform-maintained resource model.
 - Environment records carry `clusterId`, `registryId`, and `jenkinsId` as references to those reusable resources.
 - Environment records also carry environment-level scope fields: `namespace` for Kubernetes, `registryProject` for Harbor, and `jenkinsView` for Jenkins.
 - Users only enter environment name and environment code. The backend generates the environment ID as `env-<code>` when the create request omits `id`.
 - Environment page has separate tabs for maintaining K8s, Harbor, and Jenkins resources. Environments associate those resource rows and their per-environment scopes.
-- `.secrets/` is development-only for private runtime values. Formal resource master data belongs in the platform database, and credential fields store only `credentialRef`.
-- Backend `INTEGRATION_MODE=real` now supports Harbor systeminfo and Kubernetes readyz connectivity checks through platform resource records plus development-only credentials loaded from `.secrets/integration-connections.*`.
+- `.secrets/` is development-only for private runtime values. Formal resource master data belongs in the platform database, and credentials must be hidden behind internal credential references.
+- Backend `INTEGRATION_MODE=real` currently supports Harbor systeminfo and Kubernetes readyz connectivity checks through platform resource records plus development-only credentials loaded from `.secrets/integration-connections.*`.
 - Frontend environment create/edit selects platform resource rows without exposing secrets.
 - Skill and docs now record the `.secrets/` integration rule and real-data gate for environment management.
 - Kubeconfig paths from `.secrets/` resolve from repo root, backend runtime, or package test working directories.
-- Real environment checks passed through `POST /api/environments/:id/check` for both `env-local-prod` and `env-project-xjzt-test`.
+- Real environment checks have previously passed through `POST /api/environments/:id/check` for local and project sample environments, but this is not the final acceptance standard for remote/project environments. Remote resource checks must be converted to Agent tasks that report status and probe cache.
 
-Phase 1 completion evidence:
+Phase 1 remaining work:
 
-- `env-local-prod`: platform-maintained K8s and Harbor resources passed connectivity checks.
-- `env-project-xjzt-test`: platform-maintained K8s and Harbor resources passed connectivity checks.
-- Backend startup used real PostgreSQL, real Redis, and `INTEGRATION_MODE=real`.
-- The remote agent heartbeat and lease endpoints returned HTTP 200 while the backend was running.
+- Resource create/edit forms must stop exposing implementation concepts such as `credentialRef`.
+- K8s form must accept kubeconfig upload/paste and optional context.
+- Harbor form must accept URL, HTTP/HTTPS, username/password, and optional TLS skip.
+- Jenkins form must accept URL, username, password/API token, and optional TLS skip.
+- Resource status must be system-maintained, with user actions limited to test connection and refresh/probe.
+- K8s namespaces, Harbor projects, and Jenkins views/jobs must be probed from real systems and cached.
+- Refresh/probe failure must keep the previous cache and show the failure reason.
+- Local/direct probes run in the platform backend; remote/project probes run through Agent tasks and report back to the platform.
 
-Phase 2 work already implemented but should be rechecked after phase 1 UI/data cleanup:
+Agent foundation already implemented but must be rechecked after phase 1 resource semantics:
 
 - Agent page no longer imports or falls back to mock data; it calls real `/api/agents` and `/api/environments`.
 - Agent registration token generation accepts an explicit `agentId`, validates the target environment, and returns an R&D direct-start config command using `./ops-release-agent -f ./agent.env`.
@@ -60,7 +64,7 @@ Phase 2 work already implemented but should be rechecked after phase 1 UI/data c
 - Backend runtime wires the persisted Agent task protocol store; the in-memory protocol store remains only for tests and isolated scaffolding.
 - Real remote Agent has been observed online through `/api/agents`, and heartbeat/lease requests return HTTP 200 while the backend is running.
 
-Phase 2 completion evidence:
+Agent foundation evidence:
 
 - Remote Agent `agent-project-xjzt-test` is bound to `env-project-xjzt-test` and reports `ONLINE`.
 - Agent heartbeat timestamp updates through the platform API.
@@ -69,17 +73,17 @@ Phase 2 completion evidence:
 
 Next phase gate:
 
-- Continue with phase 3 Release creation.
-- Do not start baseline management until release creation reads real environments, real agents, and real service/version source data.
-- Phase 3 requires a real release source before completion, such as Jenkins job metadata or Harbor image tags from platform-maintained resource records plus credentials resolved through `credentialRef`.
+- Continue with phase 1 Resource management.
+- Do not mark phase 1 complete until resource forms, system-owned status, probe cache, refresh actions, and Agent-based remote probing are implemented with real data and mock fallback removed.
+- Do not start release creation until phases 1 through 4 in `docs/development-plan.md` are complete.
 
 Validation for this local work:
 
 - Backend tests:
   - `go test ./...` passed on 2026-06-18.
 - Environment check API:
-  - `POST /api/environments/env-local-prod/check` returned healthy Kubernetes and Harbor checks on 2026-06-18.
-  - `POST /api/environments/env-project-xjzt-test/check` returned healthy Kubernetes and Harbor checks on 2026-06-18.
+  - Previous direct checks returned healthy Kubernetes and Harbor checks on 2026-06-18.
+  - These checks are useful evidence for local/direct connectivity only; remote/project resource probing still needs Agent-task semantics.
 - Frontend tests:
   - `npm run test:unit -- --run` passed on 2026-06-18.
 - Frontend build:

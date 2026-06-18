@@ -54,7 +54,7 @@ Response data：
 
 ### POST /api/environments/{id}/check
 
-触发连接测试。本地环境由平台 adapter 直连执行，不需要 Agent；项目环境由 Agent 出站领取任务后执行。
+触发环境依赖检查。本地或直连环境由平台 adapter 直连执行，不需要 Agent；项目或远程环境必须创建 Agent 探测任务，由 Agent 出站领取任务后访问远程 K8s/Harbor/Jenkins 并回传状态。
 
 Response data：
 
@@ -67,16 +67,120 @@ Response data：
     {
       "component": "kubernetes",
       "status": "HEALTHY",
-      "message": "mock kubernetes connection is available",
+      "message": "kubernetes connection is available",
       "checkedAt": "2026-06-07T13:20:00+08:00"
     },
     {
       "component": "harbor",
       "status": "HEALTHY",
-      "message": "mock registry connection is available",
+      "message": "registry connection is available",
       "checkedAt": "2026-06-07T13:20:00+08:00"
     }
   ]
+}
+```
+
+## 基础资源
+
+K8s、Harbor、Jenkins 是独立平台资源。环境只关联资源 ID，并选择或填写环境级作用域：K8s namespace、Harbor project、Jenkins view。
+
+资源接口原则：
+
+- 新增/编辑请求使用用户视角字段，不要求用户填写 `credentialRef`。
+- 响应不返回明文 kubeconfig、密码或 token，只返回非敏感元数据、状态、最近检查信息和缓存列表。
+- 资源状态由系统测试连接或刷新探测维护，用户不能手工更新。
+- 刷新探测成功时更新缓存；失败时保留旧缓存并记录失败原因。
+- 本地或直连资源由平台后端探测；项目或远程资源由 Agent 探测任务回传。
+
+### POST /api/kubernetes-clusters
+
+创建 K8s 资源。请求可以传 kubeconfig 内容或上传文件后的引用，后端保存凭据并生成内部凭据引用。
+
+Request data：
+
+```json
+{
+  "name": "本地测试 K3s",
+  "kubeconfig": "<masked>",
+  "context": "default"
+}
+```
+
+Response data：
+
+```json
+{
+  "id": "k8s-local-test",
+  "name": "本地测试 K3s",
+  "apiServer": "https://k8s.example.com:6443",
+  "context": "default",
+  "status": "UNKNOWN",
+  "lastCheckAt": null,
+  "lastCheckMessage": "",
+  "cachedNamespaces": []
+}
+```
+
+### POST /api/harbor-registries
+
+创建 Harbor 资源。必须支持 HTTP Harbor 和 HTTPS Harbor。
+
+Request data：
+
+```json
+{
+  "name": "本地 Harbor",
+  "url": "http://registry.example.com:5000",
+  "scheme": "HTTP",
+  "username": "admin",
+  "password": "<masked>",
+  "insecureSkipTLSVerify": false
+}
+```
+
+### POST /api/jenkins-instances
+
+创建 Jenkins 资源。
+
+Request data：
+
+```json
+{
+  "name": "本地 Jenkins",
+  "url": "http://jenkins.example.com:8080",
+  "username": "root",
+  "token": "<masked>",
+  "insecureSkipTLSVerify": false
+}
+```
+
+### POST /api/{resourceType}/{id}/test
+
+测试单个资源连接。`resourceType` 可为 `kubernetes-clusters`、`harbor-registries`、`jenkins-instances`。
+
+Response data：
+
+```json
+{
+  "resourceId": "harbor-local",
+  "status": "HEALTHY",
+  "checkedAt": "2026-06-07T13:20:00+08:00",
+  "message": "connection is available"
+}
+```
+
+### POST /api/{resourceType}/{id}/refresh
+
+刷新资源探测缓存。K8s 刷新 namespaces，Harbor 刷新 projects，Jenkins 刷新 views/jobs。远程资源应返回 Agent 任务信息或异步探测状态。
+
+Response data：
+
+```json
+{
+  "resourceId": "k8s-project-x",
+  "status": "HEALTHY",
+  "cacheUpdatedAt": "2026-06-07T13:20:00+08:00",
+  "items": ["default", "project-x-prod"]
 }
 ```
 

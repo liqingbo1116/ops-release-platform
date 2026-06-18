@@ -8,14 +8,16 @@
 - V1 最低目标不是“页面齐全”，而是“至少支持项目环境的部署与管理”。
 - 当研发即将触达 Jenkins、Harbor、Kubernetes、真实 Agent 联调时，必须提前说明所需环境和准备项，由环境提供方先准备，再继续真实集成开发。
 - 后续默认研发顺序以 `docs/development-plan.md` 的“V1 研发主线路径”为准：
-  1. 环境管理
-  2. Agent 管理
-  3. 发布单创建
-  4. 基线管理
-  5. 部署执行
-  6. 发布详情 / 部署详情
-  7. 登录与权限
-  8. 清理剩余 mock
+  1. 基础资源管理
+  2. 环境管理
+  3. Agent 管理与远程探测
+  4. 服务与版本来源
+  5. 发布单创建
+  6. 基线管理
+  7. 部署执行
+  8. 发布详情 / 部署详情
+  9. 登录与权限
+  10. 清理剩余 mock
 - 每个阶段必须切到真实数据；该阶段 mock 数据、mock repository、mock fallback 没删掉时，不能进入下一阶段。
 - 包体优化、构建 warning 清理、UI 打磨、纯重构清理都放在这条主链路之后，除非已经阻塞功能交付。
 
@@ -24,6 +26,14 @@
 - 当前 V1 主线不再允许用 mock adapter 作为阶段完成标准；如果真实外部工具或运行环境未准备好，本阶段阻塞，不能继续下一阶段。
 - 只要某一步开始需要真实系统联调，就要提前列出需要的组件与最小准备条件。
 - 环境分为本地环境与项目环境：本地环境默认平台可直连，不需要 Agent；项目环境默认平台不可直连，必须通过 Agent 接入。
+- K8s、Harbor、Jenkins 必须作为平台基础资源单独维护，可被多个环境复用；环境只关联资源并选择 `namespace`、Harbor project、Jenkins view 等环境级作用域。
+- 新增基础资源时使用用户视角字段，不让用户填写 `credentialRef`：
+  - K8s：名称、kubeconfig 上传或粘贴、可选 context。
+  - Harbor：名称、URL、HTTP/HTTPS、用户名、密码、可选跳过 TLS 校验。
+  - Jenkins：名称、URL、用户名、密码或 API Token、可选跳过 TLS 校验。
+- 资源状态由系统维护，用户不能手动修改；页面必须提供“测试连接”和“刷新/重新探测”。
+- 探测结果需要缓存并可刷新：K8s namespaces、Harbor projects、Jenkins views/jobs。刷新失败时保留旧缓存并展示失败原因。
+- 本地或平台可直连资源由平台后端探测；项目环境远程资源必须通过 Agent 探测任务执行并回传，平台不能绕过 Agent 直连远程内网资源。
 - V1 默认 Agent 部署方案固定为：
   - Agent 运行在独立 Linux 主机
   - 使用 `docker compose` 部署
@@ -235,12 +245,12 @@
 
 ## 总提示词
 
+> 下面这段是历史任务模板，仅作背景参考，不作为当前 V1 执行基线。当前唯一有效顺序以 `docs/development-plan.md` 的“V1 研发主线路径”和 `skills/ops-release-platform-dev/SKILL.md` 的 “V1 Mainline Gates” 为准，且必须优先资源管理与真实探测缓存，不能再以 mock adapter 作为阶段完成标准。
+
 ```text
 你正在开发一个企业内部运维发布交付平台。请以 docs/PRD.md 为业务依据，以 design/ops-release-console-v3.html 为视觉和页面结构参考，以 docs/domain-model.md、docs/state-machine.md、docs/api-contract.md、mocks/ 为开发约束。
 
 技术栈固定：前端 Vue 3 + Vite + TypeScript + Pinia + Vue Router + Element Plus；后端 Go + Gin + GORM；数据库 PostgreSQL；缓存与任务队列 Redis；部署使用 docker-compose。
-
-第一阶段只需要可本地运行的 MVP。第三方系统 Jenkins、Harbor、Kubernetes、GitLab、ArgoCD、Nacos 先使用 mock adapter，不要直接写真实集成。
 ```
 
 ## 任务 1：初始化工程

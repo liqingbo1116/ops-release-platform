@@ -92,38 +92,47 @@ V1 mainline rule:
 
 - `DATABASE_DSN` and `REDIS_ADDR` must point to the remote services prepared for the project, currently the remote host `100.120.3.230` recorded in `.secrets/`.
 - K8s, Harbor, and Jenkins are platform-maintained resource master data. Environment records reference resource IDs and add `namespace`, `registryProject`, and `jenkinsView`.
+- Resource create forms must match the tool's natural inputs: K8s kubeconfig/context, Harbor URL + HTTP/HTTPS + username/password, Jenkins URL + username/password or API token. Users must not type `credentialRef`.
+- Resource status is system-owned. Keep connection test and refresh/probe actions. Cache K8s namespaces, Harbor projects, and Jenkins views/jobs; on refresh failure, keep the old cache and show the failure reason.
+- Probe execution depends on network mode: local/direct resources are checked by the platform backend; remote/project resources must be checked by Agent tasks and reported back to the platform.
 - `.secrets/` is only for development-stage private values and process startup. It is not the formal platform resource master data source.
-- Platform resource records may store non-secret metadata such as API server or service URL. Credentials must be represented as `credentialRef`; do not store real passwords, tokens, or kubeconfig contents in environment rows.
+- Platform resource records may store non-secret metadata such as API server or service URL. Credentials must be represented internally; do not store real passwords, tokens, or kubeconfig contents in environment rows.
 - Do not switch PostgreSQL or Redis back to local mock containers for V1 mainline development.
-- If remote PostgreSQL/Redis is unavailable, or K8s/Harbor platform resource data plus matching credentials are unavailable, environment management and all downstream real-data phases are blocked.
+- If remote PostgreSQL/Redis is unavailable, or real K8s/Harbor/Jenkins resources cannot be created, tested, probed, and cached, resource management and all downstream real-data phases are blocked.
 - Frontend/backend local startup is only the process mode. Data dependencies must still be real.
 
 ## V1 Phase Prerequisites
 
 Use this gate list before starting the next feature area:
 
-1. Environment management
-   - Required: frontend, backend, remote PostgreSQL, remote Redis, platform-maintained K8s resources, platform-maintained Harbor resources, matching credentials loaded from development `.secrets/` or formal credential backend.
-   - Blocker: if remote PostgreSQL/Redis is unavailable, or K8s/Harbor resources and credentials are not ready, do not replace mock and do not move on.
-2. Agent management
-   - Required: environment data already real, remote Linux host, built agent binary, `-f` config file support, outbound connectivity to platform.
-   - Blocker: if a real environment cannot be created first, agent registration and binding cannot be validated.
-3. Release creation
-   - Required: real environments, real agents, real release source data.
+1. Resource management
+   - Required: frontend, backend, remote PostgreSQL, remote Redis, real K8s kubeconfig, real Harbor connection input, real Jenkins connection input when Jenkins is in scope, and remote Agent runtime before accepting remote/project resource probes.
+   - Blocker: if resource forms expose `credentialRef`, status is user-editable, probe lists are mock, refresh is missing, or remote probes bypass Agent, stop here.
+2. Environment management
+   - Required: phase 1 complete, real resource records, cached namespace/project/view options, and real backend environment persistence.
+   - Blocker: if environments embed credentials, use mock scope options, or require users to maintain both environment ID and environment code, stop here.
+3. Agent management and remote probing
+   - Required: real environments, remote Linux host, built agent binary, `-f` config file support, outbound connectivity to platform, and Agent-side access to remote K8s/Harbor/Jenkins.
+   - Blocker: if a real environment cannot be created first, or remote resource probe status/cache cannot be reported by Agent, stop here.
+4. Service and version sources
+   - Required: real environments, real agents, real service/version source data from Jenkins, Harbor, Kubernetes runtime, or persisted runtime snapshots.
    - Blocker: if source service/version data is mock, stop here.
-4. Baseline management
+5. Release creation
+   - Required: phase 1 through phase 4 complete.
+   - Blocker: if release form data is mock, stop here.
+6. Baseline management
    - Required: real baseline source such as Kubernetes runtime snapshot or persisted business snapshot data.
    - Blocker: if baseline is mock, stop here.
-5. Deployment execution
+7. Deployment execution
    - Required: agent executor tools, cluster credentials, registry credentials, network connectivity.
    - Blocker: if the agent cannot reach the real target infrastructure, stop here.
-6. Detail pages
+8. Detail pages
    - Required: persisted task/step/log/result data from real execution.
    - Blocker: if detail rendering still depends on mock task records, stop here.
-7. Auth and permissions
+9. Auth and permissions
    - Required: real login, user, role, permission, and environment-level authorization data.
    - Blocker: if auth is mock, V1 is not complete.
-8. Final mock cleanup
+10. Final mock cleanup
    - Required: all previous phases complete.
    - Blocker: if any runtime mock fallback is still required for the mainline path, V1 is not complete.
 
