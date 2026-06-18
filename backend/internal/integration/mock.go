@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"ops-release-platform/backend/internal/domain"
 )
 
 func NewMockSuite() Suite {
@@ -44,14 +46,14 @@ func (MockJenkinsAdapter) GetBuildStatus(ctx context.Context, buildID string) (B
 
 type MockRegistryAdapter struct{}
 
-func (MockRegistryAdapter) CheckConnection(ctx context.Context, environmentID string) (IntegrationCheck, error) {
+func (MockRegistryAdapter) CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error) {
 	if err := ctx.Err(); err != nil {
 		return IntegrationCheck{}, err
 	}
 	return IntegrationCheck{
 		Component: "harbor",
 		Status:    "HEALTHY",
-		Message:   "mock registry connection is available for " + environmentID,
+		Message:   "mock registry connection is available for " + environment.ID,
 		CheckedAt: time.Now().Format(time.RFC3339),
 	}, nil
 }
@@ -82,14 +84,14 @@ func (MockRegistryAdapter) SyncImage(ctx context.Context, req SyncImageRequest) 
 
 type MockKubernetesAdapter struct{}
 
-func (MockKubernetesAdapter) CheckConnection(ctx context.Context, environmentID string) (IntegrationCheck, error) {
+func (MockKubernetesAdapter) CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error) {
 	if err := ctx.Err(); err != nil {
 		return IntegrationCheck{}, err
 	}
 	return IntegrationCheck{
 		Component: "kubernetes",
 		Status:    "HEALTHY",
-		Message:   "mock kubernetes connection is available for " + environmentID,
+		Message:   "mock kubernetes connection is available for " + environment.ID,
 		CheckedAt: time.Now().Format(time.RFC3339),
 	}, nil
 }

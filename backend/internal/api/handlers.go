@@ -113,7 +113,8 @@ func (h *Handler) UpdateEnvironment(c *gin.Context) {
 
 func (h *Handler) CheckEnvironment(c *gin.Context) {
 	environmentID := c.Param("id")
-	if _, ok := h.repo.GetEnvironment(environmentID); !ok {
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
 		NotFound(c, "environment not found")
 		return
 	}
@@ -123,25 +124,29 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 	}
 	checks := make([]integration.IntegrationCheck, 0, 2)
 	if h.integrations.Kubernetes != nil {
-		check, err := h.integrations.Kubernetes.CheckConnection(c.Request.Context(), environmentID)
+		check, err := h.integrations.Kubernetes.CheckConnection(c.Request.Context(), environment)
 		if err != nil {
+			_, _, _ = h.repo.UpdateEnvironmentCheck(environmentID, "UNHEALTHY", time.Now())
 			BadRequest(c, "kubernetes check failed")
 			return
 		}
 		checks = append(checks, check)
 	}
 	if h.integrations.Registry != nil {
-		check, err := h.integrations.Registry.CheckConnection(c.Request.Context(), environmentID)
+		check, err := h.integrations.Registry.CheckConnection(c.Request.Context(), environment)
 		if err != nil {
+			_, _, _ = h.repo.UpdateEnvironmentCheck(environmentID, "UNHEALTHY", time.Now())
 			BadRequest(c, "registry check failed")
 			return
 		}
 		checks = append(checks, check)
 	}
+	checkedAt := time.Now()
+	_, _, _ = h.repo.UpdateEnvironmentCheck(environmentID, "HEALTHY", checkedAt)
 	OK(c, gin.H{
 		"environmentId": environmentID,
 		"status":        "HEALTHY",
-		"checkedAt":     time.Now().Format(time.RFC3339),
+		"checkedAt":     checkedAt.Format(time.RFC3339),
 		"checks":        checks,
 	})
 }

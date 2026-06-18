@@ -254,7 +254,7 @@ type failingKubernetesAdapter struct {
 	err error
 }
 
-func (f failingKubernetesAdapter) CheckConnection(ctx context.Context, environmentID string) (integration.IntegrationCheck, error) {
+func (f failingKubernetesAdapter) CheckConnection(ctx context.Context, environment domain.Environment) (integration.IntegrationCheck, error) {
 	return integration.IntegrationCheck{}, f.err
 }
 

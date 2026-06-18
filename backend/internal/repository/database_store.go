@@ -51,6 +51,8 @@ func (s *DatabaseStore) CreateEnvironment(input domain.Environment) (domain.Envi
 		Code:        strings.TrimSpace(input.Code),
 		Type:        strings.TrimSpace(input.Type),
 		NetworkMode: strings.TrimSpace(input.NetworkMode),
+		ClusterID:   strings.TrimSpace(input.ClusterID),
+		RegistryID:  strings.TrimSpace(input.RegistryID),
 		Status:      fallbackString(strings.TrimSpace(input.Status), "HEALTHY"),
 	}
 	if model.ID == "" || model.Name == "" || model.Code == "" || model.Type == "" || model.NetworkMode == "" {
@@ -82,9 +84,27 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 	if networkMode := strings.TrimSpace(input.NetworkMode); networkMode != "" {
 		model.NetworkMode = networkMode
 	}
+	model.ClusterID = strings.TrimSpace(input.ClusterID)
+	model.RegistryID = strings.TrimSpace(input.RegistryID)
 	if status := strings.TrimSpace(input.Status); status != "" {
 		model.Status = status
 	}
+	if err := s.db.Save(&model).Error; err != nil {
+		return domain.Environment{}, false, err
+	}
+	return toDomainEnvironment(model), true, nil
+}
+
+func (s *DatabaseStore) UpdateEnvironmentCheck(id string, status string, checkedAt time.Time) (domain.Environment, bool, error) {
+	var model EnvironmentModel
+	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return domain.Environment{}, false, nil
+		}
+		return domain.Environment{}, false, err
+	}
+	model.Status = fallbackString(strings.TrimSpace(status), "UNKNOWN")
+	model.LastCheckAt = &checkedAt
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.Environment{}, false, err
 	}
@@ -328,6 +348,8 @@ func toDomainEnvironment(model EnvironmentModel) domain.Environment {
 		Code:        model.Code,
 		Type:        model.Type,
 		NetworkMode: model.NetworkMode,
+		ClusterID:   model.ClusterID,
+		RegistryID:  model.RegistryID,
 		Status:      model.Status,
 		AgentStatus: agentStatus,
 		LastCheckAt: lastCheckAt,

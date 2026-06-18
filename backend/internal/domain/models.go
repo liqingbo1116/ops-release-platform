@@ -13,6 +13,8 @@ type Environment struct {
 	Code        string `json:"code"`
 	Type        string `json:"type"`
 	NetworkMode string `json:"networkMode"`
+	ClusterID   string `json:"clusterId"`
+	RegistryID  string `json:"registryId"`
 	Status      string `json:"status"`
 	AgentStatus string `json:"agentStatus"`
 	LastCheckAt string `json:"lastCheckAt"`

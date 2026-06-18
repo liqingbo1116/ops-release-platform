@@ -50,6 +50,8 @@ describe('environment API', () => {
         code: 'real-prod',
         type: 'PROJECT',
         networkMode: 'AGENT',
+        clusterId: '',
+        registryId: '',
         status: 'HEALTHY',
         agentStatus: 'ONLINE',
         lastCheckAt: '2026-06-12T10:00:00+08:00',

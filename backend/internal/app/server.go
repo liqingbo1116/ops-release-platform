@@ -48,7 +48,30 @@ func (s *Server) Run() error {
 	queue.StartMockWorker(context.Background())
 	log.Println("mock agent worker started")
 
-	integrations, err := integration.NewSuite(integration.Config{Mode: s.config.IntegrationMode})
+	integrations, err := integration.NewSuite(integration.Config{
+		Mode: s.config.IntegrationMode,
+		Registries: map[string]integration.RegistryConfig{
+			"local": {
+				URL:      s.config.LocalHarborURL,
+				Username: s.config.LocalHarborUsername,
+				Password: s.config.LocalHarborPassword,
+			},
+			"remote": {
+				URL:      s.config.RemoteHarborURL,
+				Username: s.config.RemoteHarborUsername,
+				Password: s.config.RemoteHarborPassword,
+			},
+		},
+		Clusters: map[string]integration.ClusterConfig{
+			"local": {
+				Kubeconfig: s.config.LocalKubeconfig,
+			},
+			"remote": {
+				Kubeconfig: s.config.RemoteKubeconfig,
+			},
+		},
+		HTTPTimeoutMS: s.config.IntegrationHTTPTimeoutMS,
+	})
 	if err != nil {
 		return fmt.Errorf("integration init failed: %w", err)
 	}

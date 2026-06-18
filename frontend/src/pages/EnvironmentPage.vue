@@ -93,6 +93,12 @@
         <el-form-item label="网络模式" required>
           <el-segmented v-model="form.networkMode" :options="networkOptions" />
         </el-form-item>
+        <el-form-item label="K8s 集群">
+          <el-input v-model="form.clusterId" placeholder="local / remote" />
+        </el-form-item>
+        <el-form-item label="镜像仓库">
+          <el-input v-model="form.registryId" placeholder="local / remote" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -134,6 +140,8 @@ const form = ref<EnvironmentPayload>({
   code: '',
   type: 'PROJECT',
   networkMode: 'AGENT',
+  clusterId: 'remote',
+  registryId: 'remote',
 })
 
 const typeOptions = [
@@ -187,6 +195,8 @@ function openCreateDialog() {
     code: '',
     type: 'PROJECT',
     networkMode: 'AGENT',
+    clusterId: 'remote',
+    registryId: 'remote',
   }
   dialogVisible.value = true
 }
@@ -199,6 +209,8 @@ function openEditDialog(row: EnvironmentInfo) {
     code: row.code,
     type: row.type,
     networkMode: row.networkMode,
+    clusterId: row.clusterId,
+    registryId: row.registryId,
     status: row.status,
   }
   dialogVisible.value = true
@@ -218,6 +230,8 @@ async function submitEnvironment() {
         id: form.value.id.trim(),
         name: form.value.name.trim(),
         code: form.value.code.trim(),
+        clusterId: form.value.clusterId.trim(),
+        registryId: form.value.registryId.trim(),
       })
       ElMessage.success('环境已创建')
     } else {
@@ -226,6 +240,8 @@ async function submitEnvironment() {
         code: form.value.code.trim(),
         type: form.value.type,
         networkMode: form.value.networkMode,
+        clusterId: form.value.clusterId.trim(),
+        registryId: form.value.registryId.trim(),
         status: form.value.status,
       })
       ElMessage.success('环境已更新')

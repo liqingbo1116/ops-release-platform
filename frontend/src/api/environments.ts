@@ -6,12 +6,17 @@ export type EnvironmentInfo = {
   code: string
   type: 'LOCAL' | 'PROJECT'
   networkMode: 'DIRECT' | 'AGENT'
+  clusterId: string
+  registryId: string
   status: string
   agentStatus: string
   lastCheckAt: string
 }
 
-export type EnvironmentPayload = Pick<EnvironmentInfo, 'id' | 'name' | 'code' | 'type' | 'networkMode'> & {
+export type EnvironmentPayload = Pick<
+  EnvironmentInfo,
+  'id' | 'name' | 'code' | 'type' | 'networkMode' | 'clusterId' | 'registryId'
+> & {
   status?: string
 }
 
@@ -32,6 +37,8 @@ function normalizeEnvironment(item: {
   code: string
   type: string
   networkMode: string
+  clusterId?: string
+  registryId?: string
   status: string
   agentStatus: string
   lastCheckAt: string
@@ -40,6 +47,8 @@ function normalizeEnvironment(item: {
     ...item,
     type: item.type === 'LOCAL' ? 'LOCAL' : 'PROJECT',
     networkMode: item.networkMode === 'DIRECT' ? 'DIRECT' : 'AGENT',
+    clusterId: item.clusterId ?? '',
+    registryId: item.registryId ?? '',
   }
 }
 

@@ -16,9 +16,34 @@ func TestNewSuiteDefaultsToMock(t *testing.T) {
 }
 
 func TestNewSuiteRejectsUnsupportedMode(t *testing.T) {
-	_, err := NewSuite(Config{Mode: "real"})
+	_, err := NewSuite(Config{Mode: "bad"})
 	if err != ErrUnsupportedMode {
 		t.Fatalf("expected unsupported mode error, got %v", err)
+	}
+}
+
+func TestNewSuiteRealRequiresConfig(t *testing.T) {
+	_, err := NewSuite(Config{Mode: "real"})
+	if err != ErrMissingRealConfig {
+		t.Fatalf("expected missing real config error, got %v", err)
+	}
+}
+
+func TestNewSuiteRealInitializesWithConfig(t *testing.T) {
+	suite, err := NewSuite(Config{
+		Mode: "real",
+		Registries: map[string]RegistryConfig{
+			"local": {URL: "http://registry.example.test"},
+		},
+		Clusters: map[string]ClusterConfig{
+			"local": {Kubeconfig: "local.yaml"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new real suite: %v", err)
+	}
+	if suite.Jenkins == nil || suite.Registry == nil || suite.Kubernetes == nil {
+		t.Fatal("expected all real adapters to be configured")
 	}
 }
 

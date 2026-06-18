@@ -55,7 +55,14 @@ go run ./cmd/server
 - `APP_PORT`：后端监听端口，默认 `8080`
 - `DATABASE_DSN`：PostgreSQL 连接串，不配置时跳过数据库迁移
 - `REDIS_ADDR`：Redis 地址，不配置时不启动 mock Agent worker
-- `INTEGRATION_MODE`：第三方系统 adapter 模式，默认 `mock`；当前只支持 `mock`
+- `INTEGRATION_MODE`：第三方系统 adapter 模式，默认 `mock`；V1 环境管理联调使用 `real`
+- `LOCAL_HARBOR_URL` / `LOCAL_HARBOR_USERNAME` / `LOCAL_HARBOR_PASSWORD`：本地环境 Harbor 连接配置
+- `LOCAL_K8S_KUBECONFIG`：本地环境 kubeconfig 路径
+- `REMOTE_HARBOR_URL` / `REMOTE_HARBOR_USERNAME` / `REMOTE_HARBOR_PASSWORD`：远程环境 Harbor 连接配置
+- `REMOTE_K8S_KUBECONFIG`：远程环境 kubeconfig 路径
+- `INTEGRATION_HTTP_TIMEOUT_MS`：真实集成 HTTP 超时时间，默认 `10000`
+
+真实连接值只允许放在 `.secrets/` 下的本地环境文件中，不要写入代码、文档或提交到 git。环境记录通过 `clusterId`、`registryId` 选择逻辑配置，目前使用 `local` 和 `remote`。
 
 ### Docker Compose
 

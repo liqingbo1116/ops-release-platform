@@ -1,12 +1,17 @@
 package repository
 
-import "ops-release-platform/backend/internal/domain"
+import (
+	"time"
+
+	"ops-release-platform/backend/internal/domain"
+)
 
 type Store interface {
 	ListEnvironments(query string) []domain.Environment
 	GetEnvironment(id string) (domain.Environment, bool)
 	CreateEnvironment(input domain.Environment) (domain.Environment, error)
 	UpdateEnvironment(id string, input domain.Environment) (domain.Environment, bool, error)
+	UpdateEnvironmentCheck(id string, status string, checkedAt time.Time) (domain.Environment, bool, error)
 	ListAgents(query string) []domain.Agent
 	GetAgent(id string) (domain.Agent, bool)
 	UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool)

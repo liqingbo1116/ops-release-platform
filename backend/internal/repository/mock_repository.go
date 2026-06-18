@@ -83,6 +83,8 @@ func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Env
 		Code:        strings.TrimSpace(input.Code),
 		Type:        strings.TrimSpace(input.Type),
 		NetworkMode: strings.TrimSpace(input.NetworkMode),
+		ClusterID:   strings.TrimSpace(input.ClusterID),
+		RegistryID:  strings.TrimSpace(input.RegistryID),
 		Status:      firstNonEmpty(strings.TrimSpace(input.Status), "HEALTHY"),
 		AgentStatus: "UNBOUND",
 		LastCheckAt: "",
@@ -114,9 +116,27 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 		if value := strings.TrimSpace(input.NetworkMode); value != "" {
 			r.environments[index].NetworkMode = value
 		}
+		if value := strings.TrimSpace(input.ClusterID); value != "" {
+			r.environments[index].ClusterID = value
+		}
+		if value := strings.TrimSpace(input.RegistryID); value != "" {
+			r.environments[index].RegistryID = value
+		}
 		if value := strings.TrimSpace(input.Status); value != "" {
 			r.environments[index].Status = value
 		}
+		return r.environments[index], true, nil
+	}
+	return domain.Environment{}, false, nil
+}
+
+func (r *MockRepository) UpdateEnvironmentCheck(id string, status string, checkedAt time.Time) (domain.Environment, bool, error) {
+	for index := range r.environments {
+		if r.environments[index].ID != id {
+			continue
+		}
+		r.environments[index].Status = firstNonEmpty(strings.TrimSpace(status), "UNKNOWN")
+		r.environments[index].LastCheckAt = checkedAt.Format(time.RFC3339)
 		return r.environments[index], true, nil
 	}
 	return domain.Environment{}, false, nil

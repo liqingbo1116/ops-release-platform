@@ -31,6 +31,8 @@ Use this skill before making code, docs, deployment, or Git changes in this repo
 - V1 mainline must use real data phase by phase. Once a phase enters mainline replacement, remove that phase's mock data and mock fallback before moving to the next phase.
 - If a phase depends on external tools or runtime environments to replace mock, those prerequisites are mandatory gates. If they are not ready, do not claim that phase is complete and do not continue to the next phase.
 - Local development runtime: frontend and backend run locally, but PostgreSQL and Redis must come from the remote services recorded in `.secrets/`. Do not switch back to local container mock services during V1 mainline development.
+- Real Harbor/Kubernetes/Jenkins connection values must stay in `.secrets/`, especially `.secrets/integration-connections.env` and `.secrets/integration-connections.ps1`. Never copy their values into docs, code, tests, logs, commits, or chat output.
+- V1 environment management uses real integration logical IDs only: `local` and `remote`. Environment records bind them through `clusterId` and `registryId`; empty values default by environment type (`LOCAL` -> `local`, `PROJECT` -> `remote`).
 - Local development runtime: run frontend with npm and backend with `go run`; do not use docker-compose for frontend/backend during development. See `../ops-release-platform-deployment/`.
 - For user requests like "继续开发", choose the next clear item from `docs/development-plan.md` and current repository state.
 - For user requests like "提交", follow `docs/git-submit-workflow.md` and the extra checks in `references/workflows.md`.
@@ -48,7 +50,11 @@ Follow this order exactly. Do not skip forward. Do not reintroduce mock for a co
      - remote PostgreSQL on `100.120.3.230`
      - remote Redis on `100.120.3.230`
      - `.secrets/` loaded with the real DSN and Redis address
+     - `.secrets/integration-connections.*` loaded when `INTEGRATION_MODE=real`
+     - real Harbor entries for logical IDs `local` and `remote`
+     - real kubeconfig files for logical IDs `local` and `remote`
    - Gate: if PostgreSQL or Redis is not ready, environment management cannot replace mock and next phase cannot start.
+   - Gate: if Harbor or Kubernetes config is missing, connection check cannot be accepted as complete and next phase cannot start.
 2. Agent management
    - Goal: agent registration, heartbeat, environment binding, online status, and task lease data all come from real backend data.
    - Required tools/environment:
@@ -65,6 +71,7 @@ Follow this order exactly. Do not skip forward. Do not reintroduce mock for a co
      - phase 1 and phase 2 complete
      - real environment-agent association
      - real service source for release selection, such as Jenkins job metadata or registry image tags
+     - Jenkins connection information stored only under `.secrets/`
    - Gate: if release source data is still mock, release creation is not complete and next phase cannot start.
 4. Baseline management
    - Goal: baseline list, baseline detail, and baseline source metadata come from real runtime snapshot or persistent business data.

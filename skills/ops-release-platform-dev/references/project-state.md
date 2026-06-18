@@ -30,20 +30,25 @@ Completed in phase 1 local work:
 - Backend runtime requires real `DATABASE_DSN` and `REDIS_ADDR` before startup.
 - Backend runtime wires `DatabaseStore` directly for the main repository, so environment list/detail/create/update use PostgreSQL-backed data in normal runtime.
 - Environment dependency check now rejects mock integrations instead of returning fake healthy Kubernetes/Registry checks.
+- Environment records now carry `clusterId` and `registryId`, using logical IDs `local` and `remote` for real integration selection.
+- Backend `INTEGRATION_MODE=real` now supports Harbor systeminfo and Kubernetes readyz connectivity checks through config loaded from `.secrets/integration-connections.*`.
+- Frontend environment create/edit and connection drawer now expose logical cluster/registry IDs without exposing secrets.
+- Skill and docs now record the `.secrets/` integration rule and real-data gate for environment management.
 
 Still blocking phase 1 completion:
 
-- Real Kubernetes and Registry integration adapters/configuration are not implemented yet.
-- Environment dependency visibility cannot be marked complete until those real adapters are available and configured.
+- Real Harbor/Kubernetes connection checks must be run against the configured local and remote environments.
+- Environment dependency visibility cannot be marked complete until both logical integration IDs validate with real infrastructure.
 - Do not move to phase 2 Agent management until environment dependency checks use real integrations or the phase-1 scope is explicitly reduced.
 
 Validation for this local work:
 
-- Targeted frontend environment tests passed before the latest environment-check hardening:
-  - `npm run test:unit -- src/api/environments.test.ts src/pages/EnvironmentPage.test.ts`
-- Targeted backend app/API tests passed before the latest environment-check hardening:
-  - `go test ./internal/app ./internal/api`
-- Rerun targeted backend and frontend validation after any follow-up edits.
+- Backend tests:
+  - `go test ./...`
+- Frontend tests:
+  - `npm run test:unit`
+- Frontend build:
+  - `npm run build`
 
 ## Known Warnings
 

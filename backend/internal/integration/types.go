@@ -3,12 +3,30 @@ package integration
 import (
 	"context"
 	"errors"
+	"strings"
+	"time"
+
+	"ops-release-platform/backend/internal/domain"
 )
 
 var ErrUnsupportedMode = errors.New("unsupported integration mode")
+var ErrMissingRealConfig = errors.New("missing real integration config")
 
 type Config struct {
-	Mode string
+	Mode          string
+	Registries    map[string]RegistryConfig
+	Clusters      map[string]ClusterConfig
+	HTTPTimeoutMS string
+}
+
+type RegistryConfig struct {
+	URL      string
+	Username string
+	Password string
+}
+
+type ClusterConfig struct {
+	Kubeconfig string
 }
 
 type Suite struct {
@@ -30,13 +48,13 @@ type JenkinsAdapter interface {
 }
 
 type RegistryAdapter interface {
-	CheckConnection(ctx context.Context, environmentID string) (IntegrationCheck, error)
+	CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error)
 	GetImage(ctx context.Context, image string, tag string) (ImageInfo, error)
 	SyncImage(ctx context.Context, req SyncImageRequest) (SyncImageResult, error)
 }
 
 type KubernetesAdapter interface {
-	CheckConnection(ctx context.Context, environmentID string) (IntegrationCheck, error)
+	CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error)
 	ListWorkloads(ctx context.Context, environmentID string) ([]Workload, error)
 	SetImage(ctx context.Context, environmentID string, req SetImageRequest) error
 	GetRolloutStatus(ctx context.Context, environmentID string, workload string) (RolloutStatus, error)
@@ -118,12 +136,32 @@ type IntegrationCheck struct {
 }
 
 func NewSuite(cfg Config) (Suite, error) {
-	mode := cfg.Mode
+	mode := strings.TrimSpace(cfg.Mode)
 	if mode == "" {
 		mode = "mock"
 	}
-	if mode != "mock" {
+	switch mode {
+	case "mock":
+		return NewMockSuite(), nil
+	case "real":
+		return NewRealSuite(cfg, parseTimeout(cfg.HTTPTimeoutMS))
+	default:
 		return Suite{}, ErrUnsupportedMode
 	}
-	return NewMockSuite(), nil
+}
+
+func parseTimeout(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 10 * time.Second
+	}
+	duration, err := time.ParseDuration(value)
+	if err == nil && duration > 0 {
+		return duration
+	}
+	duration, err = time.ParseDuration(value + "ms")
+	if err == nil && duration > 0 {
+		return duration
+	}
+	return 10 * time.Second
 }

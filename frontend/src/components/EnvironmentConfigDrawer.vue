@@ -4,6 +4,8 @@
       <div class="kv"><span>环境编码</span><strong>{{ environment.code }}</strong></div>
       <div class="kv"><span>环境类型</span><strong>{{ environment.type === 'PROJECT' ? '项目环境' : '本地环境' }}</strong></div>
       <div class="kv"><span>网络模式</span><strong>{{ environment.networkMode === 'AGENT' ? 'Agent 模式' : '平台直连' }}</strong></div>
+      <div class="kv"><span>K8s 集群</span><strong>{{ environment.clusterId || defaultIntegrationId }}</strong></div>
+      <div class="kv"><span>镜像仓库</span><strong>{{ environment.registryId || defaultIntegrationId }}</strong></div>
       <div class="kv"><span>Agent</span><StatusTag :status="environment.agentStatus" /></div>
       <div class="kv"><span>最近测试</span><span>{{ environment.lastCheckAt || '-' }}</span></div>
       <el-button type="primary" :loading="checking" @click="emit('check', environment.id)">执行连接测试</el-button>
@@ -20,6 +22,8 @@ type Environment = {
   code: string
   type: string
   networkMode: string
+  clusterId: string
+  registryId: string
   agentStatus: string
   lastCheckAt: string
 }
@@ -32,4 +36,6 @@ defineProps<{
   environment: Environment | null
   checking?: boolean
 }>()
+
+const defaultIntegrationId = 'local / remote'
 </script>
