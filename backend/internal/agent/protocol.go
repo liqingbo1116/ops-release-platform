@@ -11,6 +11,16 @@ type ProtocolStore struct {
 	tasks map[string]*ProtocolTask
 }
 
+type Protocol interface {
+	Enqueue(task Task) ProtocolTask
+	Pull(agentID string) (ProtocolTask, bool)
+	Lease(request LeaseRequest) LeaseResult
+	ReportStep(taskID string, step string, status string) (ProtocolTask, bool)
+	AppendLog(taskID string, line string) (ProtocolTask, bool)
+	ReportResult(taskID string, status string, message string) (ProtocolTask, bool)
+	Status(taskID string) (map[string]string, []string, bool)
+}
+
 type ProtocolTask struct {
 	ID            string            `json:"id"`
 	Type          string            `json:"type"`

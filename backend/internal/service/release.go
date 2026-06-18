@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"ops-release-platform/backend/internal/domain"
@@ -20,6 +22,9 @@ var (
 	ErrReleaseBaselineUnsupported = errors.New("release baseline unsupported")
 	ErrDeployBaselineRequired     = errors.New("deploy baseline required")
 	ErrInvalidServiceSelection    = errors.New("invalid service selection")
+	ErrInvalidReleaseSource       = errors.New("invalid release source")
+	ErrEnvironmentNotFound        = errors.New("environment not found")
+	ErrReleaseOrderCreate         = errors.New("release order create failed")
 	ErrJenkinsTrigger             = errors.New("jenkins trigger failed")
 	ErrRegistryImageCheck         = errors.New("registry image check failed")
 	ErrRegistryImageSync          = errors.New("registry image sync failed")
@@ -41,10 +46,20 @@ type PermissionReader interface {
 	HasEnvironmentAction(environmentID string, action string) bool
 }
 
+type EnvironmentReader interface {
+	GetEnvironment(id string) (domain.Environment, bool)
+}
+
+type ReleaseOrderWriter interface {
+	CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error)
+}
+
 type ReleaseCreator struct {
 	integrations integration.Suite
 	agents       AgentReader
 	diffReader   DiffReader
+	environments EnvironmentReader
+	orders       ReleaseOrderWriter
 	permissions  PermissionReader
 	enqueue      EnqueueFunc
 	now          func() time.Time
@@ -57,6 +72,12 @@ func NewReleaseCreator(integrations integration.Suite, agents AgentReader, diffR
 		diffReader:   diffReader,
 		enqueue:      enqueue,
 		now:          time.Now,
+	}
+	if environmentReader, ok := agents.(EnvironmentReader); ok {
+		creator.environments = environmentReader
+	}
+	if orderWriter, ok := agents.(ReleaseOrderWriter); ok {
+		creator.orders = orderWriter
 	}
 	if len(permissions) > 0 {
 		creator.permissions = permissions[0]
@@ -114,52 +135,60 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 		return CreateReleaseResult{}, ErrReleaseBaselineUnsupported
 	}
 
-	id := "REL-20260607-MOCK"
-	if request.ReleaseSource == "LOCAL_HARBOR_IMAGE" {
-		if c.integrations.Registry != nil {
-			image, err := c.integrations.Registry.GetImage(ctx, request.Image.Repository, request.Image.Tag)
-			if err != nil {
-				return CreateReleaseResult{}, ErrRegistryImageCheck
-			}
-			if !image.Exists {
-				return CreateReleaseResult{}, ErrImageNotFound
-			}
-			syncResult, err := c.integrations.Registry.SyncImage(ctx, integration.SyncImageRequest{
-				SourceImage:    request.Image.Repository,
-				SourceTag:      request.Image.Tag,
-				TargetRegistry: request.TargetEnvironmentID,
-				TargetProject:  request.AgentID,
-			})
-			if err != nil {
-				return CreateReleaseResult{}, ErrRegistryImageSync
-			}
-			c.enqueueIfNeeded(ctx, id, "release", "harbor-image-sync", request.AgentID, request.TargetEnvironmentID)
-			return CreateReleaseResult{
-				ID:            id,
-				Status:        "RUNNING",
-				ExecutionMode: "AGENT_IMAGE_SYNC",
-				AgentTaskID:   id,
-				ReleaseSource: request.ReleaseSource,
-				BuildID:       syncResult.TaskID,
-				BuildStatus:   syncResult.Status,
-				CreatedAt:     c.now().Format(time.RFC3339),
-			}, nil
+	releaseSource := strings.TrimSpace(request.ReleaseSource)
+	if releaseSource == "" {
+		releaseSource = "LOCAL_HARBOR_IMAGE"
+	}
+
+	id := c.nextID("REL")
+	createdAt := c.now().Format(time.RFC3339)
+	if releaseSource == "LOCAL_HARBOR_IMAGE" {
+		if strings.TrimSpace(request.Image.Repository) == "" || strings.TrimSpace(request.Image.Tag) == "" {
+			return CreateReleaseResult{}, ErrRegistryImageCheck
+		}
+		environment, err := c.targetEnvironment(request.TargetEnvironmentID)
+		if err != nil {
+			return CreateReleaseResult{}, err
+		}
+		image, err := c.findImageTag(ctx, environment, request.Image.Repository, request.Image.Tag)
+		if err != nil {
+			return CreateReleaseResult{}, err
+		}
+		order, err := c.createReleaseOrder(domain.CreateReleaseOrderInput{
+			ID:                   id,
+			Type:                 request.Type,
+			ReleaseSource:        releaseSource,
+			ExecutionMode:        "AGENT_IMAGE_SYNC",
+			ImageRepository:      request.Image.Repository,
+			ImageTag:             request.Image.Tag,
+			ImageDigest:          firstNonEmpty(request.Image.Digest, image.Digest),
+			TargetEnvironmentID:  request.TargetEnvironmentID,
+			AgentID:              request.AgentID,
+			Status:               "PENDING_IMAGE_SYNC",
+			Progress:             0,
+			SelectedServiceCount: len(request.ServiceIDs),
+		})
+		if err != nil {
+			return CreateReleaseResult{}, err
 		}
 		c.enqueueIfNeeded(ctx, id, "release", "harbor-image-sync", request.AgentID, request.TargetEnvironmentID)
 		return CreateReleaseResult{
-			ID:            id,
-			Status:        "PENDING_IMAGE_SYNC",
-			ExecutionMode: "AGENT_IMAGE_SYNC",
-			AgentTaskID:   id,
-			ReleaseSource: request.ReleaseSource,
-			CreatedAt:     c.now().Format(time.RFC3339),
+			ID:            order.ID,
+			Status:        order.Status,
+			ExecutionMode: order.ExecutionMode,
+			AgentTaskID:   order.ID,
+			ReleaseSource: order.ReleaseSource,
+			CreatedAt:     createdAt,
 		}, nil
 	}
 
-	if c.integrations.Jenkins != nil {
-		jobName := request.Jenkins.JobName
+	if releaseSource == "JENKINS_JOB" {
+		jobName := strings.TrimSpace(request.Jenkins.JobName)
 		if jobName == "" {
-			jobName = "mock-service-release"
+			return CreateReleaseResult{}, ErrJenkinsTrigger
+		}
+		if c.integrations.Jenkins == nil {
+			return CreateReleaseResult{}, ErrJenkinsTrigger
 		}
 		build, err := c.integrations.Jenkins.TriggerBuild(ctx, integration.BuildRequest{
 			JobName:    jobName,
@@ -169,28 +198,38 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 		if err != nil {
 			return CreateReleaseResult{}, ErrJenkinsTrigger
 		}
+		order, err := c.createReleaseOrder(domain.CreateReleaseOrderInput{
+			ID:                   id,
+			Type:                 request.Type,
+			ReleaseSource:        releaseSource,
+			ExecutionMode:        "JENKINS_AGENT",
+			BuildID:              build.BuildID,
+			BuildStatus:          build.Status,
+			BuildURL:             build.URL,
+			TargetEnvironmentID:  request.TargetEnvironmentID,
+			AgentID:              request.AgentID,
+			Status:               "JENKINS_QUEUED",
+			Progress:             0,
+			SelectedServiceCount: len(request.ServiceIDs),
+		})
+		if err != nil {
+			return CreateReleaseResult{}, err
+		}
 		c.enqueueIfNeeded(ctx, id, "release", "project-agent-sync", request.AgentID, request.TargetEnvironmentID)
 		return CreateReleaseResult{
-			ID:            id,
-			Status:        "JENKINS_QUEUED",
-			ExecutionMode: "JENKINS_AGENT",
-			AgentTaskID:   id,
-			ReleaseSource: request.ReleaseSource,
+			ID:            order.ID,
+			Status:        order.Status,
+			ExecutionMode: order.ExecutionMode,
+			AgentTaskID:   order.ID,
+			ReleaseSource: order.ReleaseSource,
 			BuildID:       build.BuildID,
 			BuildStatus:   build.Status,
 			BuildURL:      build.URL,
-			CreatedAt:     c.now().Format(time.RFC3339),
+			CreatedAt:     createdAt,
 		}, nil
 	}
 
-	c.enqueueIfNeeded(ctx, id, "release", "create", request.AgentID, request.TargetEnvironmentID)
-	return CreateReleaseResult{
-		ID:            id,
-		Status:        "PENDING_CONFIRM",
-		ExecutionMode: "AGENT",
-		AgentTaskID:   id,
-		CreatedAt:     c.now().Format(time.RFC3339),
-	}, nil
+	return CreateReleaseResult{}, ErrInvalidReleaseSource
 }
 
 type CreateDeployTaskRequest struct {
@@ -313,4 +352,73 @@ func (c *ReleaseCreator) resolveServiceSelection(sourceBaselineID string, target
 		selected = append(selected, serviceID)
 	}
 	return selected, nil
+}
+
+func (c *ReleaseCreator) targetEnvironment(id string) (domain.Environment, error) {
+	if c.environments == nil {
+		return domain.Environment{ID: id}, nil
+	}
+	environment, ok := c.environments.GetEnvironment(id)
+	if !ok {
+		return domain.Environment{}, ErrEnvironmentNotFound
+	}
+	return environment, nil
+}
+
+func (c *ReleaseCreator) findImageTag(ctx context.Context, environment domain.Environment, repository string, tag string) (integration.ImageInfo, error) {
+	if c.integrations.Registry == nil {
+		return integration.ImageInfo{}, ErrRegistryImageCheck
+	}
+	tags, err := c.integrations.Registry.ListImageTags(ctx, environment, repository)
+	if err != nil {
+		return integration.ImageInfo{}, ErrRegistryImageCheck
+	}
+	for _, item := range tags {
+		if item.Tag == tag {
+			item.Exists = true
+			return item, nil
+		}
+	}
+	return integration.ImageInfo{}, ErrImageNotFound
+}
+
+func (c *ReleaseCreator) createReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error) {
+	if c.orders == nil {
+		return domain.ReleaseOrder{
+			ID:                    input.ID,
+			Type:                  input.Type,
+			SourceBaselineID:      input.SourceBaselineID,
+			ReleaseSource:         input.ReleaseSource,
+			ExecutionMode:         input.ExecutionMode,
+			BuildID:               input.BuildID,
+			BuildStatus:           input.BuildStatus,
+			BuildURL:              input.BuildURL,
+			ImageRepository:       input.ImageRepository,
+			ImageTag:              input.ImageTag,
+			ImageDigest:           input.ImageDigest,
+			TargetEnvironmentName: input.TargetEnvironmentID,
+			Status:                input.Status,
+			Progress:              input.Progress,
+			AgentName:             input.AgentID,
+		}, nil
+	}
+	order, err := c.orders.CreateReleaseOrder(input)
+	if err != nil {
+		return domain.ReleaseOrder{}, ErrReleaseOrderCreate
+	}
+	return order, nil
+}
+
+func (c *ReleaseCreator) nextID(prefix string) string {
+	now := c.now()
+	return fmt.Sprintf("%s-%s-%06d", prefix, now.Format("20060102-150405"), now.Nanosecond()/1000)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

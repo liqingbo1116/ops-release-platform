@@ -16,6 +16,9 @@ var mockFiles embed.FS
 
 type MockRepository struct {
 	environments    []domain.Environment
+	kubernetes      []domain.KubernetesCluster
+	harbor          []domain.HarborRegistry
+	jenkins         []domain.JenkinsInstance
 	agents          []domain.Agent
 	baselines       []domain.Baseline
 	baselineDetails map[string]domain.BaselineDetail
@@ -78,16 +81,20 @@ func (r *MockRepository) GetEnvironment(id string) (domain.Environment, bool) {
 
 func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Environment, error) {
 	item := domain.Environment{
-		ID:          strings.TrimSpace(input.ID),
-		Name:        strings.TrimSpace(input.Name),
-		Code:        strings.TrimSpace(input.Code),
-		Type:        strings.TrimSpace(input.Type),
-		NetworkMode: strings.TrimSpace(input.NetworkMode),
-		ClusterID:   strings.TrimSpace(input.ClusterID),
-		RegistryID:  strings.TrimSpace(input.RegistryID),
-		Status:      firstNonEmpty(strings.TrimSpace(input.Status), "HEALTHY"),
-		AgentStatus: "UNBOUND",
-		LastCheckAt: "",
+		ID:              strings.TrimSpace(input.ID),
+		Name:            strings.TrimSpace(input.Name),
+		Code:            strings.TrimSpace(input.Code),
+		Type:            strings.TrimSpace(input.Type),
+		NetworkMode:     strings.TrimSpace(input.NetworkMode),
+		ClusterID:       strings.TrimSpace(input.ClusterID),
+		Namespace:       strings.TrimSpace(input.Namespace),
+		RegistryID:      strings.TrimSpace(input.RegistryID),
+		RegistryProject: strings.TrimSpace(input.RegistryProject),
+		JenkinsID:       strings.TrimSpace(input.JenkinsID),
+		JenkinsView:     strings.TrimSpace(input.JenkinsView),
+		Status:          firstNonEmpty(strings.TrimSpace(input.Status), "HEALTHY"),
+		AgentStatus:     "UNBOUND",
+		LastCheckAt:     "",
 	}
 	if item.ID == "" || item.Name == "" || item.Code == "" || item.Type == "" || item.NetworkMode == "" {
 		return domain.Environment{}, fmt.Errorf("missing required fields")
@@ -119,8 +126,20 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 		if value := strings.TrimSpace(input.ClusterID); value != "" {
 			r.environments[index].ClusterID = value
 		}
+		if value := strings.TrimSpace(input.Namespace); value != "" {
+			r.environments[index].Namespace = value
+		}
 		if value := strings.TrimSpace(input.RegistryID); value != "" {
 			r.environments[index].RegistryID = value
+		}
+		if value := strings.TrimSpace(input.RegistryProject); value != "" {
+			r.environments[index].RegistryProject = value
+		}
+		if value := strings.TrimSpace(input.JenkinsID); value != "" {
+			r.environments[index].JenkinsID = value
+		}
+		if value := strings.TrimSpace(input.JenkinsView); value != "" {
+			r.environments[index].JenkinsView = value
 		}
 		if value := strings.TrimSpace(input.Status); value != "" {
 			r.environments[index].Status = value
@@ -140,6 +159,156 @@ func (r *MockRepository) UpdateEnvironmentCheck(id string, status string, checke
 		return r.environments[index], true, nil
 	}
 	return domain.Environment{}, false, nil
+}
+
+func (r *MockRepository) ListKubernetesClusters(query string) []domain.KubernetesCluster {
+	return filter(r.kubernetes, query, func(item domain.KubernetesCluster) string {
+		return item.ID + " " + item.Name + " " + item.APIServer + " " + item.Status
+	})
+}
+
+func (r *MockRepository) GetKubernetesCluster(id string) (domain.KubernetesCluster, bool) {
+	for _, item := range r.kubernetes {
+		if item.ID == strings.TrimSpace(id) {
+			return item, true
+		}
+	}
+	return domain.KubernetesCluster{}, false
+}
+
+func (r *MockRepository) CreateKubernetesCluster(input domain.KubernetesCluster) (domain.KubernetesCluster, error) {
+	item := domain.KubernetesCluster{
+		ID:            strings.TrimSpace(input.ID),
+		Name:          strings.TrimSpace(input.Name),
+		APIServer:     strings.TrimSpace(input.APIServer),
+		CredentialRef: strings.TrimSpace(input.CredentialRef),
+		Status:        firstNonEmpty(strings.TrimSpace(input.Status), "UNKNOWN"),
+	}
+	if item.ID == "" || item.Name == "" || item.APIServer == "" {
+		return domain.KubernetesCluster{}, fmt.Errorf("missing required fields")
+	}
+	r.kubernetes = append(r.kubernetes, item)
+	return item, nil
+}
+
+func (r *MockRepository) UpdateKubernetesCluster(id string, input domain.KubernetesCluster) (domain.KubernetesCluster, bool, error) {
+	for index := range r.kubernetes {
+		if r.kubernetes[index].ID != id {
+			continue
+		}
+		if value := strings.TrimSpace(input.Name); value != "" {
+			r.kubernetes[index].Name = value
+		}
+		if value := strings.TrimSpace(input.APIServer); value != "" {
+			r.kubernetes[index].APIServer = value
+		}
+		r.kubernetes[index].CredentialRef = strings.TrimSpace(input.CredentialRef)
+		if value := strings.TrimSpace(input.Status); value != "" {
+			r.kubernetes[index].Status = value
+		}
+		return r.kubernetes[index], true, nil
+	}
+	return domain.KubernetesCluster{}, false, nil
+}
+
+func (r *MockRepository) ListHarborRegistries(query string) []domain.HarborRegistry {
+	return filter(r.harbor, query, func(item domain.HarborRegistry) string {
+		return item.ID + " " + item.Name + " " + item.URL + " " + item.Status
+	})
+}
+
+func (r *MockRepository) GetHarborRegistry(id string) (domain.HarborRegistry, bool) {
+	for _, item := range r.harbor {
+		if item.ID == strings.TrimSpace(id) {
+			return item, true
+		}
+	}
+	return domain.HarborRegistry{}, false
+}
+
+func (r *MockRepository) CreateHarborRegistry(input domain.HarborRegistry) (domain.HarborRegistry, error) {
+	item := domain.HarborRegistry{
+		ID:            strings.TrimSpace(input.ID),
+		Name:          strings.TrimSpace(input.Name),
+		URL:           strings.TrimSpace(input.URL),
+		CredentialRef: strings.TrimSpace(input.CredentialRef),
+		Status:        firstNonEmpty(strings.TrimSpace(input.Status), "UNKNOWN"),
+	}
+	if item.ID == "" || item.Name == "" || item.URL == "" {
+		return domain.HarborRegistry{}, fmt.Errorf("missing required fields")
+	}
+	r.harbor = append(r.harbor, item)
+	return item, nil
+}
+
+func (r *MockRepository) UpdateHarborRegistry(id string, input domain.HarborRegistry) (domain.HarborRegistry, bool, error) {
+	for index := range r.harbor {
+		if r.harbor[index].ID != id {
+			continue
+		}
+		if value := strings.TrimSpace(input.Name); value != "" {
+			r.harbor[index].Name = value
+		}
+		if value := strings.TrimSpace(input.URL); value != "" {
+			r.harbor[index].URL = value
+		}
+		r.harbor[index].CredentialRef = strings.TrimSpace(input.CredentialRef)
+		if value := strings.TrimSpace(input.Status); value != "" {
+			r.harbor[index].Status = value
+		}
+		return r.harbor[index], true, nil
+	}
+	return domain.HarborRegistry{}, false, nil
+}
+
+func (r *MockRepository) ListJenkinsInstances(query string) []domain.JenkinsInstance {
+	return filter(r.jenkins, query, func(item domain.JenkinsInstance) string {
+		return item.ID + " " + item.Name + " " + item.URL + " " + item.Status
+	})
+}
+
+func (r *MockRepository) GetJenkinsInstance(id string) (domain.JenkinsInstance, bool) {
+	for _, item := range r.jenkins {
+		if item.ID == strings.TrimSpace(id) {
+			return item, true
+		}
+	}
+	return domain.JenkinsInstance{}, false
+}
+
+func (r *MockRepository) CreateJenkinsInstance(input domain.JenkinsInstance) (domain.JenkinsInstance, error) {
+	item := domain.JenkinsInstance{
+		ID:            strings.TrimSpace(input.ID),
+		Name:          strings.TrimSpace(input.Name),
+		URL:           strings.TrimSpace(input.URL),
+		CredentialRef: strings.TrimSpace(input.CredentialRef),
+		Status:        firstNonEmpty(strings.TrimSpace(input.Status), "UNKNOWN"),
+	}
+	if item.ID == "" || item.Name == "" || item.URL == "" {
+		return domain.JenkinsInstance{}, fmt.Errorf("missing required fields")
+	}
+	r.jenkins = append(r.jenkins, item)
+	return item, nil
+}
+
+func (r *MockRepository) UpdateJenkinsInstance(id string, input domain.JenkinsInstance) (domain.JenkinsInstance, bool, error) {
+	for index := range r.jenkins {
+		if r.jenkins[index].ID != id {
+			continue
+		}
+		if value := strings.TrimSpace(input.Name); value != "" {
+			r.jenkins[index].Name = value
+		}
+		if value := strings.TrimSpace(input.URL); value != "" {
+			r.jenkins[index].URL = value
+		}
+		r.jenkins[index].CredentialRef = strings.TrimSpace(input.CredentialRef)
+		if value := strings.TrimSpace(input.Status); value != "" {
+			r.jenkins[index].Status = value
+		}
+		return r.jenkins[index], true, nil
+	}
+	return domain.JenkinsInstance{}, false, nil
 }
 
 func (r *MockRepository) ListAgents(query string) []domain.Agent {
@@ -264,6 +433,81 @@ func (r *MockRepository) ListReleases(query string) []domain.ReleaseOrder {
 		return item.ID + " " + item.Type + " " + item.SourceBaselineID + " " + item.ReleaseSource + " " + item.BuildID + " " +
 			item.ImageRepository + " " + item.ImageTag + " " + item.TargetEnvironmentName + " " + item.Status + " " + item.AgentName
 	})
+}
+
+func (r *MockRepository) ListReleaseSourceServices(query string) []domain.ReleaseSourceService {
+	services := make([]domain.ReleaseSourceService, 0)
+	for _, detail := range r.baselineDetails {
+		for _, item := range detail.Items {
+			repository := strings.TrimSpace(item.ServiceName)
+			if repository == "" {
+				repository = item.ServiceID
+			}
+			services = append(services, domain.ReleaseSourceService{
+				ServiceID:       item.ServiceID,
+				ServiceName:     item.ServiceName,
+				Namespace:       item.Namespace,
+				WorkloadName:    item.WorkloadName,
+				WorkloadType:    item.WorkloadType,
+				ImageRepository: "library/" + repository,
+				Publishable:     false,
+			})
+		}
+		break
+	}
+	return filter(services, query, func(item domain.ReleaseSourceService) string {
+		return item.ServiceID + " " + item.ServiceName + " " + item.Namespace + " " + item.WorkloadName + " " + item.ImageRepository
+	})
+}
+
+func (r *MockRepository) CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error) {
+	order := domain.ReleaseOrder{
+		ID:                    strings.TrimSpace(input.ID),
+		Type:                  strings.TrimSpace(input.Type),
+		SourceBaselineID:      strings.TrimSpace(input.SourceBaselineID),
+		ReleaseSource:         strings.TrimSpace(input.ReleaseSource),
+		ExecutionMode:         strings.TrimSpace(input.ExecutionMode),
+		BuildID:               strings.TrimSpace(input.BuildID),
+		BuildStatus:           strings.TrimSpace(input.BuildStatus),
+		BuildURL:              strings.TrimSpace(input.BuildURL),
+		ImageRepository:       strings.TrimSpace(input.ImageRepository),
+		ImageTag:              strings.TrimSpace(input.ImageTag),
+		ImageDigest:           strings.TrimSpace(input.ImageDigest),
+		TargetEnvironmentName: r.resolveEnvironmentName(input.TargetEnvironmentID),
+		Status:                firstNonEmpty(strings.TrimSpace(input.Status), "PENDING"),
+		Progress:              input.Progress,
+		AgentName:             input.AgentID,
+	}
+	if order.ID == "" || order.Type == "" || input.TargetEnvironmentID == "" {
+		return domain.ReleaseOrder{}, fmt.Errorf("missing required fields")
+	}
+	if agent, ok := r.GetAgent(input.AgentID); ok {
+		order.AgentName = firstNonEmpty(agent.Name, agent.ID)
+	}
+	r.releases = append([]domain.ReleaseOrder{order}, r.releases...)
+	r.releaseDetail = domain.ReleaseDetail{
+		ID:                    order.ID,
+		Type:                  order.Type,
+		SourceBaselineID:      order.SourceBaselineID,
+		ReleaseSource:         order.ReleaseSource,
+		ExecutionMode:         order.ExecutionMode,
+		BuildID:               order.BuildID,
+		BuildStatus:           order.BuildStatus,
+		BuildURL:              order.BuildURL,
+		ImageRepository:       order.ImageRepository,
+		ImageTag:              order.ImageTag,
+		ImageDigest:           order.ImageDigest,
+		TargetEnvironmentName: order.TargetEnvironmentName,
+		Status:                order.Status,
+		Progress:              order.Progress,
+		AgentName:             order.AgentName,
+		AgentTaskID:           order.ID,
+		Steps:                 []domain.ReleaseStep{},
+		Failures:              []domain.ReleaseFailure{},
+		ActionRecords:         []domain.ActionRecord{},
+		Logs:                  []string{},
+	}
+	return order, nil
 }
 
 func (r *MockRepository) GetReleaseDetail(id string) (domain.ReleaseDetail, bool) {

@@ -22,6 +22,20 @@
 - `REMOTE_K8S_KUBECONFIG`
 - `INTEGRATION_HTTP_TIMEOUT_MS`
 
-敏感值只能写入 `.secrets/integration-connections.env` 或对应 shell/PowerShell 本地脚本，不得写入代码、文档或提交到 git。环境记录通过 `clusterId`、`registryId` 选择逻辑配置，当前固定使用 `local` 和 `remote` 两组 ID；为空时按环境类型默认选择：`LOCAL` 使用 `local`，`PROJECT` 使用 `remote`。
+K8s 集群、Harbor 仓库、Jenkins 实例是平台可单独维护的资源主数据，不以 `.secrets/` 中的固定 `local` / `remote` 逻辑 ID 作为正式数据来源。资源记录保存非敏感连接信息和 `credentialRef`：
+
+- K8s 集群：名称、API Server、`credentialRef`
+- Harbor 仓库：名称、URL、`credentialRef`
+- Jenkins 实例：名称、URL、`credentialRef`
+
+环境记录只关联这些资源，并保存环境级作用域：
+
+- K8s：`clusterId` + `namespace`
+- Harbor：`registryId` + `registryProject`
+- Jenkins：`jenkinsId` + `jenkinsView`
+
+同一个 K8s 集群、Harbor 仓库或 Jenkins 实例可以被多个环境复用，不同环境通过 namespace、Harbor project、Jenkins view 隔离。
+
+敏感值只能写入 `.secrets/integration-connections.env` 或对应 shell/PowerShell 本地脚本，不得写入代码、文档或提交到 git。`.secrets/` 只用于研发阶段本地启动和真实连通性测试；正式发布后必须由平台数据库中的资源主数据、`credentialRef` 和正式凭证后端或部署环境提供连接能力。
 
 当前 `real` 模式已接入 Harbor `/api/v2.0/systeminfo` 和 Kubernetes `/readyz` 连通性检查。Jenkins、镜像同步、工作负载发布仍未完成真实实现，进入对应 V1 阶段前必须先准备真实 Jenkins/Harbor/Kubernetes 信息并移除该阶段 mock 路径。

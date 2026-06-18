@@ -49,6 +49,7 @@ type JenkinsAdapter interface {
 
 type RegistryAdapter interface {
 	CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error)
+	ListImageTags(ctx context.Context, environment domain.Environment, repository string) ([]ImageInfo, error)
 	GetImage(ctx context.Context, image string, tag string) (ImageInfo, error)
 	SyncImage(ctx context.Context, req SyncImageRequest) (SyncImageResult, error)
 }

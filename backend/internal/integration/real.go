@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -85,7 +86,69 @@ func (a RealRegistryAdapter) CheckConnection(ctx context.Context, environment do
 }
 
 func (a RealRegistryAdapter) GetImage(ctx context.Context, image string, tag string) (ImageInfo, error) {
-	return ImageInfo{}, ErrNotImplemented
+	environment := domain.Environment{RegistryID: "local", Type: "LOCAL"}
+	tags, err := a.ListImageTags(ctx, environment, image)
+	if err != nil {
+		return ImageInfo{}, err
+	}
+	for _, item := range tags {
+		if item.Tag == tag {
+			item.Exists = true
+			return item, nil
+		}
+	}
+	return ImageInfo{Image: image, Tag: tag, Exists: false}, nil
+}
+
+func (a RealRegistryAdapter) ListImageTags(ctx context.Context, environment domain.Environment, repository string) ([]ImageInfo, error) {
+	cfg, _, err := registryConfigForEnvironment(a.configs, environment)
+	if err != nil {
+		return nil, err
+	}
+	project, repoName, err := splitHarborRepository(repository)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := harborArtifactsURL(cfg.URL, project, repoName)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Username != "" || cfg.Password != "" {
+		req.SetBasicAuth(cfg.Username, cfg.Password)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("harbor returned status %d", resp.StatusCode)
+	}
+	var artifacts []harborArtifact
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4*1024*1024)).Decode(&artifacts); err != nil {
+		return nil, err
+	}
+	items := make([]ImageInfo, 0)
+	for _, artifact := range artifacts {
+		for _, tag := range artifact.Tags {
+			if strings.TrimSpace(tag.Name) == "" {
+				continue
+			}
+			items = append(items, ImageInfo{
+				Image:     repository,
+				Tag:       tag.Name,
+				Digest:    artifact.Digest,
+				Exists:    true,
+				UpdatedAt: firstNonEmpty(tag.PushTime, artifact.PushTime),
+			})
+		}
+	}
+	return items, nil
 }
 
 func (a RealRegistryAdapter) SyncImage(ctx context.Context, req SyncImageRequest) (SyncImageResult, error) {
@@ -105,6 +168,9 @@ func (a RealKubernetesAdapter) CheckConnection(ctx context.Context, environment 
 	client, server, err := kubernetesHTTPClient(cfg, a.timeout)
 	if err != nil {
 		return IntegrationCheck{}, err
+	}
+	if configuredServer := strings.TrimSpace(environment.ClusterAPIServer); configuredServer != "" {
+		server = configuredServer
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(server, "/")+"/readyz", nil)
 	if err != nil {
@@ -189,38 +255,38 @@ func resolveExistingPath(path string) string {
 }
 
 func registryConfigForEnvironment(configs map[string]RegistryConfig, environment domain.Environment) (RegistryConfig, string, error) {
-	return keyedRegistryConfig(configs, environment.RegistryID, environment.Type)
-}
-
-func keyedRegistryConfig(configs map[string]RegistryConfig, id string, environmentType string) (RegistryConfig, string, error) {
-	key := strings.ToLower(strings.TrimSpace(id))
-	if key == "" {
-		key = defaultIntegrationKey(environmentType)
+	resourceID := strings.TrimSpace(environment.RegistryID)
+	if resourceID == "" {
+		return RegistryConfig{}, "", errors.New("registry resource is not selected")
 	}
+	key := strings.ToLower(firstNonEmpty(environment.RegistryCredentialRef, resourceID))
 	cfg, ok := configs[key]
-	if !ok {
-		return RegistryConfig{}, key, fmt.Errorf("registry config %q is not configured", key)
+	if !ok && strings.TrimSpace(environment.RegistryCredentialRef) != "" {
+		key = strings.ToLower(resourceID)
+		cfg, ok = configs[key]
 	}
-	return cfg, key, nil
+	if strings.TrimSpace(environment.RegistryURL) == "" {
+		return RegistryConfig{}, resourceID, fmt.Errorf("registry resource %q has no url", resourceID)
+	}
+	cfg.URL = environment.RegistryURL
+	return cfg, resourceID, nil
 }
 
 func clusterConfigForEnvironment(configs map[string]ClusterConfig, environment domain.Environment) (ClusterConfig, string, error) {
-	key := strings.ToLower(strings.TrimSpace(environment.ClusterID))
-	if key == "" {
-		key = defaultIntegrationKey(environment.Type)
+	resourceID := strings.TrimSpace(environment.ClusterID)
+	if resourceID == "" {
+		return ClusterConfig{}, "", errors.New("kubernetes cluster resource is not selected")
 	}
+	key := strings.ToLower(firstNonEmpty(environment.ClusterCredentialRef, resourceID))
 	cfg, ok := configs[key]
+	if !ok && strings.TrimSpace(environment.ClusterCredentialRef) != "" {
+		key = strings.ToLower(resourceID)
+		cfg, ok = configs[key]
+	}
 	if !ok {
-		return ClusterConfig{}, key, fmt.Errorf("cluster config %q is not configured", key)
+		return ClusterConfig{}, resourceID, fmt.Errorf("cluster credential %q is not configured", key)
 	}
-	return cfg, key, nil
-}
-
-func defaultIntegrationKey(environmentType string) string {
-	if strings.EqualFold(environmentType, "LOCAL") {
-		return "local"
-	}
-	return "remote"
+	return cfg, resourceID, nil
 }
 
 func appendURLPath(raw string, path string) (string, error) {
@@ -230,6 +296,60 @@ func appendURLPath(raw string, path string) (string, error) {
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + path
 	return parsed.String(), nil
+}
+
+func harborArtifactsURL(raw string, project string, repository string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	escapedRepo := url.PathEscape(repository)
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/v2.0/projects/" + url.PathEscape(project) + "/repositories/" + escapedRepo + "/artifacts"
+	query := parsed.Query()
+	query.Set("with_tag", "true")
+	query.Set("page_size", "50")
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func splitHarborRepository(repository string) (string, string, error) {
+	value := strings.TrimSpace(repository)
+	if value == "" {
+		return "", "", errors.New("image repository is empty")
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
+		value = strings.TrimPrefix(parsed.Path, "/")
+	} else {
+		parts := strings.Split(value, "/")
+		if len(parts) >= 3 && (strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") || parts[0] == "localhost") {
+			value = strings.Join(parts[1:], "/")
+		}
+	}
+	parts := strings.SplitN(strings.Trim(value, "/"), "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("image repository %q must include harbor project and repository", repository)
+	}
+	return parts[0], parts[1], nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+type harborArtifact struct {
+	Digest   string      `json:"digest"`
+	PushTime string      `json:"push_time"`
+	Tags     []harborTag `json:"tags"`
+}
+
+type harborTag struct {
+	Name     string `json:"name"`
+	PushTime string `json:"push_time"`
 }
 
 type kubeconfigFile struct {

@@ -1,5 +1,5 @@
 import { releaseMockData } from './mockData/release'
-import { getData, postData, type PageResult, useMockApi } from './client'
+import { getData, getDataWithParams, postData, type PageResult, useMockApi } from './client'
 
 export type CreateReleaseRequest = {
   type: string
@@ -33,12 +33,40 @@ export type CreateReleaseResult = {
   createdAt: string
 }
 
+export type ReleaseImageTag = {
+  tag: string
+  digest?: string
+  updatedAt?: string
+}
+
+export type ReleaseSourceService = {
+  serviceId: string
+  serviceName: string
+  namespace: string
+  workloadName: string
+  workloadType: string
+  imageRepository: string
+  tags: ReleaseImageTag[]
+  publishable: boolean
+  message?: string
+}
+
+export type ReleaseSource = {
+  environmentId: string
+  services: ReleaseSourceService[]
+  jenkinsJobs: string[]
+}
+
 export type ReleaseActionResult = {
   releaseId: string
   action: string
   status: string
   message?: string
   updatedAt?: string
+}
+
+export function listReleaseSources(environmentId: string, keyword = '') {
+  return getDataWithParams<ReleaseSource>('/api/release-sources', { environmentId, keyword })
 }
 
 export function listReleases() {

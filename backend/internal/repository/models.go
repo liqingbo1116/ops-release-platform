@@ -33,22 +33,71 @@ func (ServiceModel) TableName() string {
 }
 
 type EnvironmentModel struct {
-	ID          string     `gorm:"primaryKey;size:64"`
-	Name        string     `gorm:"size:128;not null"`
-	Code        string     `gorm:"size:128;uniqueIndex;not null"`
-	Type        string     `gorm:"size:32;index;not null"`
-	NetworkMode string     `gorm:"size:32;not null"`
-	ClusterID   string     `gorm:"size:64"`
-	RegistryID  string     `gorm:"size:64"`
-	AgentID     string     `gorm:"size:64"`
-	Status      string     `gorm:"size:32;index;not null"`
-	LastCheckAt *time.Time `gorm:"index"`
-	CreatedAt   time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
+	ID              string     `gorm:"primaryKey;size:64"`
+	Name            string     `gorm:"size:128;not null"`
+	Code            string     `gorm:"size:128;uniqueIndex;not null"`
+	Type            string     `gorm:"size:32;index;not null"`
+	NetworkMode     string     `gorm:"size:32;not null"`
+	ClusterID       string     `gorm:"size:64"`
+	Namespace       string     `gorm:"size:128"`
+	RegistryID      string     `gorm:"size:64"`
+	RegistryProject string     `gorm:"size:128"`
+	JenkinsID       string     `gorm:"size:64"`
+	JenkinsView     string     `gorm:"size:128"`
+	AgentID         string     `gorm:"size:64"`
+	Status          string     `gorm:"size:32;index;not null"`
+	LastCheckAt     *time.Time `gorm:"index"`
+	CreatedAt       time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt       time.Time  `gorm:"autoUpdateTime"`
 }
 
 func (EnvironmentModel) TableName() string {
 	return "environments"
+}
+
+type KubernetesClusterModel struct {
+	ID            string     `gorm:"primaryKey;size:64"`
+	Name          string     `gorm:"size:128;not null"`
+	APIServer     string     `gorm:"size:512;not null"`
+	CredentialRef string     `gorm:"size:256"`
+	Status        string     `gorm:"size:32;index;not null"`
+	LastCheckAt   *time.Time `gorm:"index"`
+	CreatedAt     time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
+}
+
+func (KubernetesClusterModel) TableName() string {
+	return "kubernetes_clusters"
+}
+
+type HarborRegistryModel struct {
+	ID            string     `gorm:"primaryKey;size:64"`
+	Name          string     `gorm:"size:128;not null"`
+	URL           string     `gorm:"size:512;not null"`
+	CredentialRef string     `gorm:"size:256"`
+	Status        string     `gorm:"size:32;index;not null"`
+	LastCheckAt   *time.Time `gorm:"index"`
+	CreatedAt     time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
+}
+
+func (HarborRegistryModel) TableName() string {
+	return "harbor_registries"
+}
+
+type JenkinsInstanceModel struct {
+	ID            string     `gorm:"primaryKey;size:64"`
+	Name          string     `gorm:"size:128;not null"`
+	URL           string     `gorm:"size:512;not null"`
+	CredentialRef string     `gorm:"size:256"`
+	Status        string     `gorm:"size:32;index;not null"`
+	LastCheckAt   *time.Time `gorm:"index"`
+	CreatedAt     time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
+}
+
+func (JenkinsInstanceModel) TableName() string {
+	return "jenkins_instances"
 }
 
 type AgentModel struct {
@@ -110,9 +159,18 @@ type ReleaseOrderModel struct {
 	ID                   string    `gorm:"primaryKey;size:64"`
 	Type                 string    `gorm:"size:32;index;not null"`
 	SourceBaselineID     string    `gorm:"size:64;index"`
+	ReleaseSource        string    `gorm:"size:64;index"`
+	ExecutionMode        string    `gorm:"size:64"`
+	BuildID              string    `gorm:"size:128"`
+	BuildStatus          string    `gorm:"size:64"`
+	BuildURL             string    `gorm:"size:512"`
+	ImageRepository      string    `gorm:"size:512"`
+	ImageTag             string    `gorm:"size:128"`
+	ImageDigest          string    `gorm:"size:128"`
 	TargetEnvironmentID  string    `gorm:"size:64;index;not null"`
 	AgentID              string    `gorm:"size:64;index"`
 	Status               string    `gorm:"size:32;index;not null"`
+	Progress             int       `gorm:"not null"`
 	SelectedServiceCount int       `gorm:"not null"`
 	CreatedBy            string    `gorm:"size:64;not null"`
 	CreatedAt            time.Time `gorm:"autoCreateTime"`
@@ -157,6 +215,39 @@ type DeployStepModel struct {
 
 func (DeployStepModel) TableName() string {
 	return "deploy_steps"
+}
+
+type AgentTaskModel struct {
+	ID            string            `gorm:"primaryKey;size:64"`
+	Type          string            `gorm:"size:64;index;not null"`
+	Action        string            `gorm:"size:128;not null"`
+	Status        string            `gorm:"size:32;index;not null"`
+	Step          string            `gorm:"size:128;not null"`
+	AgentID       string            `gorm:"size:64;index"`
+	EnvironmentID string            `gorm:"size:64;index"`
+	LeaseID       string            `gorm:"size:128;index"`
+	LeaseUntil    *time.Time        `gorm:"index"`
+	Payload       map[string]string `gorm:"serializer:json;type:jsonb;not null"`
+	StepURL       string            `gorm:"size:512"`
+	LogURL        string            `gorm:"size:512"`
+	ResultURL     string            `gorm:"size:512"`
+	CreatedAt     time.Time         `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time         `gorm:"autoUpdateTime"`
+}
+
+func (AgentTaskModel) TableName() string {
+	return "agent_tasks"
+}
+
+type AgentTaskLogModel struct {
+	ID        uint      `gorm:"primaryKey"`
+	TaskID    string    `gorm:"size:64;index;not null"`
+	Line      string    `gorm:"type:text;not null"`
+	CreatedAt time.Time `gorm:"autoCreateTime;index"`
+}
+
+func (AgentTaskLogModel) TableName() string {
+	return "agent_task_logs"
 }
 
 type UserModel struct {

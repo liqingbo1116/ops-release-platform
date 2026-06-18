@@ -82,7 +82,7 @@ skills/
 3. 本地启动、验证、提交、安全规则变化后，更新 `ops-release-platform-dev/references/workflows.md`。
 4. 部署或本地运行拓扑变化后，更新 `ops-release-platform-deployment/references/deployment.md`。
 5. 不在任何 skill 或 docs 中记录真实服务器连接信息、密码、token、SSH 端口或数据库连接串。
-6. 真实连接配置只保存在 `.secrets/`，该目录不得提交。
+6. `.secrets/` 只保存研发阶段私有凭据和本地启动运行值，该目录不得提交；正式平台数据必须在环境资源管理中维护 K8s、Harbor、Jenkins 资源及其 `credentialRef`，环境只关联资源并填写 namespace、Harbor project、Jenkins view。
 
 ## 校验
 

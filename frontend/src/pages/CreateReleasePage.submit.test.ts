@@ -12,6 +12,7 @@ const {
   listEnvironments,
   getBaselineDetail,
   getBaselineCompare,
+  listReleaseSources,
   createRelease,
   createDeployTask,
   messageError,
@@ -31,6 +32,7 @@ const {
   listEnvironments: vi.fn(),
   getBaselineDetail: vi.fn(),
   getBaselineCompare: vi.fn(),
+  listReleaseSources: vi.fn(),
   createRelease: vi.fn(),
   createDeployTask: vi.fn(),
   messageError: vi.fn(),
@@ -82,6 +84,7 @@ vi.mock('@/api/releases', async () => {
   const actual = await vi.importActual<typeof import('@/api/releases')>('@/api/releases')
   return {
     ...actual,
+    listReleaseSources,
     createRelease,
   }
 })
@@ -132,6 +135,7 @@ describe('CreateReleasePage submit flow', () => {
     listEnvironments.mockReset()
     getBaselineDetail.mockReset()
     getBaselineCompare.mockReset()
+    listReleaseSources.mockReset()
     createRelease.mockReset()
     createDeployTask.mockReset()
     messageError.mockReset()
@@ -191,31 +195,34 @@ describe('CreateReleasePage submit flow', () => {
         },
       ],
     })
+    listReleaseSources.mockResolvedValue({
+      environmentId: 'env-project-x-prod',
+      services: [
+        {
+          serviceId: 'svc-project-x-order',
+          serviceName: 'order-service',
+          namespace: 'project-x',
+          workloadName: 'order-service',
+          workloadType: 'Deployment',
+          imageRepository: 'reg.k8sprokuma.org:5000/project-x/order',
+          tags: [
+            {
+              tag: 'v1.0.0',
+              digest: 'sha256:real-order-v100',
+            },
+          ],
+          publishable: true,
+        },
+      ],
+      jenkinsJobs: ['project-x-release'],
+    })
   })
 
   it('blocks submission when no services are selected', async () => {
-    getBaselineCompare.mockResolvedValue({
-      sourceBaselineId: 'BL-20260607-0001',
-      targetEnvironmentId: 'env-project-x-prod',
-      summary: {
-        consistent: 1,
-        needUpdate: 0,
-        missingInTarget: 1,
-        workloadError: 0,
-        publishable: 1,
-      },
-      items: [
-        {
-          serviceId: 'svc-project-x-web',
-          serviceName: 'web-service',
-          namespace: 'project-x',
-          sourceTag: 'v1.0.0',
-          targetTag: '',
-          diffStatus: 'MISSING_IN_TARGET',
-          publishable: true,
-          strategy: 'AUTO',
-        },
-      ],
+    listReleaseSources.mockResolvedValue({
+      environmentId: 'env-project-x-prod',
+      services: [],
+      jenkinsJobs: ['project-x-release'],
     })
 
     const wrapper = mountPage()
@@ -293,7 +300,7 @@ describe('CreateReleasePage submit flow', () => {
     expect(createDeployTask).not.toHaveBeenCalled()
   })
 
-  it('submits release with NEED_UPDATE services without source baseline id', async () => {
+  it('submits Jenkins release from real release source without source baseline id', async () => {
     createRelease.mockResolvedValue({
       id: 'REL-20260608-001',
       status: 'PENDING_CONFIRM',
@@ -306,6 +313,8 @@ describe('CreateReleasePage submit flow', () => {
     await flushPromises()
     await nextTick()
 
+    ;(wrapper.vm as unknown as { releaseSource: 'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE' }).releaseSource = 'JENKINS_JOB'
+    await nextTick()
     await wrapper.find('button').trigger('click')
 
     const releaseRequest = createRelease.mock.calls[0][0]
@@ -314,6 +323,10 @@ describe('CreateReleasePage submit flow', () => {
       targetEnvironmentId: 'env-project-x-prod',
       agentId: 'agent-project-x',
       serviceIds: ['svc-project-x-order'],
+      releaseSource: 'JENKINS_JOB',
+      jenkins: expect.objectContaining({
+        jobName: 'project-x-release',
+      }),
     }))
     expect(releaseRequest).not.toHaveProperty('sourceBaselineId')
     expect(createDeployTask).not.toHaveBeenCalled()
@@ -339,8 +352,6 @@ describe('CreateReleasePage submit flow', () => {
     await flushPromises()
     await nextTick()
 
-    ;(wrapper.vm as unknown as { releaseSource: 'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE' }).releaseSource = 'LOCAL_HARBOR_IMAGE'
-    await nextTick()
     await wrapper.find('button').trigger('click')
 
     expect(createRelease).toHaveBeenCalledWith(expect.objectContaining({
@@ -350,9 +361,9 @@ describe('CreateReleasePage submit flow', () => {
       agentId: 'agent-project-x',
       serviceIds: ['svc-project-x-order'],
       image: {
-        repository: 'harbor.local/project-x/order',
+        repository: 'reg.k8sprokuma.org:5000/project-x/order',
         tag: 'v1.0.0',
-        digest: 'sha256:mock-v1.0.0',
+        digest: 'sha256:real-order-v100',
       },
       jenkins: undefined,
     }))

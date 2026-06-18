@@ -8,12 +8,53 @@
 |---|---|---|---|
 | id | string | 是 | 环境 ID |
 | name | string | 是 | 环境名称 |
-| code | string | 是 | 环境编码 |
+| code | string | 是 | 环境编码；用户填写的唯一业务标识，创建时系统默认生成 `env-<code>` 作为环境 ID |
 | type | enum | 是 | LOCAL / PROJECT / TEST / STAGING |
 | networkMode | enum | 是 | DIRECT / AGENT / OFFLINE |
-| clusterId | string | 否 | K8s 集群 ID |
-| registryId | string | 否 | Harbor/镜像仓库 ID |
+| clusterId | string | 否 | 关联的 K8s 集群资源 ID |
+| namespace | string | 否 | 当前环境在 K8s 集群中的 namespace |
+| registryId | string | 否 | 关联的 Harbor/镜像仓库资源 ID |
+| registryProject | string | 否 | 当前环境使用的 Harbor 项目 |
+| jenkinsId | string | 否 | 关联的 Jenkins 实例资源 ID |
+| jenkinsView | string | 否 | 当前环境使用的 Jenkins 视图或项目范围 |
 | agentId | string | 否 | 绑定 Agent |
+| status | enum | 是 | HEALTHY / DEGRADED / OFFLINE / UNKNOWN |
+| lastCheckAt | datetime | 否 | 最近连接测试时间 |
+
+V1 环境管理必须把 K8s、Harbor、Jenkins 作为平台可维护的资源主数据，不把它们隐藏在 `.secrets/` 中作为正式数据来源。同一个 K8s 集群、Harbor 仓库或 Jenkins 实例可以被多个环境复用，环境记录只保存资源 ID 和环境级作用域：`namespace`、`registryProject`、`jenkinsView`。
+
+`.secrets/` 只用于研发阶段本地启动前后端、Agent 或连接私有工具时装载敏感值。正式使用时，平台数据库保存资源主数据，凭证字段只保存 `credentialRef`，由后续正式凭证后端或部署环境提供真实密钥。
+
+## KubernetesCluster
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| id | string | 是 | K8s 集群资源 ID |
+| name | string | 是 | 集群名称 |
+| apiServer | string | 是 | Kubernetes API Server 地址 |
+| credentialRef | string | 否 | 凭据引用，不保存明文 kubeconfig |
+| status | enum | 是 | HEALTHY / DEGRADED / OFFLINE / UNKNOWN |
+| lastCheckAt | datetime | 否 | 最近连接测试时间 |
+
+## HarborRegistry
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| id | string | 是 | Harbor/镜像仓库资源 ID |
+| name | string | 是 | 仓库名称 |
+| url | string | 是 | Harbor/镜像仓库地址，需支持 HTTP 和 HTTPS |
+| credentialRef | string | 否 | 凭据引用，不保存明文账号密码 |
+| status | enum | 是 | HEALTHY / DEGRADED / OFFLINE / UNKNOWN |
+| lastCheckAt | datetime | 否 | 最近连接测试时间 |
+
+## JenkinsInstance
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| id | string | 是 | Jenkins 实例资源 ID |
+| name | string | 是 | Jenkins 名称 |
+| url | string | 是 | Jenkins 地址 |
+| credentialRef | string | 否 | 凭据引用，不保存明文账号密码或 token |
 | status | enum | 是 | HEALTHY / DEGRADED / OFFLINE / UNKNOWN |
 | lastCheckAt | datetime | 否 | 最近连接测试时间 |
 

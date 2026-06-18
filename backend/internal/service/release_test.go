@@ -29,8 +29,8 @@ func TestCreateReleaseWithLocalHarborImageUsesRegistry(t *testing.T) {
 	if result.ExecutionMode != "AGENT_IMAGE_SYNC" {
 		t.Fatalf("expected AGENT_IMAGE_SYNC, got %s", result.ExecutionMode)
 	}
-	if result.BuildID == "" || result.BuildStatus != "SUCCESS" {
-		t.Fatalf("expected sync task metadata, got %+v", result)
+	if result.AgentTaskID == "" || result.Status != "PENDING_IMAGE_SYNC" {
+		t.Fatalf("expected image sync task metadata, got %+v", result)
 	}
 }
 

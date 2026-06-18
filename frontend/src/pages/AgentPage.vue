@@ -16,15 +16,13 @@
       <MetricCard label="在线" :value="onlineCount" foot="心跳正常" tone="good" />
       <MetricCard label="执行中" :value="runningCount" foot="发布 / 部署" />
       <MetricCard label="离线" :value="offlineCount" foot="需排查" tone="bad" />
-      <MetricCard label="平均心跳" value="18s" />
-      <MetricCard label="版本覆盖" value="92%" />
     </div>
 
     <div class="readiness-grid">
       <el-alert
         type="info"
         :closable="false"
-        title="V1 Agent 先按 Linux 主机 + docker compose 部署；真实联调前需确认 Agent 可访问平台 API、Jenkins、Harbor/Registry 与 Kubernetes。"
+        title="V1 Agent 研发阶段按二进制直接启动；真实联调前需确认 Agent 可访问平台 API、Jenkins、Harbor/Registry 与 Kubernetes。"
       />
       <el-alert
         v-if="offlineCount > 0"
@@ -37,7 +35,7 @@
     <el-card shadow="never">
       <div class="toolbar">
         <el-input v-model="keyword" placeholder="搜索 Agent、环境、能力" clearable />
-        <el-button :loading="loading" @click="loadAgents">下发探测任务</el-button>
+        <el-button :loading="loading" @click="loadData">下发探测任务</el-button>
       </div>
       <el-alert v-if="errorMessage" class="agent-alert" type="warning" :closable="false" :title="errorMessage" />
       <el-table v-loading="loading" :data="filteredRows" class="wide-table">
@@ -59,7 +57,7 @@
       </el-table>
     </el-card>
 
-    <AgentRegisterDrawer v-model:visible="drawerVisible" :environments="environmentMockData.environments" />
+    <AgentRegisterDrawer v-model:visible="drawerVisible" :environments="environments" />
   </section>
 </template>
 
@@ -69,12 +67,13 @@ import AgentRegisterDrawer from '@/components/AgentRegisterDrawer.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { listAgents, type AgentInfo } from '@/api/agents'
-import { environmentMockData } from '@/api/mockData/environment'
+import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { formatDateTime, joinCapabilities } from '@/utils/format'
 
 const keyword = ref('')
 const drawerVisible = ref(false)
 const agents = ref<AgentInfo[]>([])
+const environments = ref<EnvironmentInfo[]>([])
 const loading = ref(false)
 const errorMessage = ref('')
 
@@ -91,10 +90,16 @@ const filteredRows = computed(() => {
 })
 
 async function loadAgents() {
+  return loadData()
+}
+
+async function loadData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    agents.value = await listAgents()
+    const [agentItems, environmentItems] = await Promise.all([listAgents(), listEnvironments()])
+    agents.value = agentItems
+    environments.value = environmentItems
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Agent 状态加载失败'
   } finally {
@@ -102,7 +107,7 @@ async function loadAgents() {
   }
 }
 
-onMounted(loadAgents)
+onMounted(loadData)
 </script>
 
 <style scoped>

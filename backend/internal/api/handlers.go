@@ -21,12 +21,12 @@ import (
 type Handler struct {
 	repo         repository.Store
 	queue        *agent.Queue
-	protocol     *agent.ProtocolStore
+	protocol     agent.Protocol
 	integrations integration.Suite
 	service      *service.ReleaseCreator
 }
 
-func NewHandler(repo repository.Store, queue *agent.Queue, protocol *agent.ProtocolStore, integrations integration.Suite) *Handler {
+func NewHandler(repo repository.Store, queue *agent.Queue, protocol agent.Protocol, integrations integration.Suite) *Handler {
 	if protocol == nil {
 		protocol = agent.NewProtocolStore()
 	}
@@ -123,6 +123,11 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 		BadRequest(c, "real environment integrations are not configured")
 		return
 	}
+	environment, err := h.environmentWithIntegrationResources(environment)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
 	checks := make([]integration.IntegrationCheck, 0, 2)
 	if h.integrations.Kubernetes != nil {
 		check, err := h.integrations.Kubernetes.CheckConnection(c.Request.Context(), environment)
@@ -154,12 +159,157 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 	})
 }
 
+func (h *Handler) environmentWithIntegrationResources(environment domain.Environment) (domain.Environment, error) {
+	if strings.TrimSpace(environment.ClusterID) == "" {
+		return domain.Environment{}, fmt.Errorf("kubernetes cluster is required")
+	}
+	if strings.TrimSpace(environment.Namespace) == "" {
+		return domain.Environment{}, fmt.Errorf("kubernetes namespace is required")
+	}
+	cluster, ok := h.repo.GetKubernetesCluster(environment.ClusterID)
+	if !ok {
+		return domain.Environment{}, fmt.Errorf("kubernetes cluster not found")
+	}
+	if strings.TrimSpace(environment.RegistryID) == "" {
+		return domain.Environment{}, fmt.Errorf("harbor registry is required")
+	}
+	if strings.TrimSpace(environment.RegistryProject) == "" {
+		return domain.Environment{}, fmt.Errorf("harbor project is required")
+	}
+	registry, ok := h.repo.GetHarborRegistry(environment.RegistryID)
+	if !ok {
+		return domain.Environment{}, fmt.Errorf("harbor registry not found")
+	}
+	environment.ClusterAPIServer = cluster.APIServer
+	environment.ClusterCredentialRef = cluster.CredentialRef
+	environment.RegistryURL = registry.URL
+	environment.RegistryCredentialRef = registry.CredentialRef
+	if strings.TrimSpace(environment.JenkinsID) != "" {
+		jenkins, ok := h.repo.GetJenkinsInstance(environment.JenkinsID)
+		if !ok {
+			return domain.Environment{}, fmt.Errorf("jenkins instance not found")
+		}
+		environment.JenkinsURL = jenkins.URL
+		environment.JenkinsCredentialRef = jenkins.CredentialRef
+	}
+	return environment, nil
+}
+
+func (h *Handler) ListKubernetesClusters(c *gin.Context) {
+	OK(c, paginate(h.repo.ListKubernetesClusters(c.Query("keyword")), c))
+}
+
+func (h *Handler) CreateKubernetesCluster(c *gin.Context) {
+	var request domain.KubernetesCluster
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid kubernetes cluster request")
+		return
+	}
+	item, err := h.repo.CreateKubernetesCluster(request)
+	if err != nil {
+		BadRequest(c, "invalid kubernetes cluster request")
+		return
+	}
+	Created(c, item)
+}
+
+func (h *Handler) UpdateKubernetesCluster(c *gin.Context) {
+	var request domain.KubernetesCluster
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid kubernetes cluster request")
+		return
+	}
+	item, ok, err := h.repo.UpdateKubernetesCluster(c.Param("id"), request)
+	if err != nil {
+		BadRequest(c, "invalid kubernetes cluster request")
+		return
+	}
+	if !ok {
+		NotFound(c, "kubernetes cluster not found")
+		return
+	}
+	OK(c, item)
+}
+
+func (h *Handler) ListHarborRegistries(c *gin.Context) {
+	OK(c, paginate(h.repo.ListHarborRegistries(c.Query("keyword")), c))
+}
+
+func (h *Handler) CreateHarborRegistry(c *gin.Context) {
+	var request domain.HarborRegistry
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid harbor registry request")
+		return
+	}
+	item, err := h.repo.CreateHarborRegistry(request)
+	if err != nil {
+		BadRequest(c, "invalid harbor registry request")
+		return
+	}
+	Created(c, item)
+}
+
+func (h *Handler) UpdateHarborRegistry(c *gin.Context) {
+	var request domain.HarborRegistry
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid harbor registry request")
+		return
+	}
+	item, ok, err := h.repo.UpdateHarborRegistry(c.Param("id"), request)
+	if err != nil {
+		BadRequest(c, "invalid harbor registry request")
+		return
+	}
+	if !ok {
+		NotFound(c, "harbor registry not found")
+		return
+	}
+	OK(c, item)
+}
+
+func (h *Handler) ListJenkinsInstances(c *gin.Context) {
+	OK(c, paginate(h.repo.ListJenkinsInstances(c.Query("keyword")), c))
+}
+
+func (h *Handler) CreateJenkinsInstance(c *gin.Context) {
+	var request domain.JenkinsInstance
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid jenkins instance request")
+		return
+	}
+	item, err := h.repo.CreateJenkinsInstance(request)
+	if err != nil {
+		BadRequest(c, "invalid jenkins instance request")
+		return
+	}
+	Created(c, item)
+}
+
+func (h *Handler) UpdateJenkinsInstance(c *gin.Context) {
+	var request domain.JenkinsInstance
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid jenkins instance request")
+		return
+	}
+	item, ok, err := h.repo.UpdateJenkinsInstance(c.Param("id"), request)
+	if err != nil {
+		BadRequest(c, "invalid jenkins instance request")
+		return
+	}
+	if !ok {
+		NotFound(c, "jenkins instance not found")
+		return
+	}
+	OK(c, item)
+}
+
 func (h *Handler) ListAgents(c *gin.Context) {
 	OK(c, paginate(h.repo.ListAgents(c.Query("keyword")), c))
 }
 
 func (h *Handler) CreateAgentRegisterToken(c *gin.Context) {
 	var request struct {
+		AgentID       string `json:"agentId"`
 		EnvironmentID string `json:"environmentId"`
 		TTLMinutes    int    `json:"ttlMinutes"`
 	}
@@ -174,12 +324,35 @@ func (h *Handler) CreateAgentRegisterToken(c *gin.Context) {
 	if request.TTLMinutes <= 0 {
 		request.TTLMinutes = 10
 	}
+	if _, exists := h.repo.GetEnvironment(request.EnvironmentID); !exists {
+		BadRequest(c, "environment not found")
+		return
+	}
+	request.AgentID = strings.TrimSpace(request.AgentID)
+	if request.AgentID == "" {
+		request.AgentID = "agent-" + strings.TrimPrefix(request.EnvironmentID, "env-")
+	}
 	token := "agt_" + request.EnvironmentID + "_" + strconv.FormatInt(time.Now().Unix(), 10)
+	baseURL := requestBaseURL(c)
 	Created(c, gin.H{
 		"token":     token,
 		"expiresAt": time.Now().Add(time.Duration(request.TTLMinutes) * time.Minute).Format(time.RFC3339),
-		"installCommand": "curl -fsSL https://platform.local/agent/install.sh | bash -s -- --token " +
-			token + " --server https://platform.local",
+		"installCommand": strings.Join([]string{
+			"cat > agent.env <<'EOF'",
+			"AGENT_ID=" + request.AgentID,
+			"AGENT_ENVIRONMENT_ID=" + request.EnvironmentID,
+			"PLATFORM_URL=" + baseURL,
+			"AGENT_TOKEN=" + token,
+			"AGENT_MODE=mock",
+			"AGENT_HEALTH_PORT=18080",
+			"AGENT_POLL_INTERVAL_SECONDS=5",
+			"AGENT_HEARTBEAT_INTERVAL_SECONDS=15",
+			"AGENT_HTTP_TIMEOUT_SECONDS=10",
+			"AGENT_MAX_TASKS=1",
+			"AGENT_CAPABILITIES=mock-executor,image-sync,kubectl,http-check",
+			"EOF",
+			"./ops-release-agent -f ./agent.env",
+		}, "\n"),
 	})
 }
 
@@ -416,6 +589,51 @@ func (h *Handler) ListReleases(c *gin.Context) {
 	OK(c, paginate(h.repo.ListReleases(c.Query("keyword")), c))
 }
 
+func (h *Handler) ListReleaseSources(c *gin.Context) {
+	environmentID := strings.TrimSpace(c.Query("environmentId"))
+	if environmentID == "" {
+		BadRequest(c, "environmentId is required")
+		return
+	}
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	if h.integrations.Registry == nil {
+		BadRequest(c, "registry integration is not configured")
+		return
+	}
+
+	services := h.repo.ListReleaseSourceServices(c.Query("keyword"))
+	for index := range services {
+		if strings.TrimSpace(services[index].ImageRepository) == "" {
+			services[index].Tags = []domain.ReleaseImageTag{}
+			services[index].Publishable = false
+			services[index].Message = "image repository is not configured"
+			continue
+		}
+		tags, err := h.integrations.Registry.ListImageTags(c.Request.Context(), environment, services[index].ImageRepository)
+		if err != nil {
+			services[index].Tags = []domain.ReleaseImageTag{}
+			services[index].Publishable = false
+			services[index].Message = "registry image tags unavailable"
+			continue
+		}
+		services[index].Tags = toReleaseImageTags(tags)
+		services[index].Publishable = len(services[index].Tags) > 0
+		if !services[index].Publishable {
+			services[index].Message = "no image tags found"
+		}
+	}
+
+	OK(c, domain.ReleaseSource{
+		EnvironmentID: environmentID,
+		Services:      services,
+		JenkinsJobs:   []string{},
+	})
+}
+
 func (h *Handler) CreateRelease(c *gin.Context) {
 	var request service.CreateReleaseRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -435,6 +653,12 @@ func (h *Handler) CreateRelease(c *gin.Context) {
 			BadRequest(c, "agent does not belong to target environment")
 		case service.ErrEnvironmentPermission:
 			Forbidden(c, "environment permission denied")
+		case service.ErrInvalidReleaseSource:
+			BadRequest(c, "release source must be LOCAL_HARBOR_IMAGE or JENKINS_JOB")
+		case service.ErrEnvironmentNotFound:
+			BadRequest(c, "environment not found")
+		case service.ErrReleaseOrderCreate:
+			BadRequest(c, "release order create failed")
 		case service.ErrJenkinsTrigger:
 			BadRequest(c, "jenkins trigger failed")
 		case service.ErrRegistryImageCheck:
@@ -460,12 +684,8 @@ func (h *Handler) CreateRelease(c *gin.Context) {
 func (h *Handler) GetRelease(c *gin.Context) {
 	detail, ok := h.repo.GetReleaseDetail(c.Param("id"))
 	if !ok {
-		detail, ok = h.repo.GetReleaseDetail("")
-		if !ok {
-			NotFound(c, "release not found")
-			return
-		}
-		detail.ID = c.Param("id")
+		NotFound(c, "release not found")
+		return
 	}
 	OK(c, detail)
 }
@@ -650,6 +870,21 @@ func requestBaseURL(c *gin.Context) string {
 		host = c.Request.Host
 	}
 	return scheme + "://" + host
+}
+
+func toReleaseImageTags(items []integration.ImageInfo) []domain.ReleaseImageTag {
+	tags := make([]domain.ReleaseImageTag, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.Tag) == "" {
+			continue
+		}
+		tags = append(tags, domain.ReleaseImageTag{
+			Tag:       item.Tag,
+			Digest:    item.Digest,
+			UpdatedAt: item.UpdatedAt,
+		})
+	}
+	return tags
 }
 
 func paginate[T any](items []T, c *gin.Context) domain.PageResult[T] {

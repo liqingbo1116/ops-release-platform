@@ -1,12 +1,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { listAgents } = vi.hoisted(() => ({
+const { listAgents, listEnvironments } = vi.hoisted(() => ({
   listAgents: vi.fn(),
+  listEnvironments: vi.fn(),
 }))
 
 vi.mock('@/api/agents', () => ({
   listAgents,
+}))
+
+vi.mock('@/api/environments', () => ({
+  listEnvironments,
 }))
 
 import AgentPage from './AgentPage.vue'
@@ -14,6 +19,7 @@ import AgentPage from './AgentPage.vue'
 describe('AgentPage', () => {
   beforeEach(() => {
     listAgents.mockReset()
+    listEnvironments.mockReset()
     listAgents.mockResolvedValue([
       {
         id: 'agent-project-x',
@@ -38,6 +44,20 @@ describe('AgentPage', () => {
         currentTaskId: null,
       },
     ])
+    listEnvironments.mockResolvedValue([
+      {
+        id: 'env-project-x-prod',
+        name: '项目 X 生产',
+        code: 'project-x-prod',
+        type: 'PROJECT',
+        networkMode: 'AGENT',
+        clusterId: 'remote',
+        registryId: 'remote',
+        status: 'HEALTHY',
+        agentStatus: 'ONLINE',
+        lastCheckAt: '2026-06-07T12:40:12+08:00',
+      },
+    ])
   })
 
   it('shows Agent readiness, heartbeat, capabilities, recent task, and offline blocker', async () => {
@@ -57,7 +77,8 @@ describe('AgentPage', () => {
     await flushPromises()
 
     expect(listAgents).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('Linux 主机 + docker compose')
+    expect(listEnvironments).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('二进制直接启动')
     expect(wrapper.text()).toContain('agent-project-x')
     expect(wrapper.text()).toContain('项目 X 生产')
     expect(wrapper.text()).toContain('image-sync / kubectl / shell / http-check')

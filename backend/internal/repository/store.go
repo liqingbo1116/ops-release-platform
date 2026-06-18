@@ -12,6 +12,18 @@ type Store interface {
 	CreateEnvironment(input domain.Environment) (domain.Environment, error)
 	UpdateEnvironment(id string, input domain.Environment) (domain.Environment, bool, error)
 	UpdateEnvironmentCheck(id string, status string, checkedAt time.Time) (domain.Environment, bool, error)
+	ListKubernetesClusters(query string) []domain.KubernetesCluster
+	GetKubernetesCluster(id string) (domain.KubernetesCluster, bool)
+	CreateKubernetesCluster(input domain.KubernetesCluster) (domain.KubernetesCluster, error)
+	UpdateKubernetesCluster(id string, input domain.KubernetesCluster) (domain.KubernetesCluster, bool, error)
+	ListHarborRegistries(query string) []domain.HarborRegistry
+	GetHarborRegistry(id string) (domain.HarborRegistry, bool)
+	CreateHarborRegistry(input domain.HarborRegistry) (domain.HarborRegistry, error)
+	UpdateHarborRegistry(id string, input domain.HarborRegistry) (domain.HarborRegistry, bool, error)
+	ListJenkinsInstances(query string) []domain.JenkinsInstance
+	GetJenkinsInstance(id string) (domain.JenkinsInstance, bool)
+	CreateJenkinsInstance(input domain.JenkinsInstance) (domain.JenkinsInstance, error)
+	UpdateJenkinsInstance(id string, input domain.JenkinsInstance) (domain.JenkinsInstance, bool, error)
 	ListAgents(query string) []domain.Agent
 	GetAgent(id string) (domain.Agent, bool)
 	UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool)
@@ -27,6 +39,8 @@ type Store interface {
 	GetBaselineDetail(id string) (domain.BaselineDetail, bool)
 	LockBaseline(id string) (domain.BaselineDetail, bool)
 	GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool)
+	ListReleaseSourceServices(query string) []domain.ReleaseSourceService
+	CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error)
 	ListReleases(query string) []domain.ReleaseOrder
 	GetReleaseDetail(id string) (domain.ReleaseDetail, bool)
 	ListDeployTasks(query string) []domain.DeployTask

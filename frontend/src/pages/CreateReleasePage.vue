@@ -35,7 +35,7 @@
             </el-radio-group>
           </el-form-item>
           <el-form-item v-if="releaseMode === 'SERVICE_RELEASE' && releaseSource === 'JENKINS_JOB'" label="Jenkins job">
-            <el-select v-model="jenkinsJob">
+            <el-select v-model="jenkinsJob" :disabled="jenkinsJobOptions.length === 0">
               <el-option
                 v-for="job in jenkinsJobOptions"
                 :key="job"
@@ -45,7 +45,7 @@
             </el-select>
           </el-form-item>
           <el-form-item v-if="releaseMode === 'SERVICE_RELEASE' && releaseSource === 'LOCAL_HARBOR_IMAGE'" label="本地 Harbor 镜像 tag">
-            <el-select v-model="imageTag">
+            <el-select v-model="imageTag" :disabled="imageTagOptions.length === 0">
               <el-option
                 v-for="tag in imageTagOptions"
                 :key="tag"
@@ -110,10 +110,9 @@ import { listAgents } from '@/api/agents'
 import { createDeployTask } from '@/api/deployTasks'
 import { getBaselineCompare, getBaselineDetail } from '@/api/baselines'
 import { listEnvironments } from '@/api/environments'
-import { createRelease } from '@/api/releases'
-import { agentMockData } from '@/api/mockData/agent'
-import { baselineMockData } from '@/api/mockData/baseline'
-import { environmentMockData } from '@/api/mockData/environment'
+import { createRelease, listReleaseSources, type ReleaseSource, type ReleaseSourceService } from '@/api/releases'
+import type { AgentInfo } from '@/api/agents'
+import type { EnvironmentInfo } from '@/api/environments'
 import { useAuthStore } from '@/stores/authStore'
 import { resolveCreateReleaseErrorMessage } from './createReleaseErrors'
 
@@ -122,15 +121,29 @@ const router = useRouter()
 const authStore = useAuthStore()
 const keyword = ref('')
 const releaseMode = ref<'SERVICE_RELEASE' | 'SERVICE_DEPLOYMENT'>('SERVICE_RELEASE')
-const releaseSource = ref<'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE'>('JENKINS_JOB')
+const releaseSource = ref<'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE'>('LOCAL_HARBOR_IMAGE')
 const jenkinsJob = ref('')
 const imageTag = ref('')
 const selectedIds = ref<string[]>([])
 const submitting = ref(false)
-const baselineDetail = ref({ ...baselineMockData.baselineDetail })
-const diffResult = ref({ ...baselineMockData.diffResult })
-const agents = ref<typeof agentMockData.agents>([])
-const environments = ref<typeof environmentMockData.environments>([])
+const baselineDetail = ref({
+  id: '',
+  name: '',
+  sourceEnvironmentName: '',
+})
+const diffResult = ref({
+  sourceBaselineId: '',
+  targetEnvironmentId: '',
+  items: [] as ServiceTableItem[],
+})
+const releaseSourceData = ref<ReleaseSource | null>(null)
+const releaseSourceLoading = ref(false)
+const releaseSourceError = ref('')
+const agentsError = ref('')
+const environmentsError = ref('')
+const deploymentSourceError = ref('')
+const agents = ref<AgentInfo[]>([])
+const environments = ref<EnvironmentInfo[]>([])
 const sourceBaselineId = ref('')
 const targetEnvironmentId = ref('')
 const agentId = ref('')
@@ -141,11 +154,39 @@ const options = ref({
   auditLog: true,
 })
 
+type ServiceTableItem = {
+  serviceId: string
+  serviceName: string
+  namespace: string
+  sourceTag: string
+  targetTag: string | null
+  diffStatus: string
+  publishable: boolean
+  strategy: string
+}
+
+const releaseSourceItems = computed<ServiceTableItem[]>(() => {
+  return (releaseSourceData.value?.services ?? []).map((service) => {
+    const tag = service.tags[0]
+    return {
+      serviceId: service.serviceId,
+      serviceName: service.serviceName,
+      namespace: service.namespace,
+      sourceTag: tag?.tag ?? '',
+      targetTag: null,
+      diffStatus: service.publishable ? 'IMAGE_AVAILABLE' : 'IMAGE_UNAVAILABLE',
+      publishable: service.publishable,
+      strategy: service.publishable ? '选择 Harbor 镜像 tag' : service.message || 'Harbor 镜像不可用',
+    }
+  })
+})
+
 const candidateItems = computed(() => {
+  if (releaseMode.value === 'SERVICE_RELEASE') {
+    return releaseSourceItems.value
+  }
   return diffResult.value.items.filter((item) =>
-    releaseMode.value === 'SERVICE_DEPLOYMENT'
-      ? item.diffStatus === 'MISSING_IN_TARGET'
-      : item.diffStatus === 'NEED_UPDATE',
+    item.diffStatus === 'MISSING_IN_TARGET',
   )
 })
 
@@ -171,16 +212,21 @@ const availableAgents = computed(() =>
 const offlineAgentsInTargetEnvironment = computed(() =>
   agentsInTargetEnvironment.value.filter((item) => item.status !== 'ONLINE'),
 )
-const selectedServices = computed(() => {
-  const selectedSet = new Set(selectedIds.value)
-  return candidateItems.value.filter((item) => selectedSet.has(item.serviceId))
-})
 const requiredPermission = computed(() => (releaseMode.value === 'SERVICE_DEPLOYMENT' ? 'deploy:write' : 'release:write'))
 const missingPermission = computed(() => !authStore.hasPermission(requiredPermission.value))
 const readinessBlockingReasons = computed(() => {
   const reasons: string[] = []
   if (!targetEnvironmentId.value || !selectedEnvironment.value) {
     reasons.push('请选择有效的目标环境')
+  }
+  if (environmentsError.value) {
+    reasons.push(environmentsError.value)
+  }
+  if (agentsError.value) {
+    reasons.push(agentsError.value)
+  }
+  if (releaseMode.value === 'SERVICE_DEPLOYMENT' && deploymentSourceError.value) {
+    reasons.push(deploymentSourceError.value)
   }
   if (missingPermission.value) {
     reasons.push(releaseMode.value === 'SERVICE_DEPLOYMENT' ? '当前账号没有服务部署权限' : '当前账号没有服务发版权限')
@@ -189,8 +235,23 @@ const readinessBlockingReasons = computed(() => {
     const offlineCount = offlineAgentsInTargetEnvironment.value.length
     reasons.push(offlineCount > 0 ? `目标环境有 ${offlineCount} 个 Agent，但当前都不在线` : '目标环境尚未接入在线 Agent')
   }
+  if (releaseMode.value === 'SERVICE_RELEASE' && releaseSourceLoading.value) {
+    reasons.push('正在读取 Harbor 发布源')
+  }
+  if (releaseMode.value === 'SERVICE_RELEASE' && releaseSourceError.value) {
+    reasons.push(releaseSourceError.value)
+  }
   if (selectedIds.value.length === 0) {
     reasons.push(releaseMode.value === 'SERVICE_DEPLOYMENT' ? '请选择目标环境缺失服务' : '请选择目标已有且需要更新的服务')
+  }
+  if (releaseMode.value === 'SERVICE_RELEASE' && releaseSource.value === 'LOCAL_HARBOR_IMAGE' && selectedIds.value.length > 1) {
+    reasons.push('本地 Harbor 镜像发版当前一次只能选择一个服务')
+  }
+  if (releaseMode.value === 'SERVICE_RELEASE' && releaseSource.value === 'LOCAL_HARBOR_IMAGE' && (!imageRepository.value || !imageTag.value)) {
+    reasons.push('请选择可用的 Harbor 镜像 tag')
+  }
+  if (releaseMode.value === 'SERVICE_RELEASE' && releaseSource.value === 'JENKINS_JOB' && !jenkinsJob.value) {
+    reasons.push('当前环境未返回可用 Jenkins job')
   }
   return reasons
 })
@@ -204,28 +265,18 @@ const readinessDescription = computed(() => {
   const agentName = availableAgents.value.find((item) => item.id === agentId.value)?.name || agentId.value
   return `${environmentName} 已选择在线 Agent ${agentName}，可创建${releaseMode.value === 'SERVICE_DEPLOYMENT' ? '服务部署任务' : '服务发版任务'}`
 })
-const releaseServices = computed(() => selectedServices.value.filter((item) => item.diffStatus === 'NEED_UPDATE'))
-const serviceSlug = computed(() => {
-  const firstService = releaseServices.value[0]?.serviceName || candidateItems.value[0]?.serviceName || 'service'
-  return firstService.replace(/-service$/, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase()
+const releaseServiceById = computed(() => {
+  const services = new Map<string, ReleaseSourceService>()
+  ;(releaseSourceData.value?.services ?? []).forEach((service) => services.set(service.serviceId, service))
+  return services
 })
-const environmentCode = computed(() => {
-  const currentEnvironment = environments.value.find((item) => item.id === targetEnvironmentId.value)
-  return currentEnvironment?.code || 'target-env'
-})
-const projectSlug = computed(() => {
-  const parts = environmentCode.value.split('-')
-  return parts.slice(0, Math.max(parts.length - 1, 1)).join('-')
-})
-const jenkinsJobOptions = computed(() => [
-  `${projectSlug.value}-${serviceSlug.value}-release`,
-  `${projectSlug.value}-image-tag-release`,
-])
+const selectedReleaseService = computed(() => releaseServiceById.value.get(selectedIds.value[0]))
+const jenkinsJobOptions = computed(() => releaseSourceData.value?.jenkinsJobs ?? [])
 const imageTagOptions = computed(() => {
-  const tags = releaseServices.value.map((item) => item.sourceTag)
-  return [...new Set(tags.length > 0 ? tags : candidateItems.value.map((item) => item.sourceTag))].filter(Boolean)
+  return (selectedReleaseService.value?.tags ?? []).map((item) => item.tag).filter(Boolean)
 })
-const imageRepository = computed(() => `harbor.local/${projectSlug.value}/${serviceSlug.value || 'service'}`)
+const selectedImageTag = computed(() => selectedReleaseService.value?.tags.find((item) => item.tag === imageTag.value))
+const imageRepository = computed(() => selectedReleaseService.value?.imageRepository ?? '')
 
 function selectPublishable() {
   selectedIds.value = filteredItems.value.filter((item) => item.publishable).map((item) => item.serviceId)
@@ -252,17 +303,45 @@ function syncAgentId() {
 
 function syncTargetEnvironmentId() {
   const routeEnvironmentId = String(route.query.targetEnvironmentId || '')
-  const diffEnvironmentId = diffResult.value.targetEnvironmentId
-  targetEnvironmentId.value = routeEnvironmentId || diffEnvironmentId || environments.value[0]?.id || ''
+  const currentEnvironmentExists = environments.value.some((item) => item.id === targetEnvironmentId.value)
+  if (currentEnvironmentExists && !routeEnvironmentId) {
+    syncAgentId()
+    return
+  }
+  targetEnvironmentId.value = routeEnvironmentId || environments.value[0]?.id || ''
   syncAgentId()
 }
 
 watch(releaseMode, () => {
   keyword.value = ''
   syncSelectedIds()
-  selectPublishable()
   syncReleaseSourceFields()
 }, { immediate: true })
+
+async function loadReleaseSources() {
+  if (releaseMode.value !== 'SERVICE_RELEASE' || !targetEnvironmentId.value) {
+    releaseSourceData.value = null
+    releaseSourceError.value = ''
+    syncSelectedIds()
+    syncReleaseSourceFields()
+    return
+  }
+  releaseSourceLoading.value = true
+  releaseSourceError.value = ''
+  try {
+    releaseSourceData.value = await listReleaseSources(targetEnvironmentId.value, keyword.value)
+  } catch {
+    releaseSourceData.value = null
+    releaseSourceError.value = '读取 Harbor 发布源失败'
+  } finally {
+    releaseSourceLoading.value = false
+    syncSelectedIds()
+    if (selectedIds.value.length === 0) {
+      selectPublishable()
+    }
+    syncReleaseSourceFields()
+  }
+}
 
 async function submitRelease() {
   if (missingPermission.value) {
@@ -279,6 +358,20 @@ async function submitRelease() {
   }
   if (selectedIds.value.length === 0) {
     ElMessage.warning(releaseMode.value === 'SERVICE_DEPLOYMENT' ? '请至少选择一个待部署服务' : '请至少选择一个待发版服务')
+    return
+  }
+  if (releaseMode.value === 'SERVICE_RELEASE' && releaseSource.value === 'LOCAL_HARBOR_IMAGE') {
+    if (selectedIds.value.length > 1) {
+      ElMessage.warning('本地 Harbor 镜像发版当前一次只能选择一个服务')
+      return
+    }
+    if (!selectedReleaseService.value || !imageRepository.value || !imageTag.value) {
+      ElMessage.warning('请选择可用的 Harbor 镜像 tag')
+      return
+    }
+  }
+  if (releaseMode.value === 'SERVICE_RELEASE' && releaseSource.value === 'JENKINS_JOB' && !jenkinsJob.value) {
+    ElMessage.warning('当前环境未返回可用 Jenkins job')
     return
   }
   submitting.value = true
@@ -313,7 +406,7 @@ async function submitRelease() {
       image: releaseSource.value === 'LOCAL_HARBOR_IMAGE' ? {
         repository: imageRepository.value,
         tag: imageTag.value,
-        digest: `sha256:mock-${imageTag.value}`,
+        digest: selectedImageTag.value?.digest,
       } : undefined,
       jenkins: releaseSource.value === 'JENKINS_JOB' ? {
         jobName: jenkinsJob.value,
@@ -340,29 +433,52 @@ async function submitRelease() {
 }
 
 async function loadAgents() {
+  agentsError.value = ''
   try {
     agents.value = await listAgents()
   } catch {
-    agents.value = [...agentMockData.agents]
+    agents.value = []
+    agentsError.value = '读取 Agent 列表失败'
   } finally {
     syncAgentId()
   }
 }
 
 async function loadEnvironments() {
+  environmentsError.value = ''
   try {
     environments.value = await listEnvironments()
   } catch {
-    environments.value = [...environmentMockData.environments]
+    environments.value = []
+    environmentsError.value = '读取环境列表失败'
   } finally {
     syncTargetEnvironmentId()
+    void loadReleaseSources()
   }
 }
 
 async function loadDiffResult() {
   releaseMode.value = route.query.mode === 'SERVICE_DEPLOYMENT' ? 'SERVICE_DEPLOYMENT' : 'SERVICE_RELEASE'
   selectedIds.value = route.query.serviceIds ? String(route.query.serviceIds).split(',').filter(Boolean) : []
-  const baselineId = String(route.query.baselineId || diffResult.value.sourceBaselineId || 'BL-20260607-0001')
+  deploymentSourceError.value = ''
+  if (releaseMode.value === 'SERVICE_RELEASE') {
+    baselineDetail.value = { id: '', name: '', sourceEnvironmentName: '' }
+    diffResult.value = { sourceBaselineId: '', targetEnvironmentId: '', items: [] }
+    sourceBaselineId.value = ''
+    syncTargetEnvironmentId()
+    syncSelectedIds()
+    await loadReleaseSources()
+    return
+  }
+  const baselineId = String(route.query.baselineId || diffResult.value.sourceBaselineId || '')
+  if (!baselineId) {
+    deploymentSourceError.value = '服务部署需要先选择来源基线'
+    sourceBaselineId.value = ''
+    diffResult.value = { sourceBaselineId: '', targetEnvironmentId: targetEnvironmentId.value, items: [] }
+    syncTargetEnvironmentId()
+    syncSelectedIds()
+    return
+  }
   const routeTargetEnvironmentId = String(route.query.targetEnvironmentId || '')
   sourceBaselineId.value = baselineId
   try {
@@ -379,19 +495,23 @@ async function loadDiffResult() {
       selectedIds.value = candidateItems.value.filter((item) => item.publishable).map((item) => item.serviceId)
     }
   } catch {
-    baselineDetail.value = { ...baselineMockData.baselineDetail }
-    diffResult.value = { ...baselineMockData.diffResult }
-    sourceBaselineId.value = diffResult.value.sourceBaselineId
+    baselineDetail.value = { id: '', name: '', sourceEnvironmentName: '' }
+    diffResult.value = { sourceBaselineId: baselineId, targetEnvironmentId: routeTargetEnvironmentId || targetEnvironmentId.value, items: [] }
+    deploymentSourceError.value = '读取基线差异失败'
     syncTargetEnvironmentId()
     syncSelectedIds()
-    if (selectedIds.value.length === 0) {
-      selectedIds.value = candidateItems.value.filter((item) => item.publishable).map((item) => item.serviceId)
-    }
   }
 }
 
-watch(targetEnvironmentId, syncAgentId)
-watch([selectedIds, targetEnvironmentId], syncReleaseSourceFields, { immediate: true })
+watch(targetEnvironmentId, () => {
+  syncAgentId()
+  void loadReleaseSources()
+})
+watch(releaseSource, syncReleaseSourceFields)
+watch(selectedIds, syncReleaseSourceFields, { immediate: true })
+watch(keyword, () => {
+  void loadReleaseSources()
+})
 
 loadAgents()
 loadEnvironments()

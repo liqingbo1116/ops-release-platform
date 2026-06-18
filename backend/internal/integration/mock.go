@@ -71,6 +71,21 @@ func (MockRegistryAdapter) GetImage(ctx context.Context, image string, tag strin
 	}, nil
 }
 
+func (MockRegistryAdapter) ListImageTags(ctx context.Context, environment domain.Environment, repository string) ([]ImageInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []ImageInfo{
+		{
+			Image:     repository,
+			Tag:       "20260607-a1b2c3",
+			Digest:    "sha256:mock-20260607-a1b2c3",
+			Exists:    true,
+			UpdatedAt: time.Now().Add(-15 * time.Minute).Format(time.RFC3339),
+		},
+	}, nil
+}
+
 func (MockRegistryAdapter) SyncImage(ctx context.Context, req SyncImageRequest) (SyncImageResult, error) {
 	if err := ctx.Err(); err != nil {
 		return SyncImageResult{}, err

@@ -13,7 +13,7 @@ import (
 	"ops-release-platform/backend/internal/repository"
 )
 
-func NewRouter(repo repository.Store, queue *agent.Queue, protocol *agent.ProtocolStore, integrations integration.Suite) *gin.Engine {
+func NewRouter(repo repository.Store, queue *agent.Queue, protocol agent.Protocol, integrations integration.Suite) *gin.Engine {
 	router := gin.Default()
 	router.Use(middleware.CORS())
 	router.NoRoute(NoRoute)
@@ -44,6 +44,15 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol *agent.Protoc
 	api.POST("/environments", handler.CreateEnvironment)
 	api.PUT("/environments/:id", handler.UpdateEnvironment)
 	api.POST("/environments/:id/check", handler.CheckEnvironment)
+	api.GET("/kubernetes-clusters", handler.ListKubernetesClusters)
+	api.POST("/kubernetes-clusters", handler.CreateKubernetesCluster)
+	api.PUT("/kubernetes-clusters/:id", handler.UpdateKubernetesCluster)
+	api.GET("/harbor-registries", handler.ListHarborRegistries)
+	api.POST("/harbor-registries", handler.CreateHarborRegistry)
+	api.PUT("/harbor-registries/:id", handler.UpdateHarborRegistry)
+	api.GET("/jenkins-instances", handler.ListJenkinsInstances)
+	api.POST("/jenkins-instances", handler.CreateJenkinsInstance)
+	api.PUT("/jenkins-instances/:id", handler.UpdateJenkinsInstance)
 
 	api.GET("/agents", handler.ListAgents)
 	api.POST("/agents/register-token", handler.CreateAgentRegisterToken)
@@ -61,6 +70,7 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol *agent.Protoc
 	api.POST("/baselines/:id/compare", handler.CompareBaseline)
 
 	api.GET("/releases", handler.ListReleases)
+	api.GET("/release-sources", handler.ListReleaseSources)
 	api.POST("/releases", handler.CreateRelease)
 	api.GET("/releases/:id", handler.GetRelease)
 	api.POST("/releases/:id/retry", handler.RetryRelease)

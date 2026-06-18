@@ -7,7 +7,11 @@ export type EnvironmentInfo = {
   type: 'LOCAL' | 'PROJECT'
   networkMode: 'DIRECT' | 'AGENT'
   clusterId: string
+  namespace: string
   registryId: string
+  registryProject: string
+  jenkinsId: string
+  jenkinsView: string
   status: string
   agentStatus: string
   lastCheckAt: string
@@ -15,7 +19,17 @@ export type EnvironmentInfo = {
 
 export type EnvironmentPayload = Pick<
   EnvironmentInfo,
-  'id' | 'name' | 'code' | 'type' | 'networkMode' | 'clusterId' | 'registryId'
+  | 'id'
+  | 'name'
+  | 'code'
+  | 'type'
+  | 'networkMode'
+  | 'clusterId'
+  | 'namespace'
+  | 'registryId'
+  | 'registryProject'
+  | 'jenkinsId'
+  | 'jenkinsView'
 > & {
   status?: string
 }
@@ -38,7 +52,11 @@ function normalizeEnvironment(item: {
   type: string
   networkMode: string
   clusterId?: string
+  namespace?: string
   registryId?: string
+  registryProject?: string
+  jenkinsId?: string
+  jenkinsView?: string
   status: string
   agentStatus: string
   lastCheckAt: string
@@ -48,7 +66,11 @@ function normalizeEnvironment(item: {
     type: item.type === 'LOCAL' ? 'LOCAL' : 'PROJECT',
     networkMode: item.networkMode === 'DIRECT' ? 'DIRECT' : 'AGENT',
     clusterId: item.clusterId ?? '',
+    namespace: item.namespace ?? '',
     registryId: item.registryId ?? '',
+    registryProject: item.registryProject ?? '',
+    jenkinsId: item.jenkinsId ?? '',
+    jenkinsView: item.jenkinsView ?? '',
   }
 }
 

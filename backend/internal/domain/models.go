@@ -8,16 +8,54 @@ type PageResult[T any] struct {
 }
 
 type Environment struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Code        string `json:"code"`
-	Type        string `json:"type"`
-	NetworkMode string `json:"networkMode"`
-	ClusterID   string `json:"clusterId"`
-	RegistryID  string `json:"registryId"`
-	Status      string `json:"status"`
-	AgentStatus string `json:"agentStatus"`
-	LastCheckAt string `json:"lastCheckAt"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Code            string `json:"code"`
+	Type            string `json:"type"`
+	NetworkMode     string `json:"networkMode"`
+	ClusterID       string `json:"clusterId"`
+	Namespace       string `json:"namespace"`
+	RegistryID      string `json:"registryId"`
+	RegistryProject string `json:"registryProject"`
+	JenkinsID       string `json:"jenkinsId"`
+	JenkinsView     string `json:"jenkinsView"`
+	Status          string `json:"status"`
+	AgentStatus     string `json:"agentStatus"`
+	LastCheckAt     string `json:"lastCheckAt"`
+
+	ClusterAPIServer      string `json:"-"`
+	ClusterCredentialRef  string `json:"-"`
+	RegistryURL           string `json:"-"`
+	RegistryCredentialRef string `json:"-"`
+	JenkinsURL            string `json:"-"`
+	JenkinsCredentialRef  string `json:"-"`
+}
+
+type KubernetesCluster struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	APIServer     string `json:"apiServer"`
+	CredentialRef string `json:"credentialRef"`
+	Status        string `json:"status"`
+	LastCheckAt   string `json:"lastCheckAt"`
+}
+
+type HarborRegistry struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	URL           string `json:"url"`
+	CredentialRef string `json:"credentialRef"`
+	Status        string `json:"status"`
+	LastCheckAt   string `json:"lastCheckAt"`
+}
+
+type JenkinsInstance struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	URL           string `json:"url"`
+	CredentialRef string `json:"credentialRef"`
+	Status        string `json:"status"`
+	LastCheckAt   string `json:"lastCheckAt"`
 }
 
 type Agent struct {
@@ -105,6 +143,30 @@ type DiffResult struct {
 	Items               []DiffItem  `json:"items"`
 }
 
+type ReleaseImageTag struct {
+	Tag       string `json:"tag"`
+	Digest    string `json:"digest,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+type ReleaseSourceService struct {
+	ServiceID       string            `json:"serviceId"`
+	ServiceName     string            `json:"serviceName"`
+	Namespace       string            `json:"namespace"`
+	WorkloadName    string            `json:"workloadName"`
+	WorkloadType    string            `json:"workloadType"`
+	ImageRepository string            `json:"imageRepository"`
+	Tags            []ReleaseImageTag `json:"tags"`
+	Publishable     bool              `json:"publishable"`
+	Message         string            `json:"message,omitempty"`
+}
+
+type ReleaseSource struct {
+	EnvironmentID string                 `json:"environmentId"`
+	Services      []ReleaseSourceService `json:"services"`
+	JenkinsJobs   []string               `json:"jenkinsJobs"`
+}
+
 type ReleaseStep struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"`
@@ -150,13 +212,36 @@ type ReleaseOrder struct {
 	Type                  string `json:"type"`
 	SourceBaselineID      string `json:"sourceBaselineId,omitempty"`
 	ReleaseSource         string `json:"releaseSource,omitempty"`
+	ExecutionMode         string `json:"executionMode,omitempty"`
 	BuildID               string `json:"buildId,omitempty"`
+	BuildStatus           string `json:"buildStatus,omitempty"`
+	BuildURL              string `json:"buildUrl,omitempty"`
 	ImageRepository       string `json:"imageRepository,omitempty"`
 	ImageTag              string `json:"imageTag,omitempty"`
+	ImageDigest           string `json:"imageDigest,omitempty"`
 	TargetEnvironmentName string `json:"targetEnvironmentName"`
 	Status                string `json:"status"`
 	Progress              int    `json:"progress"`
 	AgentName             string `json:"agentName"`
+}
+
+type CreateReleaseOrderInput struct {
+	ID                   string
+	Type                 string
+	SourceBaselineID     string
+	ReleaseSource        string
+	ExecutionMode        string
+	BuildID              string
+	BuildStatus          string
+	BuildURL             string
+	ImageRepository      string
+	ImageTag             string
+	ImageDigest          string
+	TargetEnvironmentID  string
+	AgentID              string
+	Status               string
+	Progress             int
+	SelectedServiceCount int
 }
 
 type ReleaseDetail struct {

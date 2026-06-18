@@ -81,6 +81,7 @@ func (s *Server) Run() error {
 		return fmt.Errorf("load mock repository failed: %w", err)
 	}
 	repo := repository.NewDatabaseStore(database, mockRepo)
-	router := api.NewRouter(repo, queue, agent.NewProtocolStore(), integrations)
+	protocolStore := repository.NewDatabaseProtocolStore(database)
+	router := api.NewRouter(repo, queue, protocolStore, integrations)
 	return router.Run(fmt.Sprintf(":%s", s.config.Port))
 }

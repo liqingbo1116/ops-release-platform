@@ -111,6 +111,8 @@ V1 最低交付目标：
 目标：
 
 - 环境列表、环境详情、环境创建、环境编辑、环境状态全部改为真实后端数据。
+- K8s 集群、Harbor 仓库、Jenkins 实例必须作为平台可维护资源主数据单独维护。
+- 环境通过资源 ID 关联 K8s/Harbor/Jenkins，并单独填写 `namespace`、`registryProject`、`jenkinsView`。
 - 删除环境管理页面和后端接口中的环境 mock 数据与 fallback。
 
 状态：
@@ -119,7 +121,11 @@ V1 最低交付目标：
 - 后端以真实 PostgreSQL、真实 Redis、`INTEGRATION_MODE=real` 启动。
 - `env-local-prod` 已通过真实 Kubernetes 与 Harbor 连接检查。
 - `env-project-xjzt-test` 已通过真实 Kubernetes 与 Harbor 连接检查。
-- 环境记录使用逻辑集成 ID：`clusterId` / `registryId` 为 `local` 或 `remote`，真实连接地址、凭证、kubeconfig 只保存在 `.secrets/`。
+- K8s、Harbor、Jenkins 资源记录由平台维护，不依赖固定 `local` / `remote` 逻辑 ID 作为正式主数据。
+- 环境记录使用环境级作用域字段区分共享基础设施：`namespace` 对应 K8s 命名空间，`registryProject` 对应 Harbor 项目，`jenkinsView` 对应 Jenkins 视图或项目范围。
+- 用户创建环境时只填写环境名称和环境编码；环境 ID 由后端按 `env-<环境编码>` 自动生成，不要求用户同时理解和维护两套标识。
+- `.secrets/` 只用于研发阶段启动服务和保存私密连接值，不作为正式发布后的资源主数据来源。
+- 正式使用时，资源地址等非敏感主数据来自平台数据库，凭据字段只保存 `credentialRef`，真实密钥由正式凭证后端或部署环境提供。
 
 必须准备：
 
@@ -127,15 +133,16 @@ V1 最低交付目标：
 - 后端本地运行环境：Go
 - 远程 PostgreSQL
 - 远程 Redis
-- `.secrets/` 中可用的真实连接配置
+- `.secrets/` 中可用的研发阶段私密连接配置
 - 当前项目约定的远程 PostgreSQL/Redis 主机 `100.120.3.230`
-- 逻辑 ID 为 `local` 和 `remote` 的 Harbor 配置
-- 逻辑 ID 为 `local` 和 `remote` 的 Kubernetes kubeconfig
+- 平台中已录入真实 K8s 集群资源，凭据通过 `credentialRef` 对应到研发私密配置或正式凭证后端
+- 平台中已录入真实 Harbor 资源，需支持当前准备的 HTTP Harbor 地址，凭据通过 `credentialRef` 对应到研发私密配置或正式凭证后端
+- 如本阶段需要录入 Jenkins 关联，平台中需先录入 Jenkins 实例资源；未准备 Jenkins 时只能保留 Jenkins 字段为空，不能进入依赖 Jenkins 真实数据的发布单创建验收。
 
 门禁：
 
 - 如果 PostgreSQL 或 Redis 未准备好，环境管理无法替换 mock，不能进入阶段 2。
-- 如果 Harbor 或 Kubernetes 真实检查未通过，环境依赖可见性不能验收，不能进入阶段 2。
+- 如果 K8s/Harbor 资源主数据不存在，或真实检查未通过，环境依赖可见性不能验收，不能进入阶段 2。
 - 当前门禁已通过，可以进入阶段 2：Agent 管理。
 
 ### 阶段 2：Agent 管理

@@ -124,6 +124,7 @@ Request：
 
 ```json
 {
+  "agentId": "agent-project-x-prod",
   "environmentId": "env-project-x-prod",
   "ttlMinutes": 10
 }
@@ -133,9 +134,9 @@ Response data：
 
 ```json
 {
-  "token": "agt_7f92c1b8_20260607",
+  "token": "agt_env-project-x-prod_1781750628",
   "expiresAt": "2026-06-07T13:20:00+08:00",
-  "installCommand": "curl -fsSL https://platform.local/agent/install.sh | bash -s -- --token agt_7f92c1b8_20260607 --server https://platform.local"
+  "installCommand": "cat > agent.env <<'EOF'\nAGENT_ID=agent-project-x-prod\nAGENT_ENVIRONMENT_ID=env-project-x-prod\nPLATFORM_URL=http://platform.example.com:8080\nAGENT_TOKEN=agt_env-project-x-prod_1781750628\nAGENT_MODE=mock\nAGENT_HEALTH_PORT=18080\nAGENT_POLL_INTERVAL_SECONDS=5\nAGENT_HEARTBEAT_INTERVAL_SECONDS=15\nAGENT_HTTP_TIMEOUT_SECONDS=10\nAGENT_MAX_TASKS=1\nAGENT_CAPABILITIES=mock-executor,image-sync,kubectl,http-check\nEOF\n./ops-release-agent -f ./agent.env"
 }
 ```
 

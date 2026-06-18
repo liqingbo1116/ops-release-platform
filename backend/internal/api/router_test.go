@@ -37,8 +37,6 @@ func TestCoreMockAPIs(t *testing.T) {
 		{name: "create release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
 		{name: "create service release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
 		{name: "create image release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"LOCAL_HARBOR_IMAGE","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","image":{"repository":"harbor.local/project-x/user-service","tag":"20260607-a1b2c3"}}`, statusCode: http.StatusCreated},
-		{name: "release detail", method: http.MethodGet, path: "/api/releases/REL-20260607-031", statusCode: http.StatusOK},
-		{name: "created release detail", method: http.MethodGet, path: "/api/releases/REL-20260607-MOCK", statusCode: http.StatusOK},
 		{name: "deploy tasks", method: http.MethodGet, path: "/api/deploy-tasks", statusCode: http.StatusOK},
 		{name: "create deploy task", method: http.MethodPost, path: "/api/deploy-tasks", body: `{"type":"SERVICE_DEPLOYMENT","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x"}`, statusCode: http.StatusCreated},
 		{name: "deploy detail", method: http.MethodGet, path: "/api/deploy-tasks/DEP-20260607-009", statusCode: http.StatusOK},
@@ -65,6 +63,46 @@ func TestCoreMockAPIs(t *testing.T) {
 			assertOKResponse(t, recorder.Body.Bytes())
 		})
 	}
+}
+
+func TestReleaseDetailUsesCreatedOrderOnly(t *testing.T) {
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"LOCAL_HARBOR_IMAGE","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","image":{"repository":"harbor.local/project-x/user-service","tag":"20260607-a1b2c3"}}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected release create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var createPayload struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createPayload.Data.ID == "" {
+		t.Fatal("expected release id")
+	}
+
+	detailRequest := httptest.NewRequest(http.MethodGet, "/api/releases/"+createPayload.Data.ID, nil)
+	detailRecorder := httptest.NewRecorder()
+	router.ServeHTTP(detailRecorder, detailRequest)
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("expected release detail status 200, got %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	assertOKResponse(t, detailRecorder.Body.Bytes())
+
+	missingRequest := httptest.NewRequest(http.MethodGet, "/api/releases/REL-20260607-MOCK", nil)
+	missingRecorder := httptest.NewRecorder()
+	router.ServeHTTP(missingRecorder, missingRequest)
+	if missingRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected missing release detail status 404, got %d: %s", missingRecorder.Code, missingRecorder.Body.String())
+	}
+	assertErrorResponse(t, missingRecorder.Body.Bytes(), "NOT_FOUND", "release not found")
 }
 
 func TestAgentTaskStatusWithoutRedis(t *testing.T) {
@@ -580,7 +618,7 @@ func TestCreateDeployTaskReturnsAgentTaskID(t *testing.T) {
 	}
 }
 
-func TestCreateImageReleaseReturnsRegistrySyncMetadata(t *testing.T) {
+func TestCreateImageReleaseQueuesAgentSync(t *testing.T) {
 	router := newTestRouter()
 	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"LOCAL_HARBOR_IMAGE","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","image":{"repository":"harbor.local/project-x/user-service","tag":"20260607-a1b2c3"}}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -595,8 +633,8 @@ func TestCreateImageReleaseReturnsRegistrySyncMetadata(t *testing.T) {
 		Code string `json:"code"`
 		Data struct {
 			ExecutionMode string `json:"executionMode"`
-			BuildID       string `json:"buildId"`
-			BuildStatus   string `json:"buildStatus"`
+			Status        string `json:"status"`
+			AgentTaskID   string `json:"agentTaskId"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
@@ -605,8 +643,8 @@ func TestCreateImageReleaseReturnsRegistrySyncMetadata(t *testing.T) {
 	if payload.Data.ExecutionMode != "AGENT_IMAGE_SYNC" {
 		t.Fatalf("expected AGENT_IMAGE_SYNC, got %s", payload.Data.ExecutionMode)
 	}
-	if payload.Data.BuildID == "" || payload.Data.BuildStatus != "SUCCESS" {
-		t.Fatalf("expected registry sync metadata, got %+v", payload.Data)
+	if payload.Data.Status != "PENDING_IMAGE_SYNC" || payload.Data.AgentTaskID == "" {
+		t.Fatalf("expected queued agent image sync, got %+v", payload.Data)
 	}
 }
 
