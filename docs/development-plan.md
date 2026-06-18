@@ -113,6 +113,14 @@ V1 最低交付目标：
 - 环境列表、环境详情、环境创建、环境编辑、环境状态全部改为真实后端数据。
 - 删除环境管理页面和后端接口中的环境 mock 数据与 fallback。
 
+状态：
+
+- 已完成。
+- 后端以真实 PostgreSQL、真实 Redis、`INTEGRATION_MODE=real` 启动。
+- `env-local-prod` 已通过真实 Kubernetes 与 Harbor 连接检查。
+- `env-project-xjzt-test` 已通过真实 Kubernetes 与 Harbor 连接检查。
+- 环境记录使用逻辑集成 ID：`clusterId` / `registryId` 为 `local` 或 `remote`，真实连接地址、凭证、kubeconfig 只保存在 `.secrets/`。
+
 必须准备：
 
 - 前端本地运行环境：Node.js、npm
@@ -121,10 +129,14 @@ V1 最低交付目标：
 - 远程 Redis
 - `.secrets/` 中可用的真实连接配置
 - 当前项目约定的远程 PostgreSQL/Redis 主机 `100.120.3.230`
+- 逻辑 ID 为 `local` 和 `remote` 的 Harbor 配置
+- 逻辑 ID 为 `local` 和 `remote` 的 Kubernetes kubeconfig
 
 门禁：
 
 - 如果 PostgreSQL 或 Redis 未准备好，环境管理无法替换 mock，不能进入阶段 2。
+- 如果 Harbor 或 Kubernetes 真实检查未通过，环境依赖可见性不能验收，不能进入阶段 2。
+- 当前门禁已通过，可以进入阶段 2：Agent 管理。
 
 ### 阶段 2：Agent 管理
 

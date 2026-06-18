@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-06-12
+Last updated: 2026-06-18
 
 Always verify with `git status --short --branch` and `git log -1 --oneline`; this file is an onboarding aid, not a substitute for checking the working tree.
 
@@ -22,9 +22,9 @@ Latest pushed commit at time of this note:
 
 ## Current Local Work
 
-V1 mainline development is in phase 1: Environment management.
+V1 mainline development has completed phase 1: Environment management. The next phase is phase 2: Agent management.
 
-Completed in phase 1 local work:
+Completed in phase 1:
 
 - Frontend environment API list no longer imports or falls back to mock data; it calls `/api/environments`.
 - Backend runtime requires real `DATABASE_DSN` and `REDIS_ADDR` before startup.
@@ -34,17 +34,28 @@ Completed in phase 1 local work:
 - Backend `INTEGRATION_MODE=real` now supports Harbor systeminfo and Kubernetes readyz connectivity checks through config loaded from `.secrets/integration-connections.*`.
 - Frontend environment create/edit and connection drawer now expose logical cluster/registry IDs without exposing secrets.
 - Skill and docs now record the `.secrets/` integration rule and real-data gate for environment management.
+- Kubeconfig paths from `.secrets/` resolve from repo root, backend runtime, or package test working directories.
+- Real environment checks passed through `POST /api/environments/:id/check` for both `env-local-prod` and `env-project-xjzt-test`.
 
-Still blocking phase 1 completion:
+Phase 1 completion evidence:
 
-- Real Harbor/Kubernetes connection checks must be run against the configured local and remote environments.
-- Environment dependency visibility cannot be marked complete until both logical integration IDs validate with real infrastructure.
-- Do not move to phase 2 Agent management until environment dependency checks use real integrations or the phase-1 scope is explicitly reduced.
+- `env-local-prod`: Kubernetes logical ID `local` healthy, Harbor logical ID `local` healthy.
+- `env-project-xjzt-test`: Kubernetes logical ID `remote` healthy, Harbor logical ID `remote` healthy.
+- Backend startup used real PostgreSQL, real Redis, and `INTEGRATION_MODE=real`.
+- The remote agent heartbeat and lease endpoints returned HTTP 200 while the backend was running.
+
+Next phase gate:
+
+- Continue with phase 2 Agent management.
+- Do not start release creation until Agent registration, heartbeat, environment binding, online status, and task lease data use real backend data with the real environment records from phase 1.
 
 Validation for this local work:
 
 - Backend tests:
   - `go test ./...`
+- Environment check API:
+  - `POST /api/environments/env-local-prod/check`
+  - `POST /api/environments/env-project-xjzt-test/check`
 - Frontend tests:
   - `npm run test:unit`
 - Frontend build:

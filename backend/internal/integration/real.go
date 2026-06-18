@@ -156,11 +156,36 @@ func compactClusters(input map[string]ClusterConfig) map[string]ClusterConfig {
 	for key, cfg := range input {
 		normalized := strings.ToLower(strings.TrimSpace(key))
 		if normalized != "" && strings.TrimSpace(cfg.Kubeconfig) != "" {
-			cfg.Kubeconfig = strings.TrimSpace(cfg.Kubeconfig)
+			cfg.Kubeconfig = resolveExistingPath(strings.TrimSpace(cfg.Kubeconfig))
 			output[normalized] = cfg
 		}
 	}
 	return output
+}
+
+func resolveExistingPath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return path
+	}
+	for {
+		candidate := filepath.Join(currentDir, path)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(currentDir)
+		if parent == currentDir {
+			break
+		}
+		currentDir = parent
+	}
+	return path
 }
 
 func registryConfigForEnvironment(configs map[string]RegistryConfig, environment domain.Environment) (RegistryConfig, string, error) {

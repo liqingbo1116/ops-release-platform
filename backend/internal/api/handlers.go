@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -126,6 +127,7 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 	if h.integrations.Kubernetes != nil {
 		check, err := h.integrations.Kubernetes.CheckConnection(c.Request.Context(), environment)
 		if err != nil {
+			log.Printf("environment %s kubernetes check failed: %v", environmentID, err)
 			_, _, _ = h.repo.UpdateEnvironmentCheck(environmentID, "UNHEALTHY", time.Now())
 			BadRequest(c, "kubernetes check failed")
 			return
@@ -135,6 +137,7 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 	if h.integrations.Registry != nil {
 		check, err := h.integrations.Registry.CheckConnection(c.Request.Context(), environment)
 		if err != nil {
+			log.Printf("environment %s registry check failed: %v", environmentID, err)
 			_, _, _ = h.repo.UpdateEnvironmentCheck(environmentID, "UNHEALTHY", time.Now())
 			BadRequest(c, "registry check failed")
 			return
