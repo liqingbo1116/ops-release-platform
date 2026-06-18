@@ -100,7 +100,9 @@ Request data：
 
 ```json
 {
+  "id": "k8s-local-test",
   "name": "本地测试 K3s",
+  "apiServer": "https://k8s.example.com:6443",
   "kubeconfig": "<masked>",
   "context": "default"
 }
@@ -115,9 +117,9 @@ Response data：
   "apiServer": "https://k8s.example.com:6443",
   "context": "default",
   "status": "UNKNOWN",
-  "lastCheckAt": null,
-  "lastCheckMessage": "",
-  "cachedNamespaces": []
+  "lastCheckAt": "",
+  "probeMessage": "",
+  "namespaces": []
 }
 ```
 
@@ -129,12 +131,30 @@ Request data：
 
 ```json
 {
+  "id": "harbor-local",
   "name": "本地 Harbor",
   "url": "http://registry.example.com:5000",
-  "scheme": "HTTP",
+  "scheme": "http",
   "username": "admin",
   "password": "<masked>",
   "insecureSkipTLSVerify": false
+}
+```
+
+Response data：
+
+```json
+{
+  "id": "harbor-local",
+  "name": "本地 Harbor",
+  "url": "http://registry.example.com:5000",
+  "scheme": "http",
+  "username": "admin",
+  "insecureSkipTLSVerify": false,
+  "status": "UNKNOWN",
+  "lastCheckAt": "",
+  "probeMessage": "",
+  "projects": []
 }
 ```
 
@@ -146,11 +166,29 @@ Request data：
 
 ```json
 {
+  "id": "jenkins-local",
   "name": "本地 Jenkins",
   "url": "http://jenkins.example.com:8080",
   "username": "root",
   "token": "<masked>",
   "insecureSkipTLSVerify": false
+}
+```
+
+Response data：
+
+```json
+{
+  "id": "jenkins-local",
+  "name": "本地 Jenkins",
+  "url": "http://jenkins.example.com:8080",
+  "username": "root",
+  "insecureSkipTLSVerify": false,
+  "status": "UNKNOWN",
+  "lastCheckAt": "",
+  "probeMessage": "",
+  "views": [],
+  "jobs": []
 }
 ```
 
@@ -162,10 +200,16 @@ Response data：
 
 ```json
 {
-  "resourceId": "harbor-local",
+  "id": "harbor-local",
+  "name": "本地 Harbor",
+  "url": "http://registry.example.com:5000",
+  "scheme": "http",
+  "username": "admin",
+  "insecureSkipTLSVerify": false,
   "status": "HEALTHY",
-  "checkedAt": "2026-06-07T13:20:00+08:00",
-  "message": "connection is available"
+  "lastCheckAt": "2026-06-07T13:20:00+08:00",
+  "probeMessage": "connection is available",
+  "projects": []
 }
 ```
 
@@ -177,10 +221,14 @@ Response data：
 
 ```json
 {
-  "resourceId": "k8s-project-x",
+  "id": "k8s-project-x",
+  "name": "项目 K8s",
+  "apiServer": "https://k8s.example.com:6443",
+  "context": "default",
   "status": "HEALTHY",
-  "cacheUpdatedAt": "2026-06-07T13:20:00+08:00",
-  "items": ["default", "project-x-prod"]
+  "lastCheckAt": "2026-06-07T13:20:00+08:00",
+  "probeMessage": "connection is available",
+  "namespaces": ["default", "project-x-prod"]
 }
 ```
 

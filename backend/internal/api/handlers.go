@@ -26,6 +26,33 @@ type Handler struct {
 	service      *service.ReleaseCreator
 }
 
+type kubernetesClusterRequest struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	APIServer  string `json:"apiServer"`
+	Context    string `json:"context"`
+	Kubeconfig string `json:"kubeconfig"`
+}
+
+type harborRegistryRequest struct {
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	URL                   string `json:"url"`
+	Scheme                string `json:"scheme"`
+	Username              string `json:"username"`
+	Password              string `json:"password"`
+	InsecureSkipTLSVerify bool   `json:"insecureSkipTLSVerify"`
+}
+
+type jenkinsInstanceRequest struct {
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	URL                   string `json:"url"`
+	Username              string `json:"username"`
+	Token                 string `json:"token"`
+	InsecureSkipTLSVerify bool   `json:"insecureSkipTLSVerify"`
+}
+
 func NewHandler(repo repository.Store, queue *agent.Queue, protocol agent.Protocol, integrations integration.Suite) *Handler {
 	if protocol == nil {
 		protocol = agent.NewProtocolStore()
@@ -200,12 +227,18 @@ func (h *Handler) ListKubernetesClusters(c *gin.Context) {
 }
 
 func (h *Handler) CreateKubernetesCluster(c *gin.Context) {
-	var request domain.KubernetesCluster
+	var request kubernetesClusterRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid kubernetes cluster request")
 		return
 	}
-	item, err := h.repo.CreateKubernetesCluster(request)
+	item, err := h.repo.CreateKubernetesCluster(domain.KubernetesCluster{
+		ID:         request.ID,
+		Name:       request.Name,
+		APIServer:  request.APIServer,
+		Context:    request.Context,
+		Kubeconfig: request.Kubeconfig,
+	})
 	if err != nil {
 		BadRequest(c, "invalid kubernetes cluster request")
 		return
@@ -214,12 +247,18 @@ func (h *Handler) CreateKubernetesCluster(c *gin.Context) {
 }
 
 func (h *Handler) UpdateKubernetesCluster(c *gin.Context) {
-	var request domain.KubernetesCluster
+	var request kubernetesClusterRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid kubernetes cluster request")
 		return
 	}
-	item, ok, err := h.repo.UpdateKubernetesCluster(c.Param("id"), request)
+	item, ok, err := h.repo.UpdateKubernetesCluster(c.Param("id"), domain.KubernetesCluster{
+		ID:         request.ID,
+		Name:       request.Name,
+		APIServer:  request.APIServer,
+		Context:    request.Context,
+		Kubeconfig: request.Kubeconfig,
+	})
 	if err != nil {
 		BadRequest(c, "invalid kubernetes cluster request")
 		return
@@ -236,12 +275,20 @@ func (h *Handler) ListHarborRegistries(c *gin.Context) {
 }
 
 func (h *Handler) CreateHarborRegistry(c *gin.Context) {
-	var request domain.HarborRegistry
+	var request harborRegistryRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid harbor registry request")
 		return
 	}
-	item, err := h.repo.CreateHarborRegistry(request)
+	item, err := h.repo.CreateHarborRegistry(domain.HarborRegistry{
+		ID:                    request.ID,
+		Name:                  request.Name,
+		URL:                   request.URL,
+		Scheme:                request.Scheme,
+		Username:              request.Username,
+		Password:              request.Password,
+		InsecureSkipTLSVerify: request.InsecureSkipTLSVerify,
+	})
 	if err != nil {
 		BadRequest(c, "invalid harbor registry request")
 		return
@@ -250,12 +297,20 @@ func (h *Handler) CreateHarborRegistry(c *gin.Context) {
 }
 
 func (h *Handler) UpdateHarborRegistry(c *gin.Context) {
-	var request domain.HarborRegistry
+	var request harborRegistryRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid harbor registry request")
 		return
 	}
-	item, ok, err := h.repo.UpdateHarborRegistry(c.Param("id"), request)
+	item, ok, err := h.repo.UpdateHarborRegistry(c.Param("id"), domain.HarborRegistry{
+		ID:                    request.ID,
+		Name:                  request.Name,
+		URL:                   request.URL,
+		Scheme:                request.Scheme,
+		Username:              request.Username,
+		Password:              request.Password,
+		InsecureSkipTLSVerify: request.InsecureSkipTLSVerify,
+	})
 	if err != nil {
 		BadRequest(c, "invalid harbor registry request")
 		return
@@ -272,12 +327,19 @@ func (h *Handler) ListJenkinsInstances(c *gin.Context) {
 }
 
 func (h *Handler) CreateJenkinsInstance(c *gin.Context) {
-	var request domain.JenkinsInstance
+	var request jenkinsInstanceRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid jenkins instance request")
 		return
 	}
-	item, err := h.repo.CreateJenkinsInstance(request)
+	item, err := h.repo.CreateJenkinsInstance(domain.JenkinsInstance{
+		ID:                    request.ID,
+		Name:                  request.Name,
+		URL:                   request.URL,
+		Username:              request.Username,
+		Token:                 request.Token,
+		InsecureSkipTLSVerify: request.InsecureSkipTLSVerify,
+	})
 	if err != nil {
 		BadRequest(c, "invalid jenkins instance request")
 		return
@@ -286,12 +348,19 @@ func (h *Handler) CreateJenkinsInstance(c *gin.Context) {
 }
 
 func (h *Handler) UpdateJenkinsInstance(c *gin.Context) {
-	var request domain.JenkinsInstance
+	var request jenkinsInstanceRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid jenkins instance request")
 		return
 	}
-	item, ok, err := h.repo.UpdateJenkinsInstance(c.Param("id"), request)
+	item, ok, err := h.repo.UpdateJenkinsInstance(c.Param("id"), domain.JenkinsInstance{
+		ID:                    request.ID,
+		Name:                  request.Name,
+		URL:                   request.URL,
+		Username:              request.Username,
+		Token:                 request.Token,
+		InsecureSkipTLSVerify: request.InsecureSkipTLSVerify,
+	})
 	if err != nil {
 		BadRequest(c, "invalid jenkins instance request")
 		return

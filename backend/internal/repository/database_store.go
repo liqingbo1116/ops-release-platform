@@ -157,11 +157,16 @@ func (s *DatabaseStore) CreateKubernetesCluster(input domain.KubernetesCluster) 
 		ID:            strings.TrimSpace(input.ID),
 		Name:          strings.TrimSpace(input.Name),
 		APIServer:     strings.TrimSpace(input.APIServer),
-		CredentialRef: strings.TrimSpace(input.CredentialRef),
-		Status:        fallbackString(strings.TrimSpace(input.Status), "UNKNOWN"),
+		CredentialRef: fallbackString(strings.TrimSpace(input.CredentialRef), "resource:"+strings.TrimSpace(input.ID)),
+		Kubeconfig:    strings.TrimSpace(input.Kubeconfig),
+		Context:       strings.TrimSpace(input.Context),
+		Status:        "UNKNOWN",
 	}
-	if model.ID == "" || model.Name == "" || model.APIServer == "" {
+	if model.ID == "" || model.Name == "" || (model.APIServer == "" && model.Kubeconfig == "") {
 		return domain.KubernetesCluster{}, errors.New("missing required fields")
+	}
+	if model.CredentialRef == "resource:" {
+		model.CredentialRef = "resource:" + model.ID
 	}
 	if err := s.db.Create(&model).Error; err != nil {
 		return domain.KubernetesCluster{}, err
@@ -183,10 +188,35 @@ func (s *DatabaseStore) UpdateKubernetesCluster(id string, input domain.Kubernet
 	if value := strings.TrimSpace(input.APIServer); value != "" {
 		model.APIServer = value
 	}
-	model.CredentialRef = strings.TrimSpace(input.CredentialRef)
-	if value := strings.TrimSpace(input.Status); value != "" {
-		model.Status = value
+	if value := strings.TrimSpace(input.Kubeconfig); value != "" {
+		model.Kubeconfig = value
 	}
+	if value := strings.TrimSpace(input.Context); value != "" || strings.TrimSpace(input.Kubeconfig) != "" {
+		model.Context = value
+	}
+	if value := strings.TrimSpace(input.CredentialRef); value != "" {
+		model.CredentialRef = value
+	}
+	if err := s.db.Save(&model).Error; err != nil {
+		return domain.KubernetesCluster{}, false, err
+	}
+	return toDomainKubernetesCluster(model), true, nil
+}
+
+func (s *DatabaseStore) UpdateKubernetesClusterProbe(id string, status string, message string, namespaces []string, checkedAt time.Time) (domain.KubernetesCluster, bool, error) {
+	var model KubernetesClusterModel
+	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return domain.KubernetesCluster{}, false, nil
+		}
+		return domain.KubernetesCluster{}, false, err
+	}
+	model.Status = fallbackString(strings.TrimSpace(status), "UNKNOWN")
+	model.ProbeMessage = strings.TrimSpace(message)
+	if namespaces != nil {
+		model.Namespaces = compactStringList(namespaces)
+	}
+	model.LastCheckAt = &checkedAt
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.KubernetesCluster{}, false, err
 	}
@@ -220,15 +250,23 @@ func (s *DatabaseStore) GetHarborRegistry(id string) (domain.HarborRegistry, boo
 
 func (s *DatabaseStore) CreateHarborRegistry(input domain.HarborRegistry) (domain.HarborRegistry, error) {
 	model := HarborRegistryModel{
-		ID:            strings.TrimSpace(input.ID),
-		Name:          strings.TrimSpace(input.Name),
-		URL:           strings.TrimSpace(input.URL),
-		CredentialRef: strings.TrimSpace(input.CredentialRef),
-		Status:        fallbackString(strings.TrimSpace(input.Status), "UNKNOWN"),
+		ID:                    strings.TrimSpace(input.ID),
+		Name:                  strings.TrimSpace(input.Name),
+		URL:                   strings.TrimSpace(input.URL),
+		Scheme:                normalizeScheme(input.Scheme, input.URL),
+		Username:              strings.TrimSpace(input.Username),
+		Password:              strings.TrimSpace(input.Password),
+		CredentialRef:         fallbackString(strings.TrimSpace(input.CredentialRef), "resource:"+strings.TrimSpace(input.ID)),
+		InsecureSkipTLSVerify: input.InsecureSkipTLSVerify,
+		Status:                "UNKNOWN",
 	}
 	if model.ID == "" || model.Name == "" || model.URL == "" {
 		return domain.HarborRegistry{}, errors.New("missing required fields")
 	}
+	if model.CredentialRef == "resource:" {
+		model.CredentialRef = "resource:" + model.ID
+	}
+	model.URL = normalizeResourceURL(model.URL, model.Scheme)
 	if err := s.db.Create(&model).Error; err != nil {
 		return domain.HarborRegistry{}, err
 	}
@@ -249,10 +287,40 @@ func (s *DatabaseStore) UpdateHarborRegistry(id string, input domain.HarborRegis
 	if value := strings.TrimSpace(input.URL); value != "" {
 		model.URL = value
 	}
-	model.CredentialRef = strings.TrimSpace(input.CredentialRef)
-	if value := strings.TrimSpace(input.Status); value != "" {
-		model.Status = value
+	if value := normalizeScheme(input.Scheme, model.URL); value != "" {
+		model.Scheme = value
 	}
+	model.URL = normalizeResourceURL(model.URL, model.Scheme)
+	if value := strings.TrimSpace(input.Username); value != "" {
+		model.Username = value
+	}
+	if value := strings.TrimSpace(input.Password); value != "" {
+		model.Password = value
+	}
+	if value := strings.TrimSpace(input.CredentialRef); value != "" {
+		model.CredentialRef = value
+	}
+	model.InsecureSkipTLSVerify = input.InsecureSkipTLSVerify
+	if err := s.db.Save(&model).Error; err != nil {
+		return domain.HarborRegistry{}, false, err
+	}
+	return toDomainHarborRegistry(model), true, nil
+}
+
+func (s *DatabaseStore) UpdateHarborRegistryProbe(id string, status string, message string, projects []string, checkedAt time.Time) (domain.HarborRegistry, bool, error) {
+	var model HarborRegistryModel
+	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return domain.HarborRegistry{}, false, nil
+		}
+		return domain.HarborRegistry{}, false, err
+	}
+	model.Status = fallbackString(strings.TrimSpace(status), "UNKNOWN")
+	model.ProbeMessage = strings.TrimSpace(message)
+	if projects != nil {
+		model.Projects = compactStringList(projects)
+	}
+	model.LastCheckAt = &checkedAt
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.HarborRegistry{}, false, err
 	}
@@ -286,14 +354,20 @@ func (s *DatabaseStore) GetJenkinsInstance(id string) (domain.JenkinsInstance, b
 
 func (s *DatabaseStore) CreateJenkinsInstance(input domain.JenkinsInstance) (domain.JenkinsInstance, error) {
 	model := JenkinsInstanceModel{
-		ID:            strings.TrimSpace(input.ID),
-		Name:          strings.TrimSpace(input.Name),
-		URL:           strings.TrimSpace(input.URL),
-		CredentialRef: strings.TrimSpace(input.CredentialRef),
-		Status:        fallbackString(strings.TrimSpace(input.Status), "UNKNOWN"),
+		ID:                    strings.TrimSpace(input.ID),
+		Name:                  strings.TrimSpace(input.Name),
+		URL:                   normalizeResourceURL(strings.TrimSpace(input.URL), "https"),
+		Username:              strings.TrimSpace(input.Username),
+		Token:                 strings.TrimSpace(input.Token),
+		CredentialRef:         fallbackString(strings.TrimSpace(input.CredentialRef), "resource:"+strings.TrimSpace(input.ID)),
+		InsecureSkipTLSVerify: input.InsecureSkipTLSVerify,
+		Status:                "UNKNOWN",
 	}
 	if model.ID == "" || model.Name == "" || model.URL == "" {
 		return domain.JenkinsInstance{}, errors.New("missing required fields")
+	}
+	if model.CredentialRef == "resource:" {
+		model.CredentialRef = "resource:" + model.ID
 	}
 	if err := s.db.Create(&model).Error; err != nil {
 		return domain.JenkinsInstance{}, err
@@ -313,12 +387,41 @@ func (s *DatabaseStore) UpdateJenkinsInstance(id string, input domain.JenkinsIns
 		model.Name = value
 	}
 	if value := strings.TrimSpace(input.URL); value != "" {
-		model.URL = value
+		model.URL = normalizeResourceURL(value, "https")
 	}
-	model.CredentialRef = strings.TrimSpace(input.CredentialRef)
-	if value := strings.TrimSpace(input.Status); value != "" {
-		model.Status = value
+	if value := strings.TrimSpace(input.Username); value != "" {
+		model.Username = value
 	}
+	if value := strings.TrimSpace(input.Token); value != "" {
+		model.Token = value
+	}
+	if value := strings.TrimSpace(input.CredentialRef); value != "" {
+		model.CredentialRef = value
+	}
+	model.InsecureSkipTLSVerify = input.InsecureSkipTLSVerify
+	if err := s.db.Save(&model).Error; err != nil {
+		return domain.JenkinsInstance{}, false, err
+	}
+	return toDomainJenkinsInstance(model), true, nil
+}
+
+func (s *DatabaseStore) UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, checkedAt time.Time) (domain.JenkinsInstance, bool, error) {
+	var model JenkinsInstanceModel
+	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return domain.JenkinsInstance{}, false, nil
+		}
+		return domain.JenkinsInstance{}, false, err
+	}
+	model.Status = fallbackString(strings.TrimSpace(status), "UNKNOWN")
+	model.ProbeMessage = strings.TrimSpace(message)
+	if views != nil {
+		model.Views = compactStringList(views)
+	}
+	if jobs != nil {
+		model.Jobs = compactStringList(jobs)
+	}
+	model.LastCheckAt = &checkedAt
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.JenkinsInstance{}, false, err
 	}
@@ -680,9 +783,13 @@ func toDomainKubernetesCluster(model KubernetesClusterModel) domain.KubernetesCl
 		ID:            model.ID,
 		Name:          model.Name,
 		APIServer:     model.APIServer,
+		Context:       model.Context,
 		CredentialRef: model.CredentialRef,
+		Kubeconfig:    model.Kubeconfig,
 		Status:        model.Status,
 		LastCheckAt:   lastCheckAt,
+		ProbeMessage:  model.ProbeMessage,
+		Namespaces:    compactStringList(model.Namespaces),
 	}
 }
 
@@ -692,12 +799,18 @@ func toDomainHarborRegistry(model HarborRegistryModel) domain.HarborRegistry {
 		lastCheckAt = model.LastCheckAt.Format(time.RFC3339)
 	}
 	return domain.HarborRegistry{
-		ID:            model.ID,
-		Name:          model.Name,
-		URL:           model.URL,
-		CredentialRef: model.CredentialRef,
-		Status:        model.Status,
-		LastCheckAt:   lastCheckAt,
+		ID:                    model.ID,
+		Name:                  model.Name,
+		URL:                   model.URL,
+		Scheme:                fallbackString(model.Scheme, schemeFromURL(model.URL)),
+		Username:              model.Username,
+		CredentialRef:         model.CredentialRef,
+		Password:              model.Password,
+		InsecureSkipTLSVerify: model.InsecureSkipTLSVerify,
+		Status:                model.Status,
+		LastCheckAt:           lastCheckAt,
+		ProbeMessage:          model.ProbeMessage,
+		Projects:              compactStringList(model.Projects),
 	}
 }
 
@@ -707,13 +820,66 @@ func toDomainJenkinsInstance(model JenkinsInstanceModel) domain.JenkinsInstance 
 		lastCheckAt = model.LastCheckAt.Format(time.RFC3339)
 	}
 	return domain.JenkinsInstance{
-		ID:            model.ID,
-		Name:          model.Name,
-		URL:           model.URL,
-		CredentialRef: model.CredentialRef,
-		Status:        model.Status,
-		LastCheckAt:   lastCheckAt,
+		ID:                    model.ID,
+		Name:                  model.Name,
+		URL:                   model.URL,
+		Username:              model.Username,
+		CredentialRef:         model.CredentialRef,
+		Token:                 model.Token,
+		InsecureSkipTLSVerify: model.InsecureSkipTLSVerify,
+		Status:                model.Status,
+		LastCheckAt:           lastCheckAt,
+		ProbeMessage:          model.ProbeMessage,
+		Views:                 compactStringList(model.Views),
+		Jobs:                  compactStringList(model.Jobs),
 	}
+}
+
+func compactStringList(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	seen := map[string]struct{}{}
+	output := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		output = append(output, trimmed)
+	}
+	return output
+}
+
+func normalizeScheme(scheme string, rawURL string) string {
+	value := strings.ToLower(strings.TrimSpace(scheme))
+	if value == "http" || value == "https" {
+		return value
+	}
+	return schemeFromURL(rawURL)
+}
+
+func schemeFromURL(rawURL string) string {
+	value := strings.ToLower(strings.TrimSpace(rawURL))
+	if strings.HasPrefix(value, "http://") {
+		return "http"
+	}
+	if strings.HasPrefix(value, "https://") {
+		return "https"
+	}
+	return "https"
+}
+
+func normalizeResourceURL(rawURL string, scheme string) string {
+	value := strings.TrimSpace(rawURL)
+	if value == "" || strings.HasPrefix(strings.ToLower(value), "http://") || strings.HasPrefix(strings.ToLower(value), "https://") {
+		return value
+	}
+	return fallbackString(normalizeScheme(scheme, value), "https") + "://" + value
 }
 
 func toDomainAgent(model AgentModel, environmentName string) domain.Agent {

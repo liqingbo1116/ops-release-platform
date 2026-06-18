@@ -60,6 +60,10 @@ type KubernetesClusterModel struct {
 	Name          string     `gorm:"size:128;not null"`
 	APIServer     string     `gorm:"size:512;not null"`
 	CredentialRef string     `gorm:"size:256"`
+	Kubeconfig    string     `gorm:"type:text"`
+	Context       string     `gorm:"size:128"`
+	Namespaces    []string   `gorm:"serializer:json;type:jsonb"`
+	ProbeMessage  string     `gorm:"size:512"`
 	Status        string     `gorm:"size:32;index;not null"`
 	LastCheckAt   *time.Time `gorm:"index"`
 	CreatedAt     time.Time  `gorm:"autoCreateTime"`
@@ -71,14 +75,20 @@ func (KubernetesClusterModel) TableName() string {
 }
 
 type HarborRegistryModel struct {
-	ID            string     `gorm:"primaryKey;size:64"`
-	Name          string     `gorm:"size:128;not null"`
-	URL           string     `gorm:"size:512;not null"`
-	CredentialRef string     `gorm:"size:256"`
-	Status        string     `gorm:"size:32;index;not null"`
-	LastCheckAt   *time.Time `gorm:"index"`
-	CreatedAt     time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
+	ID                    string `gorm:"primaryKey;size:64"`
+	Name                  string `gorm:"size:128;not null"`
+	URL                   string `gorm:"size:512;not null"`
+	Scheme                string `gorm:"size:16"`
+	Username              string `gorm:"size:128"`
+	Password              string `gorm:"type:text"`
+	CredentialRef         string `gorm:"size:256"`
+	InsecureSkipTLSVerify bool
+	Projects              []string   `gorm:"serializer:json;type:jsonb"`
+	ProbeMessage          string     `gorm:"size:512"`
+	Status                string     `gorm:"size:32;index;not null"`
+	LastCheckAt           *time.Time `gorm:"index"`
+	CreatedAt             time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt             time.Time  `gorm:"autoUpdateTime"`
 }
 
 func (HarborRegistryModel) TableName() string {
@@ -86,14 +96,20 @@ func (HarborRegistryModel) TableName() string {
 }
 
 type JenkinsInstanceModel struct {
-	ID            string     `gorm:"primaryKey;size:64"`
-	Name          string     `gorm:"size:128;not null"`
-	URL           string     `gorm:"size:512;not null"`
-	CredentialRef string     `gorm:"size:256"`
-	Status        string     `gorm:"size:32;index;not null"`
-	LastCheckAt   *time.Time `gorm:"index"`
-	CreatedAt     time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
+	ID                    string `gorm:"primaryKey;size:64"`
+	Name                  string `gorm:"size:128;not null"`
+	URL                   string `gorm:"size:512;not null"`
+	Username              string `gorm:"size:128"`
+	Token                 string `gorm:"type:text"`
+	CredentialRef         string `gorm:"size:256"`
+	InsecureSkipTLSVerify bool
+	Views                 []string   `gorm:"serializer:json;type:jsonb"`
+	Jobs                  []string   `gorm:"serializer:json;type:jsonb"`
+	ProbeMessage          string     `gorm:"size:512"`
+	Status                string     `gorm:"size:32;index;not null"`
+	LastCheckAt           *time.Time `gorm:"index"`
+	CreatedAt             time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt             time.Time  `gorm:"autoUpdateTime"`
 }
 
 func (JenkinsInstanceModel) TableName() string {

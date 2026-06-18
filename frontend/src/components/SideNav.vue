@@ -16,6 +16,7 @@ const groups = [
   {
     title: '环境与接入',
     items: [
+      { label: '基础资源', path: '/integration-resources' },
       { label: '环境管理', path: '/environments' },
       { label: 'Agent 管理', path: '/agents' },
     ],

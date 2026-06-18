@@ -8,11 +8,23 @@ const { listEnvironments, createEnvironment, updateEnvironment, checkEnvironment
   checkEnvironment: vi.fn(),
 }))
 
+const { listKubernetesClusters, listHarborRegistries, listJenkinsInstances } = vi.hoisted(() => ({
+  listKubernetesClusters: vi.fn(),
+  listHarborRegistries: vi.fn(),
+  listJenkinsInstances: vi.fn(),
+}))
+
 vi.mock('@/api/environments', () => ({
   listEnvironments,
   createEnvironment,
   updateEnvironment,
   checkEnvironment,
+}))
+
+vi.mock('@/api/integrationResources', () => ({
+  listKubernetesClusters,
+  listHarborRegistries,
+  listJenkinsInstances,
 }))
 
 vi.mock('element-plus', async (importOriginal) => {
@@ -35,6 +47,12 @@ describe('EnvironmentPage', () => {
     createEnvironment.mockReset()
     updateEnvironment.mockReset()
     checkEnvironment.mockReset()
+    listKubernetesClusters.mockReset()
+    listHarborRegistries.mockReset()
+    listJenkinsInstances.mockReset()
+    listKubernetesClusters.mockResolvedValue([])
+    listHarborRegistries.mockResolvedValue([])
+    listJenkinsInstances.mockResolvedValue([])
     listEnvironments.mockResolvedValue([
       {
         id: 'env-local-prod',
@@ -86,10 +104,10 @@ describe('EnvironmentPage', () => {
 
     expect(listEnvironments).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('项目 X 生产')
-    expect(wrapper.text()).toContain('项目环境')
+    expect(wrapper.text()).toContain('维护环境与基础资源的关联范围')
     expect(wrapper.text()).toContain('Agent 模式')
     expect(wrapper.text()).toContain('ONLINE')
-    expect(wrapper.text()).toContain('先维护真实环境，再校验 agent 绑定')
+    expect(wrapper.text()).toContain('基础资源在“基础资源”菜单维护')
     expect(wrapper.text()).toContain('1 个项目环境 Agent 未就绪')
   })
 

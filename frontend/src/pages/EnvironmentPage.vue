@@ -3,12 +3,11 @@
     <div class="page-head">
       <div>
         <h1>环境管理</h1>
-        <p>先维护 K8s、Harbor、Jenkins 资源，再让环境关联资源并填写 namespace、Harbor project、Jenkins view。</p>
+        <p>维护环境与基础资源的关联范围：K8s namespace、Harbor project、Jenkins view。</p>
       </div>
       <div class="head-actions">
         <el-button :loading="loading" @click="loadAll">刷新</el-button>
-        <el-button v-if="activeTab === 'environments'" type="primary" @click="openCreateDialog">新增环境</el-button>
-        <el-button v-else type="primary" @click="openResourceCreateDialog">新增资源</el-button>
+        <el-button type="primary" @click="openCreateDialog">新增环境</el-button>
       </div>
     </div>
 
@@ -16,7 +15,7 @@
       <el-alert
         type="info"
         :closable="false"
-        title="V1 主线：资源连接信息由平台维护；.secrets 只用于研发阶段启动服务，不作为正式环境主数据来源。"
+        title="V1 主线：基础资源在“基础资源”菜单维护；环境只关联资源与作用域；.secrets 只用于研发阶段启动配置。"
       />
       <el-alert
         v-if="blockedProjectEnvironmentCount > 0"
@@ -26,90 +25,46 @@
       />
     </div>
 
-    <el-tabs v-model="activeTab" class="environment-tabs">
-      <el-tab-pane label="环境" name="environments">
-        <el-card shadow="never">
-          <div class="toolbar">
-            <div class="toolbar-left">
-              <el-input v-model="keyword" placeholder="搜索环境、编码" clearable />
-              <el-select v-model="networkMode" placeholder="全部网络模式" clearable>
-                <el-option label="平台直连" value="DIRECT" />
-                <el-option label="Agent 模式" value="AGENT" />
-              </el-select>
-            </div>
-            <el-button>批量连接测试</el-button>
-          </div>
-          <el-alert v-if="errorMessage" class="environment-alert" type="warning" :closable="false" :title="errorMessage" />
-          <el-table v-loading="loading" :data="filteredRows" class="wide-table">
-            <el-table-column prop="name" label="环境" min-width="150" />
-            <el-table-column prop="code" label="编码" min-width="150" />
-            <el-table-column label="K8s / namespace" min-width="180">
-              <template #default="{ row }">{{ resourceName(kubernetesClusters, row.clusterId) }} / {{ row.namespace || '-' }}</template>
-            </el-table-column>
-            <el-table-column label="Harbor / project" min-width="180">
-              <template #default="{ row }">{{ resourceName(harborRegistries, row.registryId) }} / {{ row.registryProject || '-' }}</template>
-            </el-table-column>
-            <el-table-column label="Jenkins / view" min-width="180">
-              <template #default="{ row }">{{ resourceName(jenkinsInstances, row.jenkinsId) }} / {{ row.jenkinsView || '-' }}</template>
-            </el-table-column>
-            <el-table-column label="网络" min-width="110">
-              <template #default="{ row }">{{ row.networkMode === 'DIRECT' ? '平台直连' : 'Agent 模式' }}</template>
-            </el-table-column>
-            <el-table-column label="Agent" min-width="100">
-              <template #default="{ row }"><StatusTag :status="row.agentStatus" /></template>
-            </el-table-column>
-            <el-table-column label="状态" min-width="100">
-              <template #default="{ row }"><StatusTag :status="row.status" /></template>
-            </el-table-column>
-            <el-table-column label="操作" fixed="right" width="180">
-              <template #default="{ row }">
-                <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
-                <el-button link type="primary" @click="openDrawer(row)">连接配置</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-tab-pane>
-
-      <el-tab-pane label="K8s 集群" name="kubernetes">
-        <el-card shadow="never">
-          <el-table v-loading="loading" :data="kubernetesClusters" class="wide-table">
-            <el-table-column prop="name" label="名称" min-width="150" />
-            <el-table-column prop="id" label="资源 ID" min-width="150" />
-            <el-table-column prop="apiServer" label="API Server" min-width="240" />
-            <el-table-column prop="credentialRef" label="凭据引用" min-width="180" />
-            <el-table-column label="状态" min-width="100"><template #default="{ row }"><StatusTag :status="row.status" /></template></el-table-column>
-            <el-table-column label="操作" fixed="right" width="100"><template #default="{ row }"><el-button link type="primary" @click="openResourceEditDialog('kubernetes', row)">编辑</el-button></template></el-table-column>
-          </el-table>
-        </el-card>
-      </el-tab-pane>
-
-      <el-tab-pane label="Harbor 仓库" name="harbor">
-        <el-card shadow="never">
-          <el-table v-loading="loading" :data="harborRegistries" class="wide-table">
-            <el-table-column prop="name" label="名称" min-width="150" />
-            <el-table-column prop="id" label="资源 ID" min-width="150" />
-            <el-table-column prop="url" label="地址" min-width="240" />
-            <el-table-column prop="credentialRef" label="凭据引用" min-width="180" />
-            <el-table-column label="状态" min-width="100"><template #default="{ row }"><StatusTag :status="row.status" /></template></el-table-column>
-            <el-table-column label="操作" fixed="right" width="100"><template #default="{ row }"><el-button link type="primary" @click="openResourceEditDialog('harbor', row)">编辑</el-button></template></el-table-column>
-          </el-table>
-        </el-card>
-      </el-tab-pane>
-
-      <el-tab-pane label="Jenkins" name="jenkins">
-        <el-card shadow="never">
-          <el-table v-loading="loading" :data="jenkinsInstances" class="wide-table">
-            <el-table-column prop="name" label="名称" min-width="150" />
-            <el-table-column prop="id" label="资源 ID" min-width="150" />
-            <el-table-column prop="url" label="地址" min-width="240" />
-            <el-table-column prop="credentialRef" label="凭据引用" min-width="180" />
-            <el-table-column label="状态" min-width="100"><template #default="{ row }"><StatusTag :status="row.status" /></template></el-table-column>
-            <el-table-column label="操作" fixed="right" width="100"><template #default="{ row }"><el-button link type="primary" @click="openResourceEditDialog('jenkins', row)">编辑</el-button></template></el-table-column>
-          </el-table>
-        </el-card>
-      </el-tab-pane>
-    </el-tabs>
+    <el-card shadow="never">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <el-input v-model="keyword" placeholder="搜索环境、编码" clearable />
+          <el-select v-model="networkMode" placeholder="全部网络模式" clearable>
+            <el-option label="平台直连" value="DIRECT" />
+            <el-option label="Agent 模式" value="AGENT" />
+          </el-select>
+        </div>
+      </div>
+      <el-alert v-if="errorMessage" class="environment-alert" type="warning" :closable="false" :title="errorMessage" />
+      <el-table v-loading="loading" :data="filteredRows" class="wide-table">
+        <el-table-column prop="name" label="环境" min-width="150" />
+        <el-table-column prop="code" label="编码" min-width="150" />
+        <el-table-column label="K8s / namespace" min-width="210">
+          <template #default="{ row }">{{ resourceName(kubernetesClusters, row.clusterId) }} / {{ row.namespace || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="Harbor / project" min-width="210">
+          <template #default="{ row }">{{ resourceName(harborRegistries, row.registryId) }} / {{ row.registryProject || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="Jenkins / view" min-width="210">
+          <template #default="{ row }">{{ resourceName(jenkinsInstances, row.jenkinsId) }} / {{ row.jenkinsView || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="网络" min-width="110">
+          <template #default="{ row }">{{ row.networkMode === 'DIRECT' ? '平台直连' : 'Agent 模式' }}</template>
+        </el-table-column>
+        <el-table-column label="Agent" min-width="100">
+          <template #default="{ row }"><StatusTag :status="row.agentStatus" /></template>
+        </el-table-column>
+        <el-table-column label="状态" min-width="100">
+          <template #default="{ row }"><StatusTag :status="row.status" /></template>
+        </el-table-column>
+        <el-table-column label="操作" fixed="right" width="170">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
+            <el-button link type="primary" @click="openDrawer(row)">连接配置</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
 
     <EnvironmentConfigDrawer
       v-model:visible="drawerVisible"
@@ -118,8 +73,8 @@
       @check="handleCheckEnvironment"
     />
 
-    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增环境' : '编辑环境'" width="560px" destroy-on-close>
-      <el-form :model="form" label-width="112px">
+    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增环境' : '编辑环境'" width="580px" destroy-on-close>
+      <el-form :model="form" label-width="120px">
         <el-form-item label="环境名称" required><el-input v-model="form.name" placeholder="项目 X 生产" /></el-form-item>
         <el-form-item label="环境编码" required>
           <el-input v-model="form.code" placeholder="project-x-prod" />
@@ -128,41 +83,39 @@
         <el-form-item label="环境类型" required><el-segmented v-model="form.type" :options="typeOptions" /></el-form-item>
         <el-form-item label="网络模式" required><el-segmented v-model="form.networkMode" :options="networkOptions" /></el-form-item>
         <el-form-item label="K8s 集群" required>
-          <el-select v-model="form.clusterId" placeholder="先维护 K8s 集群资源">
-            <el-option v-for="item in kubernetesClusters" :key="item.id" :label="`${item.name}（${item.id}）`" :value="item.id" />
+          <el-select v-model="form.clusterId" placeholder="先在基础资源维护 K8s 集群" filterable>
+            <el-option v-for="item in kubernetesClusters" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="命名空间" required><el-input v-model="form.namespace" placeholder="project-x-prod" /></el-form-item>
+        <el-form-item label="命名空间" required>
+          <el-select v-model="form.namespace" placeholder="选择或输入 namespace" filterable allow-create default-first-option>
+            <el-option v-for="item in selectedNamespaces" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="Harbor 仓库" required>
-          <el-select v-model="form.registryId" placeholder="先维护 Harbor 仓库资源">
-            <el-option v-for="item in harborRegistries" :key="item.id" :label="`${item.name}（${item.id}）`" :value="item.id" />
+          <el-select v-model="form.registryId" placeholder="先在基础资源维护 Harbor 仓库" filterable>
+            <el-option v-for="item in harborRegistries" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="Harbor project" required><el-input v-model="form.registryProject" placeholder="project-x" /></el-form-item>
+        <el-form-item label="Harbor project" required>
+          <el-select v-model="form.registryProject" placeholder="选择或输入 project" filterable allow-create default-first-option>
+            <el-option v-for="item in selectedProjects" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="Jenkins">
-          <el-select v-model="form.jenkinsId" placeholder="选择 Jenkins 资源" clearable>
-            <el-option v-for="item in jenkinsInstances" :key="item.id" :label="`${item.name}（${item.id}）`" :value="item.id" />
+          <el-select v-model="form.jenkinsId" placeholder="选择 Jenkins 资源" clearable filterable>
+            <el-option v-for="item in jenkinsInstances" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="Jenkins view"><el-input v-model="form.jenkinsView" placeholder="project-x" /></el-form-item>
+        <el-form-item label="Jenkins view">
+          <el-select v-model="form.jenkinsView" placeholder="选择或输入 view" clearable filterable allow-create default-first-option>
+            <el-option v-for="item in selectedViews" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitEnvironment">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="resourceDialogVisible" :title="resourceDialogTitle" width="540px" destroy-on-close>
-      <el-form :model="resourceForm" label-width="96px">
-        <el-form-item label="资源 ID" required><el-input v-model="resourceForm.id" :disabled="resourceDialogMode === 'edit'" placeholder="例如 local-k3s / remote-harbor" /></el-form-item>
-        <el-form-item label="名称" required><el-input v-model="resourceForm.name" /></el-form-item>
-        <el-form-item :label="resourceAddressLabel" required><el-input v-model="resourceForm.address" /></el-form-item>
-        <el-form-item label="凭据引用"><el-input v-model="resourceForm.credentialRef" placeholder="例如 secrets/local-harbor，不填写明文密码" /></el-form-item>
-        <el-form-item label="状态"><el-select v-model="resourceForm.status"><el-option label="未知" value="UNKNOWN" /><el-option label="健康" value="HEALTHY" /><el-option label="异常" value="UNHEALTHY" /></el-select></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="resourceDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="resourceSubmitting" @click="submitResource">保存</el-button>
       </template>
     </el-dialog>
   </section>
@@ -175,25 +128,15 @@ import EnvironmentConfigDrawer from '@/components/EnvironmentConfigDrawer.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { checkEnvironment, createEnvironment, listEnvironments, updateEnvironment, type EnvironmentInfo, type EnvironmentPayload } from '@/api/environments'
 import {
-  createHarborRegistry,
-  createJenkinsInstance,
-  createKubernetesCluster,
   listHarborRegistries,
   listJenkinsInstances,
   listKubernetesClusters,
-  updateHarborRegistry,
-  updateJenkinsInstance,
-  updateKubernetesCluster,
   type HarborRegistry,
   type IntegrationResource,
-  type IntegrationResourceKind,
   type JenkinsInstance,
   type KubernetesCluster,
 } from '@/api/integrationResources'
 
-type ActiveTab = 'environments' | IntegrationResourceKind
-
-const activeTab = ref<ActiveTab>('environments')
 const keyword = ref('')
 const networkMode = ref('')
 const drawerVisible = ref(false)
@@ -209,12 +152,6 @@ const submitting = ref(false)
 const checkingEnvironment = ref(false)
 const errorMessage = ref('')
 const form = ref<EnvironmentPayload>(emptyEnvironmentForm())
-
-const resourceDialogVisible = ref(false)
-const resourceDialogMode = ref<'create' | 'edit'>('create')
-const resourceKind = ref<IntegrationResourceKind>('kubernetes')
-const resourceSubmitting = ref(false)
-const resourceForm = ref({ id: '', name: '', address: '', credentialRef: '', status: 'UNKNOWN' })
 
 const typeOptions = [
   { label: '项目环境', value: 'PROJECT' },
@@ -239,12 +176,9 @@ const filteredRows = computed(() => {
   })
 })
 
-const resourceDialogTitle = computed(() => {
-  const prefix = resourceDialogMode.value === 'create' ? '新增' : '编辑'
-  return `${prefix}${resourceKindName(resourceKind.value)}`
-})
-
-const resourceAddressLabel = computed(() => (resourceKind.value === 'kubernetes' ? 'API Server' : '地址'))
+const selectedNamespaces = computed(() => kubernetesClusters.value.find((item) => item.id === form.value.clusterId)?.namespaces ?? [])
+const selectedProjects = computed(() => harborRegistries.value.find((item) => item.id === form.value.registryId)?.projects ?? [])
+const selectedViews = computed(() => jenkinsInstances.value.find((item) => item.id === form.value.jenkinsId)?.views ?? [])
 
 function emptyEnvironmentForm(): EnvironmentPayload {
   return {
@@ -260,10 +194,6 @@ function emptyEnvironmentForm(): EnvironmentPayload {
     jenkinsId: '',
     jenkinsView: '',
   }
-}
-
-function resourceKindName(kind: IntegrationResourceKind) {
-  return kind === 'kubernetes' ? 'K8s 集群' : kind === 'harbor' ? 'Harbor 仓库' : 'Jenkins'
 }
 
 function resourceName(items: IntegrationResource[], id: string) {
@@ -358,53 +288,6 @@ function trimEnvironmentPayload(payload: EnvironmentPayload): EnvironmentPayload
   }
 }
 
-function openResourceCreateDialog() {
-  resourceKind.value = activeTab.value === 'environments' ? 'kubernetes' : activeTab.value
-  resourceDialogMode.value = 'create'
-  resourceForm.value = { id: '', name: '', address: '', credentialRef: '', status: 'UNKNOWN' }
-  resourceDialogVisible.value = true
-}
-
-function openResourceEditDialog(kind: IntegrationResourceKind, row: IntegrationResource) {
-  resourceKind.value = kind
-  resourceDialogMode.value = 'edit'
-  resourceForm.value = {
-    id: row.id,
-    name: row.name,
-    address: kind === 'kubernetes' ? (row as KubernetesCluster).apiServer : (row as HarborRegistry | JenkinsInstance).url,
-    credentialRef: row.credentialRef,
-    status: row.status,
-  }
-  resourceDialogVisible.value = true
-}
-
-async function submitResource() {
-  if (!resourceForm.value.id.trim() || !resourceForm.value.name.trim() || !resourceForm.value.address.trim()) {
-    ElMessage.warning('请完整填写资源 ID、名称和地址')
-    return
-  }
-  resourceSubmitting.value = true
-  try {
-    if (resourceKind.value === 'kubernetes') {
-      const payload = { id: resourceForm.value.id.trim(), name: resourceForm.value.name.trim(), apiServer: resourceForm.value.address.trim(), credentialRef: resourceForm.value.credentialRef.trim(), status: resourceForm.value.status }
-      resourceDialogMode.value === 'create' ? await createKubernetesCluster(payload) : await updateKubernetesCluster(payload.id, payload)
-    } else if (resourceKind.value === 'harbor') {
-      const payload = { id: resourceForm.value.id.trim(), name: resourceForm.value.name.trim(), url: resourceForm.value.address.trim(), credentialRef: resourceForm.value.credentialRef.trim(), status: resourceForm.value.status }
-      resourceDialogMode.value === 'create' ? await createHarborRegistry(payload) : await updateHarborRegistry(payload.id, payload)
-    } else {
-      const payload = { id: resourceForm.value.id.trim(), name: resourceForm.value.name.trim(), url: resourceForm.value.address.trim(), credentialRef: resourceForm.value.credentialRef.trim(), status: resourceForm.value.status }
-      resourceDialogMode.value === 'create' ? await createJenkinsInstance(payload) : await updateJenkinsInstance(payload.id, payload)
-    }
-    ElMessage.success('资源已保存')
-    resourceDialogVisible.value = false
-    await loadAll()
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '资源保存失败')
-  } finally {
-    resourceSubmitting.value = false
-  }
-}
-
 async function handleCheckEnvironment(id: string) {
   checkingEnvironment.value = true
   try {
@@ -430,10 +313,6 @@ onMounted(loadAll)
 
 .readiness-grid {
   flex-direction: column;
-}
-
-.environment-tabs {
-  margin-top: 4px;
 }
 
 .environment-alert {

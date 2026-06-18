@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -393,6 +394,203 @@ func TestEnvironmentCRUD(t *testing.T) {
 	if updateRecorder.Code != http.StatusOK {
 		t.Fatalf("expected update environment status 200, got %d: %s", updateRecorder.Code, updateRecorder.Body.String())
 	}
+}
+
+func TestResourceManagementCreatesAndRefreshesKubernetesFromKubeconfig(t *testing.T) {
+	kubernetesAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/readyz":
+			_, _ = w.Write([]byte(`ok`))
+		case "/api/v1/namespaces":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"items":[{"metadata":{"name":"project-x"}},{"metadata":{"name":"default"}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer kubernetesAPI.Close()
+	router := newTestRouter()
+	kubeconfig := strings.ReplaceAll(`apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: __SERVER__
+    insecure-skip-tls-verify: true
+users:
+- name: dev
+  user:
+    token: test-token
+contexts:
+- name: local-context
+  context:
+    cluster: local
+    user: dev
+current-context: local-context
+`, "__SERVER__", kubernetesAPI.URL)
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/kubernetes-clusters", strings.NewReader(`{"id":"k8s-dev","name":"开发集群","kubeconfig":`+strconv.Quote(kubeconfig)+`}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected kubernetes create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	if strings.Contains(createRecorder.Body.String(), "test-token") || strings.Contains(createRecorder.Body.String(), "kubeconfig") {
+		t.Fatalf("expected kubeconfig secret fields not to be returned: %s", createRecorder.Body.String())
+	}
+
+	refreshRequest := httptest.NewRequest(http.MethodPost, "/api/kubernetes-clusters/k8s-dev/refresh", nil)
+	refreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(refreshRecorder, refreshRequest)
+	if refreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected kubernetes refresh status 200, got %d: %s", refreshRecorder.Code, refreshRecorder.Body.String())
+	}
+	var payload struct {
+		Data domain.KubernetesCluster `json:"data"`
+	}
+	if err := json.Unmarshal(refreshRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode kubernetes refresh response: %v", err)
+	}
+	if payload.Data.Status != "HEALTHY" || !stringSliceContains(payload.Data.Namespaces, "project-x") {
+		t.Fatalf("expected healthy kubernetes namespace cache, got %+v", payload.Data)
+	}
+}
+
+func TestResourceManagementDoesNotExposeHarborAndJenkinsSecrets(t *testing.T) {
+	harborAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2.0/systeminfo":
+			_, _ = w.Write([]byte(`{"harbor_version":"dev"}`))
+		case "/api/v2.0/projects":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"name":"project-x"},{"name":"project-y"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer harborAPI.Close()
+	jenkinsAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"mode":"NORMAL","views":[{"name":"project-x"}],"jobs":[{"name":"build-project-x"}]}`))
+	}))
+	defer jenkinsAPI.Close()
+	router := newTestRouter()
+
+	harborSecret := "harbor-secret-for-test"
+	harborCreate := httptest.NewRequest(http.MethodPost, "/api/harbor-registries", strings.NewReader(`{"id":"harbor-dev","name":"开发 Harbor","url":"`+harborAPI.URL+`","scheme":"http","username":"dev","password":"`+harborSecret+`"}`))
+	harborCreate.Header.Set("Content-Type", "application/json")
+	harborCreateRecorder := httptest.NewRecorder()
+	router.ServeHTTP(harborCreateRecorder, harborCreate)
+	if harborCreateRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected harbor create status 201, got %d: %s", harborCreateRecorder.Code, harborCreateRecorder.Body.String())
+	}
+	if strings.Contains(harborCreateRecorder.Body.String(), harborSecret) || strings.Contains(harborCreateRecorder.Body.String(), "password") {
+		t.Fatalf("expected harbor password not to be returned: %s", harborCreateRecorder.Body.String())
+	}
+	harborRefresh := httptest.NewRequest(http.MethodPost, "/api/harbor-registries/harbor-dev/refresh", nil)
+	harborRefreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(harborRefreshRecorder, harborRefresh)
+	if harborRefreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected harbor refresh status 200, got %d: %s", harborRefreshRecorder.Code, harborRefreshRecorder.Body.String())
+	}
+	var harborPayload struct {
+		Data domain.HarborRegistry `json:"data"`
+	}
+	if err := json.Unmarshal(harborRefreshRecorder.Body.Bytes(), &harborPayload); err != nil {
+		t.Fatalf("decode harbor refresh response: %v", err)
+	}
+	if harborPayload.Data.Status != "HEALTHY" || !stringSliceContains(harborPayload.Data.Projects, "project-x") {
+		t.Fatalf("expected healthy harbor project cache, got %+v", harborPayload.Data)
+	}
+
+	jenkinsSecret := "jenkins-secret-for-test"
+	jenkinsCreate := httptest.NewRequest(http.MethodPost, "/api/jenkins-instances", strings.NewReader(`{"id":"jenkins-dev","name":"开发 Jenkins","url":"`+jenkinsAPI.URL+`","username":"dev","token":"`+jenkinsSecret+`"}`))
+	jenkinsCreate.Header.Set("Content-Type", "application/json")
+	jenkinsCreateRecorder := httptest.NewRecorder()
+	router.ServeHTTP(jenkinsCreateRecorder, jenkinsCreate)
+	if jenkinsCreateRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected jenkins create status 201, got %d: %s", jenkinsCreateRecorder.Code, jenkinsCreateRecorder.Body.String())
+	}
+	if strings.Contains(jenkinsCreateRecorder.Body.String(), jenkinsSecret) || strings.Contains(jenkinsCreateRecorder.Body.String(), "token") {
+		t.Fatalf("expected jenkins token not to be returned: %s", jenkinsCreateRecorder.Body.String())
+	}
+	jenkinsRefresh := httptest.NewRequest(http.MethodPost, "/api/jenkins-instances/jenkins-dev/refresh", nil)
+	jenkinsRefreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(jenkinsRefreshRecorder, jenkinsRefresh)
+	if jenkinsRefreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected jenkins refresh status 200, got %d: %s", jenkinsRefreshRecorder.Code, jenkinsRefreshRecorder.Body.String())
+	}
+	var jenkinsPayload struct {
+		Data domain.JenkinsInstance `json:"data"`
+	}
+	if err := json.Unmarshal(jenkinsRefreshRecorder.Body.Bytes(), &jenkinsPayload); err != nil {
+		t.Fatalf("decode jenkins refresh response: %v", err)
+	}
+	if jenkinsPayload.Data.Status != "HEALTHY" || !stringSliceContains(jenkinsPayload.Data.Views, "project-x") || !stringSliceContains(jenkinsPayload.Data.Jobs, "build-project-x") {
+		t.Fatalf("expected healthy jenkins cache, got %+v", jenkinsPayload.Data)
+	}
+}
+
+func TestResourceRefreshFailureKeepsPreviousCache(t *testing.T) {
+	harborAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2.0/systeminfo":
+			_, _ = w.Write([]byte(`{"harbor_version":"dev"}`))
+		case "/api/v2.0/projects":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"name":"project-x"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/harbor-registries", strings.NewReader(`{"id":"harbor-cache","name":"缓存 Harbor","url":"`+harborAPI.URL+`","scheme":"http"}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected harbor create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	refreshRequest := httptest.NewRequest(http.MethodPost, "/api/harbor-registries/harbor-cache/refresh", nil)
+	refreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(refreshRecorder, refreshRequest)
+	if refreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected first harbor refresh status 200, got %d: %s", refreshRecorder.Code, refreshRecorder.Body.String())
+	}
+
+	harborAPI.Close()
+	failedRefreshRequest := httptest.NewRequest(http.MethodPost, "/api/harbor-registries/harbor-cache/refresh", nil)
+	failedRefreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(failedRefreshRecorder, failedRefreshRequest)
+	if failedRefreshRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected failed harbor refresh status 400, got %d: %s", failedRefreshRecorder.Code, failedRefreshRecorder.Body.String())
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/harbor-registries", nil)
+	listRecorder := httptest.NewRecorder()
+	router.ServeHTTP(listRecorder, listRequest)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected harbor list status 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Items []domain.HarborRegistry `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode harbor list response: %v", err)
+	}
+	for _, item := range payload.Data.Items {
+		if item.ID == "harbor-cache" {
+			if item.Status != "UNHEALTHY" || !stringSliceContains(item.Projects, "project-x") || item.ProbeMessage == "" {
+				t.Fatalf("expected failed refresh to keep project cache and record failure, got %+v", item)
+			}
+			return
+		}
+	}
+	t.Fatal("expected harbor-cache resource in list")
 }
 
 func TestAgentHeartbeatRejectsUnknownEnvironment(t *testing.T) {
@@ -1060,4 +1258,13 @@ func assertAgentStatus(t *testing.T, router http.Handler, taskID string, step st
 	if len(payload.Data.Logs) == 0 {
 		t.Fatalf("expected action log, got %+v", payload.Data.Logs)
 	}
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

@@ -16,14 +16,17 @@ type Store interface {
 	GetKubernetesCluster(id string) (domain.KubernetesCluster, bool)
 	CreateKubernetesCluster(input domain.KubernetesCluster) (domain.KubernetesCluster, error)
 	UpdateKubernetesCluster(id string, input domain.KubernetesCluster) (domain.KubernetesCluster, bool, error)
+	UpdateKubernetesClusterProbe(id string, status string, message string, namespaces []string, checkedAt time.Time) (domain.KubernetesCluster, bool, error)
 	ListHarborRegistries(query string) []domain.HarborRegistry
 	GetHarborRegistry(id string) (domain.HarborRegistry, bool)
 	CreateHarborRegistry(input domain.HarborRegistry) (domain.HarborRegistry, error)
 	UpdateHarborRegistry(id string, input domain.HarborRegistry) (domain.HarborRegistry, bool, error)
+	UpdateHarborRegistryProbe(id string, status string, message string, projects []string, checkedAt time.Time) (domain.HarborRegistry, bool, error)
 	ListJenkinsInstances(query string) []domain.JenkinsInstance
 	GetJenkinsInstance(id string) (domain.JenkinsInstance, bool)
 	CreateJenkinsInstance(input domain.JenkinsInstance) (domain.JenkinsInstance, error)
 	UpdateJenkinsInstance(id string, input domain.JenkinsInstance) (domain.JenkinsInstance, bool, error)
+	UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, checkedAt time.Time) (domain.JenkinsInstance, bool, error)
 	ListAgents(query string) []domain.Agent
 	GetAgent(id string) (domain.Agent, bool)
 	UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool)

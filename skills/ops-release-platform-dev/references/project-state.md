@@ -36,22 +36,23 @@ Existing foundation:
 - Users only enter environment name and environment code. The backend generates the environment ID as `env-<code>` when the create request omits `id`.
 - Environment page has separate tabs for maintaining K8s, Harbor, and Jenkins resources. Environments associate those resource rows and their per-environment scopes.
 - `.secrets/` is development-only for private runtime values. Formal resource master data belongs in the platform database, and credentials must be hidden behind internal credential references.
-- Backend `INTEGRATION_MODE=real` currently supports Harbor systeminfo and Kubernetes readyz connectivity checks through platform resource records plus development-only credentials loaded from `.secrets/integration-connections.*`.
-- Frontend environment create/edit selects platform resource rows without exposing secrets.
+- Resource create/edit forms use user-oriented fields and no longer expose `credentialRef`: K8s kubeconfig/context, Harbor URL + HTTP/HTTPS + username/password, Jenkins URL + username/password or API token.
+- Resource status is system-owned. Users can test connection or refresh probe cache, but cannot manually edit status.
+- Backend resource probe endpoints support local/direct checks and cache refresh:
+  - K8s `/readyz` and namespace list from kubeconfig/API server.
+  - Harbor `/api/v2.0/systeminfo` and project list, including HTTP registries.
+  - Jenkins `/api/json` and view/job list.
+- Probe responses update `status`, `lastCheckAt`, `probeMessage`, and successful cache lists: `namespaces`, `projects`, `views`, `jobs`.
+- Refresh failure keeps the previous cache and records the failure reason in `probeMessage`.
+- Frontend environment create/edit selects platform resource rows without exposing secrets, and environment scope options come from cached namespaces/projects/views while still allowing manual input when cache is empty.
 - Skill and docs now record the `.secrets/` integration rule and real-data gate for environment management.
 - Kubeconfig paths from `.secrets/` resolve from repo root, backend runtime, or package test working directories.
 - Real environment checks have previously passed through `POST /api/environments/:id/check` for local and project sample environments, but this is not the final acceptance standard for remote/project environments. Remote resource checks must be converted to Agent tasks that report status and probe cache.
 
 Phase 1 remaining work:
 
-- Resource create/edit forms must stop exposing implementation concepts such as `credentialRef`.
-- K8s form must accept kubeconfig upload/paste and optional context.
-- Harbor form must accept URL, HTTP/HTTPS, username/password, and optional TLS skip.
-- Jenkins form must accept URL, username, password/API token, and optional TLS skip.
-- Resource status must be system-maintained, with user actions limited to test connection and refresh/probe.
-- K8s namespaces, Harbor projects, and Jenkins views/jobs must be probed from real systems and cached.
-- Refresh/probe failure must keep the previous cache and show the failure reason.
 - Local/direct probes run in the platform backend; remote/project probes run through Agent tasks and report back to the platform.
+- Remote/project Agent-based resource probing remains the phase 1 gate that is not complete.
 
 Agent foundation already implemented but must be rechecked after phase 1 resource semantics:
 
@@ -88,6 +89,7 @@ Validation for this local work:
   - `npm run test:unit -- --run` passed on 2026-06-18.
 - Frontend build:
   - `npm run build` passed on 2026-06-18.
+  - The build produced only third-party Rolldown pure-annotation warnings from `@vueuse/core`; no type or build failure.
 
 Current runtime:
 

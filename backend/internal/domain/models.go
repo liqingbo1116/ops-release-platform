@@ -32,30 +32,49 @@ type Environment struct {
 }
 
 type KubernetesCluster struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	APIServer     string `json:"apiServer"`
-	CredentialRef string `json:"credentialRef"`
-	Status        string `json:"status"`
-	LastCheckAt   string `json:"lastCheckAt"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	APIServer    string   `json:"apiServer"`
+	Context      string   `json:"context"`
+	Status       string   `json:"status"`
+	LastCheckAt  string   `json:"lastCheckAt"`
+	ProbeMessage string   `json:"probeMessage"`
+	Namespaces   []string `json:"namespaces"`
+
+	CredentialRef string `json:"-"`
+	Kubeconfig    string `json:"-"`
 }
 
 type HarborRegistry struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	URL           string `json:"url"`
-	CredentialRef string `json:"credentialRef"`
-	Status        string `json:"status"`
-	LastCheckAt   string `json:"lastCheckAt"`
+	ID                    string   `json:"id"`
+	Name                  string   `json:"name"`
+	URL                   string   `json:"url"`
+	Scheme                string   `json:"scheme"`
+	Username              string   `json:"username"`
+	InsecureSkipTLSVerify bool     `json:"insecureSkipTLSVerify"`
+	Status                string   `json:"status"`
+	LastCheckAt           string   `json:"lastCheckAt"`
+	ProbeMessage          string   `json:"probeMessage"`
+	Projects              []string `json:"projects"`
+
+	CredentialRef string `json:"-"`
+	Password      string `json:"-"`
 }
 
 type JenkinsInstance struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	URL           string `json:"url"`
-	CredentialRef string `json:"credentialRef"`
-	Status        string `json:"status"`
-	LastCheckAt   string `json:"lastCheckAt"`
+	ID                    string   `json:"id"`
+	Name                  string   `json:"name"`
+	URL                   string   `json:"url"`
+	Username              string   `json:"username"`
+	InsecureSkipTLSVerify bool     `json:"insecureSkipTLSVerify"`
+	Status                string   `json:"status"`
+	LastCheckAt           string   `json:"lastCheckAt"`
+	ProbeMessage          string   `json:"probeMessage"`
+	Views                 []string `json:"views"`
+	Jobs                  []string `json:"jobs"`
+
+	CredentialRef string `json:"-"`
+	Token         string `json:"-"`
 }
 
 type Agent struct {

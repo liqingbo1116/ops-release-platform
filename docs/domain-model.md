@@ -35,7 +35,7 @@ K8s、Harbor、Jenkins 是独立资源，不是环境的内嵌字段。资源新
 - Harbor：名称、地址、HTTP/HTTPS、用户名、密码、可选跳过 TLS 校验。
 - Jenkins：名称、地址、用户名、密码或 API Token、可选跳过 TLS 校验。
 
-`credentialRef` 是平台内部字段，由后端在保存凭据后生成或关联，前端表单不让用户填写。资源状态统一由测试连接或刷新探测更新，状态建议包含 `UNKNOWN`、`HEALTHY`、`UNHEALTHY`、`UNAUTHORIZED`、`UNREACHABLE`、`TLS_ERROR`，并保存 `lastCheckAt`、`lastCheckMessage`。
+`credentialRef` 是平台内部字段，由后端在保存凭据后生成或关联，前端表单不让用户填写。资源状态统一由测试连接或刷新探测更新，状态建议包含 `UNKNOWN`、`HEALTHY`、`UNHEALTHY`、`UNAUTHORIZED`、`UNREACHABLE`、`TLS_ERROR`，并保存 `lastCheckAt`、`probeMessage`。
 
 资源探测结果需要缓存，供环境关联时快速选择：
 
@@ -51,14 +51,14 @@ K8s、Harbor、Jenkins 是独立资源，不是环境的内嵌字段。资源新
 |---|---|---|---|
 | id | string | 是 | K8s 集群资源 ID |
 | name | string | 是 | 集群名称 |
-| apiServer | string | 是 | Kubernetes API Server 地址 |
+| apiServer | string | 否 | Kubernetes API Server 地址；创建时 `apiServer` 与 `kubeconfig` 至少提供一个 |
 | context | string | 否 | kubeconfig 中选择的 context |
 | credentialRef | string | 否 | 内部凭据引用，不由用户填写，不保存明文 kubeconfig |
+| kubeconfig | string | 否 | 仅请求字段，响应不返回明文 kubeconfig |
 | status | enum | 是 | UNKNOWN / HEALTHY / UNHEALTHY / UNAUTHORIZED / UNREACHABLE / TLS_ERROR |
 | lastCheckAt | datetime | 否 | 最近连接测试时间 |
-| lastCheckMessage | string | 否 | 最近连接测试结果或失败原因 |
-| cachedNamespaces | string[] | 否 | 最近一次成功探测到的 namespace 列表 |
-| cacheUpdatedAt | datetime | 否 | 缓存更新时间 |
+| probeMessage | string | 否 | 最近连接测试结果或失败原因 |
+| namespaces | string[] | 否 | 最近一次成功探测到的 namespace 列表 |
 
 ## HarborRegistry
 
@@ -67,14 +67,15 @@ K8s、Harbor、Jenkins 是独立资源，不是环境的内嵌字段。资源新
 | id | string | 是 | Harbor/镜像仓库资源 ID |
 | name | string | 是 | 仓库名称 |
 | url | string | 是 | Harbor/镜像仓库地址，需支持 HTTP 和 HTTPS |
-| scheme | enum | 是 | HTTP / HTTPS |
+| scheme | enum | 是 | http / https |
+| username | string | 否 | Harbor 用户名 |
+| password | string | 否 | 仅请求字段，响应不返回明文密码 |
 | insecureSkipTLSVerify | bool | 否 | HTTPS 自签或测试环境是否跳过 TLS 校验 |
 | credentialRef | string | 否 | 内部凭据引用，不由用户填写，不保存明文账号密码 |
 | status | enum | 是 | UNKNOWN / HEALTHY / UNHEALTHY / UNAUTHORIZED / UNREACHABLE / TLS_ERROR |
 | lastCheckAt | datetime | 否 | 最近连接测试时间 |
-| lastCheckMessage | string | 否 | 最近连接测试结果或失败原因 |
-| cachedProjects | string[] | 否 | 最近一次成功探测到的 Harbor project 列表 |
-| cacheUpdatedAt | datetime | 否 | 缓存更新时间 |
+| probeMessage | string | 否 | 最近连接测试结果或失败原因 |
+| projects | string[] | 否 | 最近一次成功探测到的 Harbor project 列表 |
 
 ## JenkinsInstance
 
@@ -83,14 +84,15 @@ K8s、Harbor、Jenkins 是独立资源，不是环境的内嵌字段。资源新
 | id | string | 是 | Jenkins 实例资源 ID |
 | name | string | 是 | Jenkins 名称 |
 | url | string | 是 | Jenkins 地址 |
+| username | string | 否 | Jenkins 用户名 |
+| token | string | 否 | 仅请求字段，响应不返回明文密码或 API Token |
 | insecureSkipTLSVerify | bool | 否 | HTTPS 自签或测试环境是否跳过 TLS 校验 |
 | credentialRef | string | 否 | 内部凭据引用，不由用户填写，不保存明文账号密码或 token |
 | status | enum | 是 | UNKNOWN / HEALTHY / UNHEALTHY / UNAUTHORIZED / UNREACHABLE / TLS_ERROR |
 | lastCheckAt | datetime | 否 | 最近连接测试时间 |
-| lastCheckMessage | string | 否 | 最近连接测试结果或失败原因 |
-| cachedViews | string[] | 否 | 最近一次成功探测到的 Jenkins view 列表 |
-| cachedJobs | string[] | 否 | 最近一次成功探测到的 Jenkins job 列表 |
-| cacheUpdatedAt | datetime | 否 | 缓存更新时间 |
+| probeMessage | string | 否 | 最近连接测试结果或失败原因 |
+| views | string[] | 否 | 最近一次成功探测到的 Jenkins view 列表 |
+| jobs | string[] | 否 | 最近一次成功探测到的 Jenkins job 列表 |
 
 ## Agent
 

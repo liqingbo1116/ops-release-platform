@@ -182,9 +182,11 @@ func (r *MockRepository) CreateKubernetesCluster(input domain.KubernetesCluster)
 		Name:          strings.TrimSpace(input.Name),
 		APIServer:     strings.TrimSpace(input.APIServer),
 		CredentialRef: strings.TrimSpace(input.CredentialRef),
-		Status:        firstNonEmpty(strings.TrimSpace(input.Status), "UNKNOWN"),
+		Kubeconfig:    strings.TrimSpace(input.Kubeconfig),
+		Context:       strings.TrimSpace(input.Context),
+		Status:        "UNKNOWN",
 	}
-	if item.ID == "" || item.Name == "" || item.APIServer == "" {
+	if item.ID == "" || item.Name == "" || (item.APIServer == "" && item.Kubeconfig == "") {
 		return domain.KubernetesCluster{}, fmt.Errorf("missing required fields")
 	}
 	r.kubernetes = append(r.kubernetes, item)
@@ -202,10 +204,29 @@ func (r *MockRepository) UpdateKubernetesCluster(id string, input domain.Kuberne
 		if value := strings.TrimSpace(input.APIServer); value != "" {
 			r.kubernetes[index].APIServer = value
 		}
-		r.kubernetes[index].CredentialRef = strings.TrimSpace(input.CredentialRef)
-		if value := strings.TrimSpace(input.Status); value != "" {
-			r.kubernetes[index].Status = value
+		if value := strings.TrimSpace(input.Kubeconfig); value != "" {
+			r.kubernetes[index].Kubeconfig = value
 		}
+		r.kubernetes[index].Context = strings.TrimSpace(input.Context)
+		if value := strings.TrimSpace(input.CredentialRef); value != "" {
+			r.kubernetes[index].CredentialRef = value
+		}
+		return r.kubernetes[index], true, nil
+	}
+	return domain.KubernetesCluster{}, false, nil
+}
+
+func (r *MockRepository) UpdateKubernetesClusterProbe(id string, status string, message string, namespaces []string, checkedAt time.Time) (domain.KubernetesCluster, bool, error) {
+	for index := range r.kubernetes {
+		if r.kubernetes[index].ID != id {
+			continue
+		}
+		r.kubernetes[index].Status = firstNonEmpty(strings.TrimSpace(status), "UNKNOWN")
+		r.kubernetes[index].ProbeMessage = strings.TrimSpace(message)
+		if namespaces != nil {
+			r.kubernetes[index].Namespaces = append([]string(nil), namespaces...)
+		}
+		r.kubernetes[index].LastCheckAt = checkedAt.Format(time.RFC3339)
 		return r.kubernetes[index], true, nil
 	}
 	return domain.KubernetesCluster{}, false, nil
@@ -228,11 +249,15 @@ func (r *MockRepository) GetHarborRegistry(id string) (domain.HarborRegistry, bo
 
 func (r *MockRepository) CreateHarborRegistry(input domain.HarborRegistry) (domain.HarborRegistry, error) {
 	item := domain.HarborRegistry{
-		ID:            strings.TrimSpace(input.ID),
-		Name:          strings.TrimSpace(input.Name),
-		URL:           strings.TrimSpace(input.URL),
-		CredentialRef: strings.TrimSpace(input.CredentialRef),
-		Status:        firstNonEmpty(strings.TrimSpace(input.Status), "UNKNOWN"),
+		ID:                    strings.TrimSpace(input.ID),
+		Name:                  strings.TrimSpace(input.Name),
+		URL:                   strings.TrimSpace(input.URL),
+		Scheme:                strings.TrimSpace(input.Scheme),
+		Username:              strings.TrimSpace(input.Username),
+		Password:              strings.TrimSpace(input.Password),
+		CredentialRef:         strings.TrimSpace(input.CredentialRef),
+		InsecureSkipTLSVerify: input.InsecureSkipTLSVerify,
+		Status:                "UNKNOWN",
 	}
 	if item.ID == "" || item.Name == "" || item.URL == "" {
 		return domain.HarborRegistry{}, fmt.Errorf("missing required fields")
@@ -252,10 +277,33 @@ func (r *MockRepository) UpdateHarborRegistry(id string, input domain.HarborRegi
 		if value := strings.TrimSpace(input.URL); value != "" {
 			r.harbor[index].URL = value
 		}
-		r.harbor[index].CredentialRef = strings.TrimSpace(input.CredentialRef)
-		if value := strings.TrimSpace(input.Status); value != "" {
-			r.harbor[index].Status = value
+		if value := strings.TrimSpace(input.Username); value != "" {
+			r.harbor[index].Username = value
 		}
+		if value := strings.TrimSpace(input.Password); value != "" {
+			r.harbor[index].Password = value
+		}
+		if value := strings.TrimSpace(input.CredentialRef); value != "" {
+			r.harbor[index].CredentialRef = value
+		}
+		r.harbor[index].Scheme = strings.TrimSpace(input.Scheme)
+		r.harbor[index].InsecureSkipTLSVerify = input.InsecureSkipTLSVerify
+		return r.harbor[index], true, nil
+	}
+	return domain.HarborRegistry{}, false, nil
+}
+
+func (r *MockRepository) UpdateHarborRegistryProbe(id string, status string, message string, projects []string, checkedAt time.Time) (domain.HarborRegistry, bool, error) {
+	for index := range r.harbor {
+		if r.harbor[index].ID != id {
+			continue
+		}
+		r.harbor[index].Status = firstNonEmpty(strings.TrimSpace(status), "UNKNOWN")
+		r.harbor[index].ProbeMessage = strings.TrimSpace(message)
+		if projects != nil {
+			r.harbor[index].Projects = append([]string(nil), projects...)
+		}
+		r.harbor[index].LastCheckAt = checkedAt.Format(time.RFC3339)
 		return r.harbor[index], true, nil
 	}
 	return domain.HarborRegistry{}, false, nil
@@ -278,11 +326,14 @@ func (r *MockRepository) GetJenkinsInstance(id string) (domain.JenkinsInstance, 
 
 func (r *MockRepository) CreateJenkinsInstance(input domain.JenkinsInstance) (domain.JenkinsInstance, error) {
 	item := domain.JenkinsInstance{
-		ID:            strings.TrimSpace(input.ID),
-		Name:          strings.TrimSpace(input.Name),
-		URL:           strings.TrimSpace(input.URL),
-		CredentialRef: strings.TrimSpace(input.CredentialRef),
-		Status:        firstNonEmpty(strings.TrimSpace(input.Status), "UNKNOWN"),
+		ID:                    strings.TrimSpace(input.ID),
+		Name:                  strings.TrimSpace(input.Name),
+		URL:                   strings.TrimSpace(input.URL),
+		Username:              strings.TrimSpace(input.Username),
+		Token:                 strings.TrimSpace(input.Token),
+		CredentialRef:         strings.TrimSpace(input.CredentialRef),
+		InsecureSkipTLSVerify: input.InsecureSkipTLSVerify,
+		Status:                "UNKNOWN",
 	}
 	if item.ID == "" || item.Name == "" || item.URL == "" {
 		return domain.JenkinsInstance{}, fmt.Errorf("missing required fields")
@@ -302,10 +353,35 @@ func (r *MockRepository) UpdateJenkinsInstance(id string, input domain.JenkinsIn
 		if value := strings.TrimSpace(input.URL); value != "" {
 			r.jenkins[index].URL = value
 		}
-		r.jenkins[index].CredentialRef = strings.TrimSpace(input.CredentialRef)
-		if value := strings.TrimSpace(input.Status); value != "" {
-			r.jenkins[index].Status = value
+		if value := strings.TrimSpace(input.Username); value != "" {
+			r.jenkins[index].Username = value
 		}
+		if value := strings.TrimSpace(input.Token); value != "" {
+			r.jenkins[index].Token = value
+		}
+		if value := strings.TrimSpace(input.CredentialRef); value != "" {
+			r.jenkins[index].CredentialRef = value
+		}
+		r.jenkins[index].InsecureSkipTLSVerify = input.InsecureSkipTLSVerify
+		return r.jenkins[index], true, nil
+	}
+	return domain.JenkinsInstance{}, false, nil
+}
+
+func (r *MockRepository) UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, checkedAt time.Time) (domain.JenkinsInstance, bool, error) {
+	for index := range r.jenkins {
+		if r.jenkins[index].ID != id {
+			continue
+		}
+		r.jenkins[index].Status = firstNonEmpty(strings.TrimSpace(status), "UNKNOWN")
+		r.jenkins[index].ProbeMessage = strings.TrimSpace(message)
+		if views != nil {
+			r.jenkins[index].Views = append([]string(nil), views...)
+		}
+		if jobs != nil {
+			r.jenkins[index].Jobs = append([]string(nil), jobs...)
+		}
+		r.jenkins[index].LastCheckAt = checkedAt.Format(time.RFC3339)
 		return r.jenkins[index], true, nil
 	}
 	return domain.JenkinsInstance{}, false, nil

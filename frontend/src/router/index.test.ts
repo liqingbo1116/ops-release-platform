@@ -5,6 +5,7 @@ const pageStub = { template: '<div />' }
 vi.mock('@/pages/LoginPage.vue', () => ({ default: pageStub }))
 vi.mock('@/pages/DashboardPage.vue', () => ({ default: pageStub }))
 vi.mock('@/pages/EnvironmentPage.vue', () => ({ default: pageStub }))
+vi.mock('@/pages/IntegrationResourcePage.vue', () => ({ default: pageStub }))
 vi.mock('@/pages/AgentPage.vue', () => ({ default: pageStub }))
 vi.mock('@/pages/BaselineListPage.vue', () => ({ default: pageStub }))
 vi.mock('@/pages/BaselineDetailPage.vue', () => ({ default: pageStub }))
