@@ -18,8 +18,6 @@
         <el-card shadow="never">
           <el-table v-loading="loading" :data="kubernetesClusters" class="wide-table">
             <el-table-column prop="name" label="名称" min-width="150" />
-            <el-table-column prop="apiServer" label="API Server" min-width="240" />
-            <el-table-column prop="context" label="Context" min-width="140" />
             <el-table-column label="命名空间" min-width="110">
               <template #default="{ row }">{{ row.namespaces.length }}</template>
             </el-table-column>
@@ -27,9 +25,8 @@
               <template #default="{ row }"><StatusTag :status="row.status" /></template>
             </el-table-column>
             <el-table-column label="最近检查" min-width="170">
-              <template #default="{ row }">{{ formatEmpty(row.lastCheckAt) }}</template>
+              <template #default="{ row }">{{ formatCheckTime(row.lastCheckAt) }}</template>
             </el-table-column>
-            <el-table-column prop="probeMessage" label="探测信息" min-width="220" show-overflow-tooltip />
             <el-table-column label="操作" fixed="right" width="190">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openResourceEditDialog('kubernetes', row)">编辑</el-button>
@@ -54,9 +51,8 @@
               <template #default="{ row }"><StatusTag :status="row.status" /></template>
             </el-table-column>
             <el-table-column label="最近检查" min-width="170">
-              <template #default="{ row }">{{ formatEmpty(row.lastCheckAt) }}</template>
+              <template #default="{ row }">{{ formatCheckTime(row.lastCheckAt) }}</template>
             </el-table-column>
-            <el-table-column prop="probeMessage" label="探测信息" min-width="220" show-overflow-tooltip />
             <el-table-column label="操作" fixed="right" width="190">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openResourceEditDialog('harbor', row)">编辑</el-button>
@@ -81,9 +77,8 @@
               <template #default="{ row }"><StatusTag :status="row.status" /></template>
             </el-table-column>
             <el-table-column label="最近检查" min-width="170">
-              <template #default="{ row }">{{ formatEmpty(row.lastCheckAt) }}</template>
+              <template #default="{ row }">{{ formatCheckTime(row.lastCheckAt) }}</template>
             </el-table-column>
-            <el-table-column prop="probeMessage" label="探测信息" min-width="220" show-overflow-tooltip />
             <el-table-column label="操作" fixed="right" width="190">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openResourceEditDialog('jenkins', row)">编辑</el-button>
@@ -136,6 +131,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import StatusTag from '@/components/StatusTag.vue'
+import { formatDateTime } from '@/utils/format'
 import {
   createHarborRegistry,
   createJenkinsInstance,
@@ -206,8 +202,8 @@ function resourceKindName(kind: IntegrationResourceKind) {
   return kind === 'kubernetes' ? 'K8s 集群' : kind === 'harbor' ? 'Harbor 仓库' : 'Jenkins'
 }
 
-function formatEmpty(value: string) {
-  return value || '-'
+function formatCheckTime(value: string) {
+  return value ? formatDateTime(value) : '-'
 }
 
 function resourceActionKey(kind: IntegrationResourceKind, id: string, action: ResourceAction) {
@@ -303,9 +299,11 @@ async function submitResource() {
   }
 
   resourceSubmitting.value = true
+  const isCreate = resourceDialogMode.value === 'create'
+  const kind = resourceKind.value
   try {
-    const id = resourceDialogMode.value === 'create' ? generateResourceId(resourceKind.value, resourceForm.value.name) : resourceForm.value.id
-    if (resourceKind.value === 'kubernetes') {
+    const id = isCreate ? generateResourceId(kind, resourceForm.value.name) : resourceForm.value.id
+    if (kind === 'kubernetes') {
       const payload = {
         id,
         name: resourceForm.value.name.trim(),
@@ -313,8 +311,8 @@ async function submitResource() {
         context: undefined,
         kubeconfig: resourceForm.value.kubeconfig.trim() || undefined,
       }
-      resourceDialogMode.value === 'create' ? await createKubernetesCluster(payload) : await updateKubernetesCluster(payload.id, payload)
-    } else if (resourceKind.value === 'harbor') {
+      isCreate ? await createKubernetesCluster(payload) : await updateKubernetesCluster(payload.id, payload)
+    } else if (kind === 'harbor') {
       const url = normalizeInputURL(resourceForm.value.url)
       const payload = {
         id,
@@ -325,7 +323,7 @@ async function submitResource() {
         password: resourceForm.value.password.trim() || undefined,
         insecureSkipTLSVerify: resourceForm.value.insecureSkipTLSVerify,
       }
-      resourceDialogMode.value === 'create' ? await createHarborRegistry(payload) : await updateHarborRegistry(payload.id, payload)
+      isCreate ? await createHarborRegistry(payload) : await updateHarborRegistry(payload.id, payload)
     } else {
       const payload = {
         id,
@@ -335,15 +333,34 @@ async function submitResource() {
         token: resourceForm.value.token.trim() || undefined,
         insecureSkipTLSVerify: resourceForm.value.insecureSkipTLSVerify,
       }
-      resourceDialogMode.value === 'create' ? await createJenkinsInstance(payload) : await updateJenkinsInstance(payload.id, payload)
+      isCreate ? await createJenkinsInstance(payload) : await updateJenkinsInstance(payload.id, payload)
     }
-    ElMessage.success('资源已保存')
+    if (isCreate) {
+      try {
+        await refreshResource(kind, id)
+        ElMessage.success('资源已保存，连接刷新完成')
+      } catch (error) {
+        ElMessage.warning(error instanceof Error ? `资源已保存，连接刷新失败：${error.message}` : '资源已保存，连接刷新失败')
+      }
+    } else {
+      ElMessage.success('资源已保存')
+    }
     resourceDialogVisible.value = false
     await loadAll()
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '资源保存失败')
   } finally {
     resourceSubmitting.value = false
+  }
+}
+
+async function refreshResource(kind: IntegrationResourceKind, id: string) {
+  if (kind === 'kubernetes') {
+    await refreshKubernetesCluster(id)
+  } else if (kind === 'harbor') {
+    await refreshHarborRegistry(id)
+  } else {
+    await refreshJenkinsInstance(id)
   }
 }
 

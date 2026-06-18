@@ -77,8 +77,8 @@ describe('IntegrationResourcePage', () => {
         apiServer: 'https://k8s.example.invalid:6443',
         context: 'default',
         status: 'HEALTHY',
-        lastCheckAt: '',
-        probeMessage: '',
+        lastCheckAt: '2026-06-18T10:20:30+08:00',
+        probeMessage: 'connected',
         namespaces: ['default'],
       },
     ])
@@ -103,6 +103,11 @@ describe('IntegrationResourcePage', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('基础资源')
+    expect(wrapper.text()).toContain('2026-06-18 10:20')
+    expect(wrapper.text()).not.toContain('API Server')
+    expect(wrapper.text()).not.toContain('Context')
+    expect(wrapper.text()).not.toContain('探测信息')
+    expect(wrapper.text()).not.toContain('connected')
     expect(wrapper.text()).toContain('Kubeconfig')
     const dialogText = wrapper.get('.el-dialog').text()
     expect(dialogText).not.toContain('资源 ID')
@@ -142,5 +147,6 @@ describe('IntegrationResourcePage', () => {
         scheme: 'https',
       }),
     )
+    expect(refreshHarborRegistry).toHaveBeenCalledWith('harbor-harbor')
   })
 })
