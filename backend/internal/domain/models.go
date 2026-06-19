@@ -8,20 +8,22 @@ type PageResult[T any] struct {
 }
 
 type Environment struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Code            string `json:"code"`
-	Type            string `json:"type"`
-	NetworkMode     string `json:"networkMode"`
-	ClusterID       string `json:"clusterId"`
-	Namespace       string `json:"namespace"`
-	RegistryID      string `json:"registryId"`
-	RegistryProject string `json:"registryProject"`
-	JenkinsID       string `json:"jenkinsId"`
-	JenkinsView     string `json:"jenkinsView"`
-	Status          string `json:"status"`
-	AgentStatus     string `json:"agentStatus"`
-	LastCheckAt     string `json:"lastCheckAt"`
+	ID               string                       `json:"id"`
+	Name             string                       `json:"name"`
+	Code             string                       `json:"code"`
+	Type             string                       `json:"type"`
+	DeployTargetType string                       `json:"deployTargetType"`
+	NetworkMode      string                       `json:"networkMode"`
+	ClusterID        string                       `json:"clusterId"`
+	Namespace        string                       `json:"namespace"`
+	RegistryID       string                       `json:"registryId"`
+	RegistryProject  string                       `json:"registryProject"`
+	JenkinsID        string                       `json:"jenkinsId"`
+	JenkinsView      string                       `json:"jenkinsView"`
+	Bindings         []EnvironmentResourceBinding `json:"bindings"`
+	Status           string                       `json:"status"`
+	AgentStatus      string                       `json:"agentStatus"`
+	LastCheckAt      string                       `json:"lastCheckAt"`
 
 	ClusterAPIServer      string `json:"-"`
 	ClusterCredentialRef  string `json:"-"`
@@ -29,6 +31,16 @@ type Environment struct {
 	RegistryCredentialRef string `json:"-"`
 	JenkinsURL            string `json:"-"`
 	JenkinsCredentialRef  string `json:"-"`
+}
+
+type EnvironmentResourceBinding struct {
+	ID            string `json:"id"`
+	EnvironmentID string `json:"environmentId"`
+	ResourceType  string `json:"resourceType"`
+	ResourceID    string `json:"resourceId"`
+	ScopeType     string `json:"scopeType"`
+	ScopeValue    string `json:"scopeValue"`
+	IsDefault     bool   `json:"isDefault"`
 }
 
 type KubernetesCluster struct {

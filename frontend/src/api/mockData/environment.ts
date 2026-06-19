@@ -1,5 +1,5 @@
-import environments from '../../../../mocks/environments.json'
+import type { EnvironmentInfo } from '../environments'
 
 export const environmentMockData = {
-  environments,
+  environments: [] as EnvironmentInfo[],
 }

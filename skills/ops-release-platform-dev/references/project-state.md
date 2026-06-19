@@ -32,7 +32,8 @@ Existing foundation:
 - Environment dependency check now rejects mock integrations instead of returning fake healthy Kubernetes/Registry checks.
 - K8s clusters, Harbor registries, and Jenkins instances have an initial platform-maintained resource model.
 - Environment records carry `clusterId`, `registryId`, and `jenkinsId` as references to those reusable resources.
-- Environment records also carry environment-level scope fields: `namespace` for Kubernetes, `registryProject` for Harbor, and `jenkinsView` for Jenkins.
+- Environment records carry `deployTargetType` and resource bindings. V1 implements `KUBERNETES` and only reserves `DOCKER_COMPOSE`; default `namespace`, `registryProject`, and `jenkinsView` fields are compatibility fields derived from default bindings.
+- One environment may bind multiple K8s namespaces, Harbor projects, and Jenkins views. Remote/project environments still bind platform-side local Harbor project and Jenkins view, while remote K8s/runtime operations are handled by Agent tasks and reports.
 - Users only enter environment name and environment code. The backend generates the environment ID as `env-<code>` when the create request omits `id`.
 - Environment page has separate tabs for maintaining K8s, Harbor, and Jenkins resources. Environments associate those resource rows and their per-environment scopes.
 - `.secrets/` is development-only for private runtime values. Formal resource master data belongs in the platform database, and credentials must be hidden behind internal credential references.
@@ -67,7 +68,7 @@ Agent foundation already implemented but must be rechecked after phase 1 resourc
 
 Agent foundation evidence:
 
-- Remote Agent `agent-project-xjzt-test` is bound to `env-project-xjzt-test` and reports `ONLINE`.
+- Remote Agent heartbeat and lease flow has been verified against a manually created remote environment.
 - Agent heartbeat timestamp updates through the platform API.
 - Agent lease path no longer requires static in-memory task state in normal backend runtime.
 - Agent registration drawer uses real environment options and generates binary direct-start config text.

@@ -21,6 +21,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&ProductModel{},
 		&ServiceModel{},
 		&EnvironmentModel{},
+		&EnvironmentResourceBindingModel{},
 		&KubernetesClusterModel{},
 		&HarborRegistryModel{},
 		&JenkinsInstanceModel{},

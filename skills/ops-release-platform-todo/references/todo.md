@@ -33,27 +33,18 @@ Latest pushed milestone:
 
 ## Current Local Work
 
-- Local uncommitted V1 environment-preparation-before-real-integration work:
-  - hardened platform task lease behavior with V1 single-task policy
-  - repeated lease by the same Agent now returns an explicit empty lease while a task is still running
-  - expired leases are returned to the pending queue and can be leased again
-  - Agent config now validates `AGENT_MAX_TASKS=1`
-  - Agent reporter sends configured `maxTasks`
-  - Agent binary now supports `-f <config-file>` for direct remote startup during development
-  - `agent/docker-compose.yml` includes `/healthz` healthcheck
-  - `agent/.env.example` includes `AGENT_MAX_TASKS=1`
-  - `agent/README.md` documents direct binary startup, `-f` config loading, docker-compose deployment, and mock verification
-  - deployment skill/docs now define direct Agent binary startup as the default development-time runtime, while preserving docker-compose as the formal deployment path
-  - docs and this TODO are being updated to reflect the completed pre-environment work
+- Local uncommitted V1 environment management work:
+  - environment page now exposes local environment and remote environment instead of network mode
+  - local environment binds platform-managed K8s namespace, Harbor project, and optional Jenkins view
+  - remote environment does not bind platform-managed K8s/Harbor/Jenkins resources and waits for Agent reporting
+  - backend normalizes local environments to `DIRECT` and remote environments to `AGENT`
+  - backend rejects platform direct connection checks for remote environments
+  - newly created environments default to `UNKNOWN` until local checks or Agent reports update status
 - Validation for current local work:
-  - `go test ./...` passed in `backend`
-  - `go test ./...` passed in `agent`
   - `git diff --check` passed
-  - `docker compose -f agent/docker-compose.yml config` could not run in the current local environment because `docker` is not installed; run it on the Agent host before remote verification
-- Remaining before real remote project-environment release/deploy testing:
-  - deploy Agent package on a real remote Linux host and verify outbound connectivity to platform API
-  - verify heartbeat, lease, mock execution logs, final result, duplicate lease behavior, and expired lease retry across host/network boundary
-  - keep Jenkins/Harbor/Kubernetes real integration blocked until those environments and samples are prepared
+  - `npm run test:unit -- EnvironmentPage` passed in `frontend`
+  - `go test ./internal/api ./internal/repository` passed in `backend`
+  - `npm run build` passed in `frontend`; Rolldown reported existing `@vueuse/core` pure annotation warnings only
 
 ## Current Step
 

@@ -60,6 +60,14 @@ Keep page components responsible for interaction composition; move reusable tabl
 5. Mock Agent worker consumes stream, writes task status and logs to Redis keys.
 6. Frontend can poll task status API when task IDs are available.
 
+## Environment Management Rules
+
+- Environment page exposes only local environment and remote environment.
+- Local environment is internally `DIRECT`, binds platform-managed K8s namespace, Harbor project, and optional Jenkins view.
+- Remote environment is internally `AGENT`, does not bind platform-managed K8s/Harbor/Jenkins resources, and depends on Agent heartbeat/reporting.
+- `networkMode` remains an internal compatibility field and must not be presented as a user choice.
+- Newly created environment status starts as `UNKNOWN`; local connection tests or Agent reports update it later.
+
 ## Release And Deployment Flow
 
 - Service release targets services that already exist in the target environment. It must not be based on a source baseline.

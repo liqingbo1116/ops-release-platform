@@ -28,7 +28,7 @@
 
 查询环境列表。
 
-Query：`type`、`networkMode`、`status`、`keyword`、`page`、`pageSize`
+Query：`type`、`status`、`keyword`、`page`、`pageSize`
 
 Response data：
 
@@ -54,7 +54,7 @@ Response data：
 
 ### POST /api/environments/{id}/check
 
-触发环境依赖检查。本地或直连环境由平台 adapter 直连执行，不需要 Agent；项目或远程环境必须创建 Agent 探测任务，由 Agent 出站领取任务后访问远程 K8s/Harbor/Jenkins 并回传状态。
+触发环境依赖检查。仅本地环境支持平台 adapter 直连检查；远程环境由 Agent 心跳、探测和任务回传维护状态，平台不对远程环境执行直连检查。
 
 Response data：
 
@@ -90,7 +90,8 @@ K8s、Harbor、Jenkins 是独立平台资源。环境只关联资源 ID，并选
 - 响应不返回明文 kubeconfig、密码或 token，只返回非敏感元数据、状态、最近检查信息和缓存列表。
 - 资源状态由系统测试连接或刷新探测维护，用户不能手工更新。
 - 刷新探测成功时更新缓存；失败时保留旧缓存并记录失败原因。
-- 本地或直连资源由平台后端探测；项目或远程资源由 Agent 探测任务回传。
+- 基础资源管理中的 K8s、Harbor、Jenkins 由平台后端探测，用于本地环境关联。
+- 远程环境不关联平台维护的基础资源，远程 K8s/Harbor/Jenkins 状态由 Agent 后续上报。
 
 ### POST /api/kubernetes-clusters
 

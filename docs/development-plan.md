@@ -157,28 +157,35 @@ V1 最低交付目标：
 目标：
 
 - 环境列表、环境详情、环境创建、环境编辑、环境状态全部改为真实后端数据。
+- 页面只让用户选择“本地环境”或“远程环境”，不暴露 `DIRECT` / `AGENT` 网络模式选项。
+- 环境增加部署目标类型 `deployTargetType`：V1 当前实现 `KUBERNETES`，模型预留 `DOCKER_COMPOSE`，但 docker-compose 执行不进入当前阶段。
+- 本地环境内部固定为 `DIRECT`，由平台直连基础资源。
+- 远程环境内部固定为 `AGENT`；远程 K8s/运行环境由 Agent 执行，平台不直连远程 K8s。
 - 环境不维护 K8s/Harbor/Jenkins 凭据，只关联阶段 1 的资源。
-- 环境通过资源 ID 关联 K8s/Harbor/Jenkins，并填写环境级作用域：
+- 环境通过资源绑定模型关联阶段 1 的资源，一个环境可关联多个作用域；当前页面先维护每类资源的默认绑定，后续多选编辑在此模型上扩展。
+- 本地环境通过资源 ID 关联 K8s/Harbor/Jenkins，并填写环境级作用域：
   - K8s `namespace`
   - Harbor `registryProject`
   - Jenkins `jenkinsView`
-- 同一个 K8s、Harbor、Jenkins 可以被多个环境复用，不同环境可使用不同 namespace/project/view。
-- 创建环境时面向用户只填写环境名称和环境编码；环境 ID 由系统生成或与编码规则保持一致，不要求用户同时维护两套标识。
+- 远程环境关联本地 Jenkins view 与本地 Harbor project，用于本地构建和选择待同步镜像；远程 K8s namespace 不在平台直连资源中维护，由 Agent 后续上报和执行。
+- 同一个 K8s、Harbor、Jenkins 可以被多个环境复用，不同环境可使用不同 namespace/project/view；同一环境也可以绑定多个 namespace/project/view。
+- 创建环境时面向用户填写环境名称，系统自动生成可见的“环境标识”；用户可按需修改标识，环境 ID 由系统按 `env-环境标识` 生成，不要求用户同时维护两套标识。
 - 选择 namespace/project/view 时优先使用阶段 1 的缓存列表，同时允许手工输入作为兜底。
 - 删除环境管理页面和后端接口中的环境 mock 数据与 fallback。
 
 必须准备：
 
 - 阶段 1 已完成
-- 至少一个真实 K8s 资源及 namespace 缓存
-- 至少一个真实 Harbor 资源及 project 缓存
+- 至少一个真实 K8s 资源及 namespace 缓存，用于创建本地环境
+- 至少一个真实 Harbor 资源及 project 缓存，用于创建本地环境
 - Jenkins 如进入发布来源验收，则必须有真实 Jenkins 资源及 view/job 缓存
 
 门禁：
 
 - 如果环境仍内嵌维护 K8s/Harbor/Jenkins 凭据，本阶段未完成。
-- 如果环境关联的 namespace/project/view 仍来自 mock，本阶段未完成。
-- 如果环境创建仍要求用户同时理解和填写环境 ID 与环境编码，本阶段未完成。
+- 如果本地环境关联的 namespace/project/view 仍来自 mock，本阶段未完成。
+- 如果环境创建仍要求用户同时理解和填写环境 ID 与环境标识，或环境标识不能自动生成，本阶段未完成。
+- 如果远程环境仍允许平台后端直连远程 K8s 或执行远程直连检查，本阶段未完成。
 
 ### 阶段 3：Agent 管理与远程探测
 
@@ -625,7 +632,7 @@ V1 最低交付目标：
 - Agent 可通过 mock 协议完成心跳、拉取任务、回传步骤、追加日志、回传结果
 - `GET /api/agent-tasks/{id}/status` 已优先读取 Agent mock 协议状态，未命中时再降级 Redis/mock 静态状态
 - Agent 管理页已使用后端 Agent 列表数据展示在线状态、心跳、当前任务
-- 环境管理页已使用后端环境列表数据展示项目环境网络模式、Agent 状态、环境阻断提示和真实联调前置条件
+- 环境管理页已使用后端环境列表数据展示本地/远程环境类型、Agent 状态、环境阻断提示和真实联调前置条件
 - 真实 Agent 进程、Agent 主动领取任务链路、租约超时回收和单任务租约策略已本地实现
 - 当前仍需在远程 Linux 主机验证 Agent `docker compose` 部署、心跳、租约领取、mock 执行日志和最终结果回传
 - 真实 Jenkins、Harbor、K8s 联调必须等待远程 Agent 可部署且任务领取链路打通

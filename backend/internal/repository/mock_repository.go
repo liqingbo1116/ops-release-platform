@@ -80,21 +80,31 @@ func (r *MockRepository) GetEnvironment(id string) (domain.Environment, bool) {
 }
 
 func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Environment, error) {
+	normalized, err := normalizeEnvironmentInput(input)
+	if err != nil {
+		return domain.Environment{}, err
+	}
+	id := strings.TrimSpace(normalized.ID)
+	if id == "" && normalized.Code != "" {
+		id = "env-" + normalized.Code
+	}
 	item := domain.Environment{
-		ID:              strings.TrimSpace(input.ID),
-		Name:            strings.TrimSpace(input.Name),
-		Code:            strings.TrimSpace(input.Code),
-		Type:            strings.TrimSpace(input.Type),
-		NetworkMode:     strings.TrimSpace(input.NetworkMode),
-		ClusterID:       strings.TrimSpace(input.ClusterID),
-		Namespace:       strings.TrimSpace(input.Namespace),
-		RegistryID:      strings.TrimSpace(input.RegistryID),
-		RegistryProject: strings.TrimSpace(input.RegistryProject),
-		JenkinsID:       strings.TrimSpace(input.JenkinsID),
-		JenkinsView:     strings.TrimSpace(input.JenkinsView),
-		Status:          firstNonEmpty(strings.TrimSpace(input.Status), "HEALTHY"),
-		AgentStatus:     "UNBOUND",
-		LastCheckAt:     "",
+		ID:               id,
+		Name:             normalized.Name,
+		Code:             normalized.Code,
+		Type:             normalized.Type,
+		DeployTargetType: normalized.DeployTargetType,
+		NetworkMode:      normalized.NetworkMode,
+		ClusterID:        normalized.ClusterID,
+		Namespace:        normalized.Namespace,
+		RegistryID:       normalized.RegistryID,
+		RegistryProject:  normalized.RegistryProject,
+		JenkinsID:        normalized.JenkinsID,
+		JenkinsView:      normalized.JenkinsView,
+		Status:           firstNonEmpty(normalized.Status, "UNKNOWN"),
+		AgentStatus:      "UNBOUND",
+		LastCheckAt:      "",
+		Bindings:         withEnvironmentID(normalized.Bindings, id),
 	}
 	if item.ID == "" || item.Name == "" || item.Code == "" || item.Type == "" || item.NetworkMode == "" {
 		return domain.Environment{}, fmt.Errorf("missing required fields")
@@ -120,30 +130,36 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 		if value := strings.TrimSpace(input.Type); value != "" {
 			r.environments[index].Type = value
 		}
+		if value := strings.TrimSpace(input.DeployTargetType); value != "" {
+			r.environments[index].DeployTargetType = value
+		}
 		if value := strings.TrimSpace(input.NetworkMode); value != "" {
 			r.environments[index].NetworkMode = value
 		}
-		if value := strings.TrimSpace(input.ClusterID); value != "" {
-			r.environments[index].ClusterID = value
-		}
-		if value := strings.TrimSpace(input.Namespace); value != "" {
-			r.environments[index].Namespace = value
-		}
-		if value := strings.TrimSpace(input.RegistryID); value != "" {
-			r.environments[index].RegistryID = value
-		}
-		if value := strings.TrimSpace(input.RegistryProject); value != "" {
-			r.environments[index].RegistryProject = value
-		}
-		if value := strings.TrimSpace(input.JenkinsID); value != "" {
-			r.environments[index].JenkinsID = value
-		}
-		if value := strings.TrimSpace(input.JenkinsView); value != "" {
-			r.environments[index].JenkinsView = value
-		}
+		r.environments[index].ClusterID = strings.TrimSpace(input.ClusterID)
+		r.environments[index].Namespace = strings.TrimSpace(input.Namespace)
+		r.environments[index].RegistryID = strings.TrimSpace(input.RegistryID)
+		r.environments[index].RegistryProject = strings.TrimSpace(input.RegistryProject)
+		r.environments[index].JenkinsID = strings.TrimSpace(input.JenkinsID)
+		r.environments[index].JenkinsView = strings.TrimSpace(input.JenkinsView)
+		r.environments[index].Bindings = input.Bindings
 		if value := strings.TrimSpace(input.Status); value != "" {
 			r.environments[index].Status = value
 		}
+		normalized, err := normalizeEnvironmentInput(r.environments[index])
+		if err != nil {
+			return domain.Environment{}, true, err
+		}
+		r.environments[index].Type = normalized.Type
+		r.environments[index].DeployTargetType = normalized.DeployTargetType
+		r.environments[index].NetworkMode = normalized.NetworkMode
+		r.environments[index].ClusterID = normalized.ClusterID
+		r.environments[index].Namespace = normalized.Namespace
+		r.environments[index].RegistryID = normalized.RegistryID
+		r.environments[index].RegistryProject = normalized.RegistryProject
+		r.environments[index].JenkinsID = normalized.JenkinsID
+		r.environments[index].JenkinsView = normalized.JenkinsView
+		r.environments[index].Bindings = withEnvironmentID(normalized.Bindings, r.environments[index].ID)
 		return r.environments[index], true, nil
 	}
 	return domain.Environment{}, false, nil

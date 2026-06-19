@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -51,6 +52,23 @@ type jenkinsInstanceRequest struct {
 	Username              string `json:"username"`
 	Token                 string `json:"token"`
 	InsecureSkipTLSVerify bool   `json:"insecureSkipTLSVerify"`
+}
+
+type environmentUpdateRequest struct {
+	ID               *string                              `json:"id"`
+	Name             *string                              `json:"name"`
+	Code             *string                              `json:"code"`
+	Type             *string                              `json:"type"`
+	DeployTargetType *string                              `json:"deployTargetType"`
+	NetworkMode      *string                              `json:"networkMode"`
+	ClusterID        *string                              `json:"clusterId"`
+	Namespace        *string                              `json:"namespace"`
+	RegistryID       *string                              `json:"registryId"`
+	RegistryProject  *string                              `json:"registryProject"`
+	JenkinsID        *string                              `json:"jenkinsId"`
+	JenkinsView      *string                              `json:"jenkinsView"`
+	Bindings         *[]domain.EnvironmentResourceBinding `json:"bindings"`
+	Status           *string                              `json:"status"`
 }
 
 func NewHandler(repo repository.Store, queue *agent.Queue, protocol agent.Protocol, integrations integration.Suite) *Handler {
@@ -122,12 +140,23 @@ func (h *Handler) CreateEnvironment(c *gin.Context) {
 }
 
 func (h *Handler) UpdateEnvironment(c *gin.Context) {
-	var request domain.Environment
-	if err := c.ShouldBindJSON(&request); err != nil {
+	existing, ok := h.repo.GetEnvironment(c.Param("id"))
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	body, err := c.GetRawData()
+	if err != nil {
 		BadRequest(c, "invalid environment request")
 		return
 	}
-	environment, ok, err := h.repo.UpdateEnvironment(c.Param("id"), request)
+	var request environmentUpdateRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		BadRequest(c, "invalid environment request")
+		return
+	}
+	merged := mergeEnvironmentUpdate(existing, request)
+	environment, ok, err := h.repo.UpdateEnvironment(c.Param("id"), merged)
 	if err != nil {
 		BadRequest(c, "invalid environment request")
 		return
@@ -139,11 +168,62 @@ func (h *Handler) UpdateEnvironment(c *gin.Context) {
 	OK(c, environment)
 }
 
+func mergeEnvironmentUpdate(existing domain.Environment, request environmentUpdateRequest) domain.Environment {
+	merged := existing
+	if request.ID != nil {
+		merged.ID = *request.ID
+	}
+	if request.Name != nil {
+		merged.Name = *request.Name
+	}
+	if request.Code != nil {
+		merged.Code = *request.Code
+	}
+	if request.Type != nil {
+		merged.Type = *request.Type
+	}
+	if request.DeployTargetType != nil {
+		merged.DeployTargetType = *request.DeployTargetType
+	}
+	if request.NetworkMode != nil {
+		merged.NetworkMode = *request.NetworkMode
+	}
+	if request.ClusterID != nil {
+		merged.ClusterID = *request.ClusterID
+	}
+	if request.Namespace != nil {
+		merged.Namespace = *request.Namespace
+	}
+	if request.RegistryID != nil {
+		merged.RegistryID = *request.RegistryID
+	}
+	if request.RegistryProject != nil {
+		merged.RegistryProject = *request.RegistryProject
+	}
+	if request.JenkinsID != nil {
+		merged.JenkinsID = *request.JenkinsID
+	}
+	if request.JenkinsView != nil {
+		merged.JenkinsView = *request.JenkinsView
+	}
+	if request.Bindings != nil {
+		merged.Bindings = *request.Bindings
+	}
+	if request.Status != nil {
+		merged.Status = *request.Status
+	}
+	return merged
+}
+
 func (h *Handler) CheckEnvironment(c *gin.Context) {
 	environmentID := c.Param("id")
 	environment, ok := h.repo.GetEnvironment(environmentID)
 	if !ok {
 		NotFound(c, "environment not found")
+		return
+	}
+	if environment.Type != "LOCAL" {
+		BadRequest(c, "remote environment checks are handled by agent")
 		return
 	}
 	if h.integrations.IsMock() {

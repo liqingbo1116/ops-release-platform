@@ -31,7 +31,9 @@ Use this skill before making code, docs, deployment, or Git changes in this repo
 - V1 mainline must use real data phase by phase. Once a phase enters mainline replacement, remove that phase's mock data and mock fallback before moving to the next phase.
 - If a phase depends on external tools or runtime environments to replace mock, those prerequisites are mandatory gates. If they are not ready, do not claim that phase is complete and do not continue to the next phase.
 - Local development runtime: frontend and backend run locally, but PostgreSQL and Redis must come from the remote services recorded in `.secrets/`. Do not switch back to local container mock services during V1 mainline development.
-- K8s, Harbor, and Jenkins must be maintainable platform resources. Environments reference those resource IDs and add per-environment scope fields: Kubernetes `namespace`, Harbor `registryProject`, and Jenkins `jenkinsView`.
+- K8s, Harbor, and Jenkins must be maintainable platform resources. Environments reference those resource IDs through resource bindings. One environment may bind multiple Kubernetes namespaces, Harbor projects, and Jenkins views; legacy default fields (`namespace`, `registryProject`, `jenkinsView`) are compatibility fields derived from the default binding.
+- Environment `type` means execution location: `LOCAL` is platform direct, `PROJECT` is remote Agent. Environment `deployTargetType` means runtime target: V1 implements `KUBERNETES` and only reserves `DOCKER_COMPOSE`.
+- Remote/project environments must not make the platform backend directly connect to remote K8s. They still bind platform-side local Harbor project and Jenkins view for local build/image source selection; remote K8s/runtime execution is handled by Agent tasks and later Agent reports.
 - Resource create forms must be user-oriented: K8s uses kubeconfig/context, Harbor uses URL + HTTP/HTTPS + username/password, Jenkins uses URL + username/password or API token. Users must not enter `credentialRef` directly.
 - Resource status is system-owned. Keep connection test and refresh/probe actions; cache K8s namespaces, Harbor projects, and Jenkins views/jobs, and keep old cache when refresh fails.
 - Local/direct environments are probed by the platform backend. Remote/project environments are probed by Agent tasks, then Agent reports status and cache back to the platform.
@@ -62,13 +64,13 @@ Follow this order exactly. Do not skip forward. Do not reintroduce mock for a co
    - Gate: if PostgreSQL or Redis is not ready, resource management cannot replace mock and next phase cannot start.
    - Gate: if resource forms still expose `credentialRef`, statuses are user-editable, probe cache is mock/missing, or remote probing bypasses Agent, this phase is not complete.
 2. Environment management
-   - Goal: environment list, detail, create, update, status, and dependency visibility all come from real backend data; environments reference resources and only add `namespace`, `registryProject`, and `jenkinsView`.
+   - Goal: environment list, detail, create, update, status, deploy target type, and dependency visibility all come from real backend data; environments reference resources through binding records and expose default `namespace`, `registryProject`, and `jenkinsView` only for compatibility.
    - Required tools/environment:
      - phase 1 complete
      - real K8s namespace cache
      - real Harbor project cache
      - real Jenkins view/job cache when Jenkins is in scope
-   - Gate: if environments still embed credentials, use mock scope options, or force users to maintain both environment ID and environment code, this phase is not complete.
+   - Gate: if environments still embed credentials, use mock scope options, force users to maintain both environment ID and environment code, or make the platform directly connect to remote K8s, this phase is not complete.
 3. Agent management and remote probing
    - Goal: agent registration, heartbeat, environment binding, online status, and task lease data all come from real backend data.
    - Required tools/environment:

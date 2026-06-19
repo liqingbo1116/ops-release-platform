@@ -2,8 +2,8 @@
 
 ## 环境与 Agent
 
-1. 能查看环境列表，包含环境类型、网络模式、K8s、Harbor、Nacos、Agent 状态。
-2. 能打开环境连接配置抽屉。
+1. 能查看环境列表，包含环境类型、K8s/namespace、Harbor/project、Jenkins/view、Agent 状态和健康状态。
+2. 能打开环境详情抽屉。本地环境显示平台基础资源关联和连接测试入口；远程环境显示 Agent 状态和最近上报时间。
 3. 能查看 Agent 列表，包含版本、心跳、能力、最近任务。
 4. 能打开 Agent 注册抽屉，看到一次性 token 和安装指令。
 
@@ -58,4 +58,4 @@
 33. 前端工程可通过 `npm run dev` 启动。
 34. 后端工程可通过 `go test ./...` 运行基础测试。
 35. docker-compose 可启动 frontend、backend、postgres、redis，或按部署要求单独启动 postgres、redis。
-36. 所有 mock 数据来自 `mocks/` 目录或后端 mock API，不在组件里硬编码大段业务数据。
+36. V1 主线阶段完成的模块必须接真实后端数据并移除对应 mock/fallback；剩余未进入阶段的 mock 需要明确标记。

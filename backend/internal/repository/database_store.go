@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"crypto/sha1"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -36,7 +38,7 @@ func (s *DatabaseStore) ListEnvironments(query string) []domain.Environment {
 	for _, model := range models {
 		items = append(items, toDomainEnvironment(model, agentStatuses[model.AgentID]))
 	}
-	return items
+	return s.attachEnvironmentBindings(items)
 }
 
 func (s *DatabaseStore) GetEnvironment(id string) (domain.Environment, bool) {
@@ -44,36 +46,49 @@ func (s *DatabaseStore) GetEnvironment(id string) (domain.Environment, bool) {
 	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
 		return domain.Environment{}, false
 	}
-	return toDomainEnvironment(model, s.getAgentStatus(model.AgentID)), true
+	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
+	items := s.attachEnvironmentBindings([]domain.Environment{item})
+	return items[0], true
 }
 
 func (s *DatabaseStore) CreateEnvironment(input domain.Environment) (domain.Environment, error) {
-	code := normalizeEnvironmentCode(input.Code)
+	normalized, err := normalizeEnvironmentInput(input)
+	if err != nil {
+		return domain.Environment{}, err
+	}
 	id := strings.TrimSpace(input.ID)
-	if id == "" && code != "" {
-		id = "env-" + code
+	if id == "" && normalized.Code != "" {
+		id = "env-" + normalized.Code
 	}
 	model := EnvironmentModel{
-		ID:              id,
-		Name:            strings.TrimSpace(input.Name),
-		Code:            code,
-		Type:            strings.TrimSpace(input.Type),
-		NetworkMode:     strings.TrimSpace(input.NetworkMode),
-		ClusterID:       strings.TrimSpace(input.ClusterID),
-		Namespace:       strings.TrimSpace(input.Namespace),
-		RegistryID:      strings.TrimSpace(input.RegistryID),
-		RegistryProject: strings.TrimSpace(input.RegistryProject),
-		JenkinsID:       strings.TrimSpace(input.JenkinsID),
-		JenkinsView:     strings.TrimSpace(input.JenkinsView),
-		Status:          fallbackString(strings.TrimSpace(input.Status), "HEALTHY"),
+		ID:               id,
+		Name:             strings.TrimSpace(normalized.Name),
+		Code:             normalized.Code,
+		Type:             normalized.Type,
+		DeployTargetType: normalized.DeployTargetType,
+		NetworkMode:      normalized.NetworkMode,
+		ClusterID:        normalized.ClusterID,
+		Namespace:        normalized.Namespace,
+		RegistryID:       normalized.RegistryID,
+		RegistryProject:  normalized.RegistryProject,
+		JenkinsID:        normalized.JenkinsID,
+		JenkinsView:      normalized.JenkinsView,
+		Status:           fallbackString(strings.TrimSpace(normalized.Status), "UNKNOWN"),
 	}
 	if model.ID == "" || model.Name == "" || model.Code == "" || model.Type == "" || model.NetworkMode == "" {
 		return domain.Environment{}, errors.New("missing required fields")
 	}
-	if err := s.db.Create(&model).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&model).Error; err != nil {
+			return err
+		}
+		return replaceEnvironmentBindings(tx, model.ID, normalized.Bindings)
+	}); err != nil {
 		return domain.Environment{}, err
 	}
-	return toDomainEnvironment(model, ""), nil
+	item := toDomainEnvironment(model, "")
+	item.Bindings = withEnvironmentID(normalized.Bindings, model.ID)
+	return item, nil
 }
 
 func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (domain.Environment, bool, error) {
@@ -93,6 +108,9 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 	if envType := strings.TrimSpace(input.Type); envType != "" {
 		model.Type = envType
 	}
+	if deployTargetType := strings.TrimSpace(input.DeployTargetType); deployTargetType != "" {
+		model.DeployTargetType = deployTargetType
+	}
 	if networkMode := strings.TrimSpace(input.NetworkMode); networkMode != "" {
 		model.NetworkMode = networkMode
 	}
@@ -105,10 +123,45 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 	if status := strings.TrimSpace(input.Status); status != "" {
 		model.Status = status
 	}
-	if err := s.db.Save(&model).Error; err != nil {
+	normalized, err := normalizeEnvironmentInput(domain.Environment{
+		ID:               model.ID,
+		Name:             model.Name,
+		Code:             model.Code,
+		Type:             model.Type,
+		DeployTargetType: model.DeployTargetType,
+		NetworkMode:      model.NetworkMode,
+		ClusterID:        model.ClusterID,
+		Namespace:        model.Namespace,
+		RegistryID:       model.RegistryID,
+		RegistryProject:  model.RegistryProject,
+		JenkinsID:        model.JenkinsID,
+		JenkinsView:      model.JenkinsView,
+		Bindings:         input.Bindings,
+		Status:           model.Status,
+	})
+	if err != nil {
 		return domain.Environment{}, false, err
 	}
-	return toDomainEnvironment(model, s.getAgentStatus(model.AgentID)), true, nil
+	model.Type = normalized.Type
+	model.DeployTargetType = normalized.DeployTargetType
+	model.NetworkMode = normalized.NetworkMode
+	model.ClusterID = normalized.ClusterID
+	model.Namespace = normalized.Namespace
+	model.RegistryID = normalized.RegistryID
+	model.RegistryProject = normalized.RegistryProject
+	model.JenkinsID = normalized.JenkinsID
+	model.JenkinsView = normalized.JenkinsView
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&model).Error; err != nil {
+			return err
+		}
+		return replaceEnvironmentBindings(tx, model.ID, normalized.Bindings)
+	}); err != nil {
+		return domain.Environment{}, false, err
+	}
+	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
+	item.Bindings = withEnvironmentID(normalized.Bindings, model.ID)
+	return item, true, nil
 }
 
 func (s *DatabaseStore) UpdateEnvironmentCheck(id string, status string, checkedAt time.Time) (domain.Environment, bool, error) {
@@ -124,7 +177,9 @@ func (s *DatabaseStore) UpdateEnvironmentCheck(id string, status string, checked
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.Environment{}, false, err
 	}
-	return toDomainEnvironment(model, s.getAgentStatus(model.AgentID)), true, nil
+	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
+	items := s.attachEnvironmentBindings([]domain.Environment{item})
+	return items[0], true, nil
 }
 
 func (s *DatabaseStore) ListKubernetesClusters(query string) []domain.KubernetesCluster {
@@ -757,20 +812,21 @@ func toDomainEnvironment(model EnvironmentModel, boundAgentStatus string) domain
 		agentStatus = fallbackString(boundAgentStatus, "OFFLINE")
 	}
 	return domain.Environment{
-		ID:              model.ID,
-		Name:            model.Name,
-		Code:            model.Code,
-		Type:            model.Type,
-		NetworkMode:     model.NetworkMode,
-		ClusterID:       model.ClusterID,
-		Namespace:       model.Namespace,
-		RegistryID:      model.RegistryID,
-		RegistryProject: model.RegistryProject,
-		JenkinsID:       model.JenkinsID,
-		JenkinsView:     model.JenkinsView,
-		Status:          model.Status,
-		AgentStatus:     agentStatus,
-		LastCheckAt:     lastCheckAt,
+		ID:               model.ID,
+		Name:             model.Name,
+		Code:             model.Code,
+		Type:             model.Type,
+		DeployTargetType: fallbackString(strings.TrimSpace(model.DeployTargetType), "KUBERNETES"),
+		NetworkMode:      model.NetworkMode,
+		ClusterID:        model.ClusterID,
+		Namespace:        model.Namespace,
+		RegistryID:       model.RegistryID,
+		RegistryProject:  model.RegistryProject,
+		JenkinsID:        model.JenkinsID,
+		JenkinsView:      model.JenkinsView,
+		Status:           model.Status,
+		AgentStatus:      agentStatus,
+		LastCheckAt:      lastCheckAt,
 	}
 }
 
@@ -964,7 +1020,279 @@ func fallbackString(value string, fallback string) string {
 }
 
 func normalizeEnvironmentCode(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastDash := false
+	for _, item := range normalized {
+		if (item >= 'a' && item <= 'z') || (item >= '0' && item <= '9') {
+			builder.WriteRune(item)
+			lastDash = false
+			continue
+		}
+		if builder.Len() > 0 && !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
+func generateEnvironmentCode(name string, environmentType string) string {
+	hasNonASCII := false
+	for _, item := range name {
+		if item > 127 {
+			hasNonASCII = true
+			break
+		}
+	}
+	if !hasNonASCII {
+		if code := normalizeEnvironmentCode(name); code != "" {
+			return code
+		}
+	}
+	prefix := "remote"
+	if strings.ToUpper(strings.TrimSpace(environmentType)) == "LOCAL" {
+		prefix = "local"
+	}
+	return prefix + "-" + time.Now().Format("20060102150405")
+}
+
+func normalizeEnvironmentInput(input domain.Environment) (domain.Environment, error) {
+	environmentType := strings.ToUpper(strings.TrimSpace(input.Type))
+	code := normalizeEnvironmentCode(input.Code)
+	if code == "" {
+		code = generateEnvironmentCode(input.Name, environmentType)
+	}
+	deployTargetType := strings.ToUpper(strings.TrimSpace(input.DeployTargetType))
+	if deployTargetType == "" {
+		deployTargetType = "KUBERNETES"
+	}
+	if deployTargetType != "KUBERNETES" && deployTargetType != "DOCKER_COMPOSE" {
+		return domain.Environment{}, errors.New("unsupported deploy target type")
+	}
+	item := domain.Environment{
+		ID:               strings.TrimSpace(input.ID),
+		Name:             strings.TrimSpace(input.Name),
+		Code:             code,
+		Type:             environmentType,
+		DeployTargetType: deployTargetType,
+		NetworkMode:      strings.ToUpper(strings.TrimSpace(input.NetworkMode)),
+		ClusterID:        strings.TrimSpace(input.ClusterID),
+		Namespace:        strings.TrimSpace(input.Namespace),
+		RegistryID:       strings.TrimSpace(input.RegistryID),
+		RegistryProject:  strings.TrimSpace(input.RegistryProject),
+		JenkinsID:        strings.TrimSpace(input.JenkinsID),
+		JenkinsView:      strings.TrimSpace(input.JenkinsView),
+		Status:           strings.TrimSpace(input.Status),
+	}
+	if item.Type == "" {
+		return domain.Environment{}, errors.New("environment type is required")
+	}
+	item.Bindings = normalizeEnvironmentBindings(input.Bindings)
+	if len(item.Bindings) == 0 {
+		item.Bindings = defaultEnvironmentBindings(item)
+	} else {
+		applyDefaultBindingsToLegacyFields(&item)
+	}
+	if item.Type == "LOCAL" {
+		item.NetworkMode = "DIRECT"
+		if item.ClusterID == "" || item.Namespace == "" || item.RegistryID == "" || item.RegistryProject == "" {
+			return domain.Environment{}, errors.New("local environment requires kubernetes and harbor scopes")
+		}
+		item.Bindings = normalizeEnvironmentBindings(item.Bindings)
+		return item, nil
+	}
+	item.Type = "PROJECT"
+	item.NetworkMode = "AGENT"
+	item.ClusterID = ""
+	item.Namespace = ""
+	item.Bindings = filterEnvironmentBindings(item.Bindings, func(binding domain.EnvironmentResourceBinding) bool {
+		return binding.ResourceType != "K8S"
+	})
+	if item.RegistryID == "" || item.RegistryProject == "" {
+		return domain.Environment{}, errors.New("remote environment requires local harbor scope")
+	}
+	item.Bindings = normalizeEnvironmentBindings(item.Bindings)
+	return item, nil
+}
+
+func defaultEnvironmentBindings(item domain.Environment) []domain.EnvironmentResourceBinding {
+	bindings := []domain.EnvironmentResourceBinding{}
+	if item.Type == "LOCAL" && item.ClusterID != "" && item.Namespace != "" {
+		bindings = append(bindings, domain.EnvironmentResourceBinding{
+			ResourceType: "K8S",
+			ResourceID:   item.ClusterID,
+			ScopeType:    "NAMESPACE",
+			ScopeValue:   item.Namespace,
+			IsDefault:    true,
+		})
+	}
+	if item.RegistryID != "" && item.RegistryProject != "" {
+		bindings = append(bindings, domain.EnvironmentResourceBinding{
+			ResourceType: "HARBOR",
+			ResourceID:   item.RegistryID,
+			ScopeType:    "PROJECT",
+			ScopeValue:   item.RegistryProject,
+			IsDefault:    true,
+		})
+	}
+	if item.JenkinsID != "" && item.JenkinsView != "" {
+		bindings = append(bindings, domain.EnvironmentResourceBinding{
+			ResourceType: "JENKINS",
+			ResourceID:   item.JenkinsID,
+			ScopeType:    "VIEW",
+			ScopeValue:   item.JenkinsView,
+			IsDefault:    true,
+		})
+	}
+	return bindings
+}
+
+func normalizeEnvironmentBindings(input []domain.EnvironmentResourceBinding) []domain.EnvironmentResourceBinding {
+	items := make([]domain.EnvironmentResourceBinding, 0, len(input))
+	defaultSeen := map[string]bool{}
+	seen := map[string]bool{}
+	for _, binding := range input {
+		item := domain.EnvironmentResourceBinding{
+			ID:            strings.TrimSpace(binding.ID),
+			EnvironmentID: strings.TrimSpace(binding.EnvironmentID),
+			ResourceType:  strings.ToUpper(strings.TrimSpace(binding.ResourceType)),
+			ResourceID:    strings.TrimSpace(binding.ResourceID),
+			ScopeType:     strings.ToUpper(strings.TrimSpace(binding.ScopeType)),
+			ScopeValue:    strings.TrimSpace(binding.ScopeValue),
+			IsDefault:     binding.IsDefault,
+		}
+		if item.ResourceType == "" || item.ResourceID == "" || item.ScopeType == "" || item.ScopeValue == "" {
+			continue
+		}
+		key := item.ResourceType + "\x00" + item.ResourceID + "\x00" + item.ScopeType + "\x00" + item.ScopeValue
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if !defaultSeen[item.ResourceType] {
+			item.IsDefault = true
+			defaultSeen[item.ResourceType] = true
+		} else {
+			item.IsDefault = false
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func filterEnvironmentBindings(input []domain.EnvironmentResourceBinding, keep func(domain.EnvironmentResourceBinding) bool) []domain.EnvironmentResourceBinding {
+	items := make([]domain.EnvironmentResourceBinding, 0, len(input))
+	for _, binding := range input {
+		if keep(binding) {
+			items = append(items, binding)
+		}
+	}
+	return items
+}
+
+func applyDefaultBindingsToLegacyFields(item *domain.Environment) {
+	for _, binding := range item.Bindings {
+		if !binding.IsDefault {
+			continue
+		}
+		switch binding.ResourceType {
+		case "K8S":
+			item.ClusterID = binding.ResourceID
+			item.Namespace = binding.ScopeValue
+		case "HARBOR":
+			item.RegistryID = binding.ResourceID
+			item.RegistryProject = binding.ScopeValue
+		case "JENKINS":
+			item.JenkinsID = binding.ResourceID
+			item.JenkinsView = binding.ScopeValue
+		}
+	}
+}
+
+func withEnvironmentID(bindings []domain.EnvironmentResourceBinding, environmentID string) []domain.EnvironmentResourceBinding {
+	items := make([]domain.EnvironmentResourceBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		item := binding
+		item.EnvironmentID = environmentID
+		if item.ID == "" {
+			item.ID = environmentBindingID(item)
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func environmentBindingID(item domain.EnvironmentResourceBinding) string {
+	raw := strings.Join([]string{
+		item.EnvironmentID,
+		strings.ToLower(item.ResourceType),
+		item.ResourceID,
+		strings.ToLower(item.ScopeType),
+		item.ScopeValue,
+	}, "\x00")
+	sum := sha1.Sum([]byte(raw))
+	return fmt.Sprintf("%s:%x", item.EnvironmentID, sum)
+}
+
+func replaceEnvironmentBindings(tx *gorm.DB, environmentID string, bindings []domain.EnvironmentResourceBinding) error {
+	if err := tx.Where("environment_id = ?", environmentID).Delete(&EnvironmentResourceBindingModel{}).Error; err != nil {
+		return err
+	}
+	models := make([]EnvironmentResourceBindingModel, 0, len(bindings))
+	for _, binding := range withEnvironmentID(bindings, environmentID) {
+		models = append(models, EnvironmentResourceBindingModel{
+			ID:            binding.ID,
+			EnvironmentID: binding.EnvironmentID,
+			ResourceType:  binding.ResourceType,
+			ResourceID:    binding.ResourceID,
+			ScopeType:     binding.ScopeType,
+			ScopeValue:    binding.ScopeValue,
+			IsDefault:     binding.IsDefault,
+		})
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return tx.Create(&models).Error
+}
+
+func (s *DatabaseStore) attachEnvironmentBindings(items []domain.Environment) []domain.Environment {
+	if len(items) == 0 {
+		return items
+	}
+	ids := make([]string, 0, len(items))
+	byID := make(map[string]int, len(items))
+	for index := range items {
+		ids = append(ids, items[index].ID)
+		byID[items[index].ID] = index
+	}
+	var models []EnvironmentResourceBindingModel
+	if err := s.db.Where("environment_id IN ?", ids).Order("created_at asc").Find(&models).Error; err != nil {
+		return items
+	}
+	for _, model := range models {
+		index, ok := byID[model.EnvironmentID]
+		if !ok {
+			continue
+		}
+		items[index].Bindings = append(items[index].Bindings, domain.EnvironmentResourceBinding{
+			ID:            model.ID,
+			EnvironmentID: model.EnvironmentID,
+			ResourceType:  model.ResourceType,
+			ResourceID:    model.ResourceID,
+			ScopeType:     model.ScopeType,
+			ScopeValue:    model.ScopeValue,
+			IsDefault:     model.IsDefault,
+		})
+	}
+	for index := range items {
+		if len(items[index].Bindings) == 0 {
+			items[index].Bindings = defaultEnvironmentBindings(items[index])
+		}
+		applyDefaultBindingsToLegacyFields(&items[index])
+	}
+	return items
 }
 
 func effectiveAgentStatus(status string, lastHeartbeatAt *time.Time) string {

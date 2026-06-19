@@ -70,6 +70,10 @@ describe('EnvironmentPage', () => {
         code: 'project-x-prod',
         type: 'PROJECT',
         networkMode: 'AGENT',
+        registryId: 'harbor-local',
+        registryProject: 'project-x',
+        jenkinsId: 'jenkins-local',
+        jenkinsView: 'project-x',
         status: 'HEALTHY',
         agentStatus: 'ONLINE',
         lastCheckAt: '2026-06-07T12:40:12+08:00',
@@ -80,6 +84,10 @@ describe('EnvironmentPage', () => {
         code: 'project-z-prod',
         type: 'PROJECT',
         networkMode: 'AGENT',
+        registryId: 'harbor-local',
+        registryProject: 'project-z',
+        jenkinsId: 'jenkins-local',
+        jenkinsView: 'project-z',
         status: 'UNKNOWN',
         agentStatus: 'OFFLINE',
         lastCheckAt: '2026-06-07T12:31:00+08:00',
@@ -104,14 +112,17 @@ describe('EnvironmentPage', () => {
 
     expect(listEnvironments).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('项目 X 生产')
-    expect(wrapper.text()).toContain('维护环境与基础资源的关联范围')
-    expect(wrapper.text()).toContain('Agent 模式')
+    expect(wrapper.text()).toContain('本地环境由平台直连基础资源')
+    expect(wrapper.text()).toContain('远程环境')
+    expect(wrapper.text()).toContain('无需 Agent')
     expect(wrapper.text()).toContain('ONLINE')
-    expect(wrapper.text()).toContain('基础资源在“基础资源”菜单维护')
-    expect(wrapper.text()).toContain('1 个项目环境 Agent 未就绪')
+    expect(wrapper.text()).toContain('本地环境关联 K8s namespace')
+    expect(wrapper.text()).toContain('远程环境关联本地 Harbor project')
+    expect(wrapper.text()).toContain('1 个远程环境 Agent 未就绪')
+    expect(wrapper.text()).not.toContain('网络模式')
   })
 
-  it('filters environments by keyword and network mode', async () => {
+  it('filters environments by keyword and type', async () => {
     const wrapper = mount(EnvironmentPage, {
       global: {
         stubs: {
@@ -131,9 +142,188 @@ describe('EnvironmentPage', () => {
     expect(wrapper.text()).not.toContain('项目 X 生产')
     expect(wrapper.text()).not.toContain('本地生产环境')
 
-    await wrapper.get('.el-select').trigger('click')
+    ;(wrapper.vm as unknown as { environmentType: string }).environmentType = 'LOCAL'
     await wrapper.vm.$nextTick()
-    expect(wrapper.text()).toContain('Agent 模式')
+    expect(wrapper.text()).not.toContain('项目 Z 生产')
+  })
+
+  it('creates remote environments with local harbor and jenkins scopes', async () => {
+    listHarborRegistries.mockResolvedValue([
+      { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listJenkinsInstances.mockResolvedValue([
+      { id: 'jenkins-local', name: '本地 Jenkins', status: 'HEALTHY', views: ['project-x'] },
+    ])
+    createEnvironment.mockResolvedValue({
+      id: 'env-remote-new-prod',
+      name: 'remote new prod',
+      code: 'remote-new-prod',
+      type: 'PROJECT',
+      networkMode: 'AGENT',
+      registryId: 'harbor-local',
+      registryProject: 'project-x',
+      jenkinsId: 'jenkins-local',
+      jenkinsView: 'project-x',
+      status: 'UNKNOWN',
+      agentStatus: 'OFFLINE',
+      lastCheckAt: '',
+    })
+    const wrapper = mount(EnvironmentPage, {
+      global: {
+        stubs: {
+          EnvironmentConfigDrawer: true,
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openCreateDialog: () => void
+      submitEnvironment: () => Promise<void>
+      form: Record<string, string>
+    }
+    vm.openCreateDialog()
+    vm.form.name = 'remote new prod'
+    await wrapper.vm.$nextTick()
+    vm.form.clusterId = 'cluster-should-clear'
+    vm.form.namespace = 'namespace-should-clear'
+    vm.form.registryProject = 'project-x'
+    vm.form.jenkinsView = 'project-x'
+    await vm.submitEnvironment()
+
+    expect(createEnvironment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'remote new prod',
+        code: 'remote-new-prod',
+        type: 'PROJECT',
+        networkMode: 'AGENT',
+        clusterId: '',
+        namespace: '',
+        registryId: 'harbor-local',
+        registryProject: 'project-x',
+        jenkinsId: 'jenkins-local',
+        jenkinsView: 'project-x',
+      }),
+    )
+  })
+
+  it('creates local environments with selected platform integration resources', async () => {
+    listKubernetesClusters.mockResolvedValue([
+      { id: 'k8s-local', name: '本地 k3s', status: 'HEALTHY', namespaces: ['default', 'project-x'] },
+    ])
+    listHarborRegistries.mockResolvedValue([
+      { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listJenkinsInstances.mockResolvedValue([
+      { id: 'jenkins-local', name: '本地 Jenkins', status: 'HEALTHY', views: ['project-x'] },
+    ])
+    createEnvironment.mockResolvedValue({
+      id: 'env-local-project-x',
+      name: '本地项目 X',
+      code: 'local-project-x',
+      type: 'LOCAL',
+      networkMode: 'DIRECT',
+      clusterId: 'k8s-local',
+      namespace: 'project-x',
+      registryId: 'harbor-local',
+      registryProject: 'project-x',
+      jenkinsId: 'jenkins-local',
+      jenkinsView: 'project-x',
+      status: 'HEALTHY',
+      agentStatus: 'NOT_REQUIRED',
+      lastCheckAt: '',
+    })
+    const wrapper = mount(EnvironmentPage, {
+      global: {
+        stubs: {
+          EnvironmentConfigDrawer: true,
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openCreateDialog: () => void
+      submitEnvironment: () => Promise<void>
+      form: Record<string, string>
+    }
+    vm.openCreateDialog()
+    vm.form.type = 'LOCAL'
+    await wrapper.vm.$nextTick()
+    vm.form.name = '本地项目 X'
+    vm.form.namespace = 'project-x'
+    vm.form.registryProject = 'project-x'
+    vm.form.jenkinsView = 'project-x'
+    await vm.submitEnvironment()
+
+    expect(createEnvironment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'LOCAL',
+        code: expect.stringMatching(/^local-\d{14}$/),
+        networkMode: 'DIRECT',
+        clusterId: 'k8s-local',
+        namespace: 'project-x',
+        registryId: 'harbor-local',
+        registryProject: 'project-x',
+        jenkinsId: 'jenkins-local',
+        jenkinsView: 'project-x',
+      }),
+    )
+  })
+
+  it('generates environment identifiers from the environment name', async () => {
+    listHarborRegistries.mockResolvedValue([
+      { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    createEnvironment.mockResolvedValue({
+      id: 'env-remote-prod',
+      name: 'remote prod',
+      code: 'remote-prod',
+      type: 'PROJECT',
+      networkMode: 'AGENT',
+      registryId: 'harbor-local',
+      registryProject: 'project-x',
+      status: 'UNKNOWN',
+      agentStatus: 'UNBOUND',
+      lastCheckAt: '',
+    })
+    const wrapper = mount(EnvironmentPage, {
+      global: {
+        stubs: {
+          EnvironmentConfigDrawer: true,
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openCreateDialog: () => void
+      submitEnvironment: () => Promise<void>
+      form: Record<string, string>
+    }
+    vm.openCreateDialog()
+    vm.form.name = 'remote prod'
+    vm.form.registryProject = 'project-x'
+    await wrapper.vm.$nextTick()
+    expect(vm.form.code).toBe('remote-prod')
+
+    await vm.submitEnvironment()
+    expect(createEnvironment).toHaveBeenCalledWith(expect.objectContaining({ code: 'remote-prod' }))
   })
 
   it('shows a clear fallback when environment loading fails', async () => {

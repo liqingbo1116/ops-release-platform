@@ -5,6 +5,7 @@ export type EnvironmentInfo = {
   name: string
   code: string
   type: 'LOCAL' | 'PROJECT'
+  deployTargetType: 'KUBERNETES' | 'DOCKER_COMPOSE'
   networkMode: 'DIRECT' | 'AGENT'
   clusterId: string
   namespace: string
@@ -15,6 +16,17 @@ export type EnvironmentInfo = {
   status: string
   agentStatus: string
   lastCheckAt: string
+  bindings: EnvironmentResourceBinding[]
+}
+
+export type EnvironmentResourceBinding = {
+  id?: string
+  environmentId?: string
+  resourceType: 'K8S' | 'HARBOR' | 'JENKINS'
+  resourceId: string
+  scopeType: 'NAMESPACE' | 'PROJECT' | 'VIEW'
+  scopeValue: string
+  isDefault: boolean
 }
 
 export type EnvironmentPayload = Pick<
@@ -23,6 +35,7 @@ export type EnvironmentPayload = Pick<
   | 'name'
   | 'code'
   | 'type'
+  | 'deployTargetType'
   | 'networkMode'
   | 'clusterId'
   | 'namespace'
@@ -30,6 +43,7 @@ export type EnvironmentPayload = Pick<
   | 'registryProject'
   | 'jenkinsId'
   | 'jenkinsView'
+  | 'bindings'
 > & {
   status?: string
 }
@@ -50,6 +64,7 @@ function normalizeEnvironment(item: {
   name: string
   code: string
   type: string
+  deployTargetType?: string
   networkMode: string
   clusterId?: string
   namespace?: string
@@ -60,10 +75,12 @@ function normalizeEnvironment(item: {
   status: string
   agentStatus: string
   lastCheckAt: string
+  bindings?: EnvironmentResourceBinding[]
 }): EnvironmentInfo {
   return {
     ...item,
     type: item.type === 'LOCAL' ? 'LOCAL' : 'PROJECT',
+    deployTargetType: item.deployTargetType === 'DOCKER_COMPOSE' ? 'DOCKER_COMPOSE' : 'KUBERNETES',
     networkMode: item.networkMode === 'DIRECT' ? 'DIRECT' : 'AGENT',
     clusterId: item.clusterId ?? '',
     namespace: item.namespace ?? '',
@@ -71,6 +88,7 @@ function normalizeEnvironment(item: {
     registryProject: item.registryProject ?? '',
     jenkinsId: item.jenkinsId ?? '',
     jenkinsView: item.jenkinsView ?? '',
+    bindings: item.bindings ?? [],
   }
 }
 

@@ -33,7 +33,7 @@ func TestCoreMockAPIs(t *testing.T) {
 		{name: "create baseline", method: http.MethodPost, path: "/api/baselines", body: `{"sourceEnvironmentId":"env-project-x-prod","name":"project-x-prod-20260608-2200","purpose":"远程部署前快照"}`, statusCode: http.StatusCreated},
 		{name: "baseline detail", method: http.MethodGet, path: "/api/baselines/BL-20260607-0001", statusCode: http.StatusOK},
 		{name: "lock baseline", method: http.MethodPost, path: "/api/baselines/BL-20260607-0002/lock", body: `{}`, statusCode: http.StatusOK},
-		{name: "baseline compare", method: http.MethodPost, path: "/api/baselines/BL-20260607-0001/compare", body: "{}", statusCode: http.StatusOK},
+		{name: "baseline compare", method: http.MethodPost, path: "/api/baselines/BL-20260607-0001/compare", body: `{"targetEnvironmentId":"env-project-x-prod"}`, statusCode: http.StatusOK},
 		{name: "release list", method: http.MethodGet, path: "/api/releases", statusCode: http.StatusOK},
 		{name: "create release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
 		{name: "create service release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
@@ -372,12 +372,29 @@ func TestAgentTaskExpiredLeaseCanBeLeasedAgain(t *testing.T) {
 func TestEnvironmentCRUD(t *testing.T) {
 	router := newTestRouter()
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-new-prod","name":"新生产环境","code":"new-prod","type":"PROJECT","networkMode":"AGENT","status":"HEALTHY"}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-new-prod","name":"新生产环境","code":"new-prod","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
 	if createRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected create environment status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	autoCodeRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"name":"Auto Code Prod","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
+	autoCodeRequest.Header.Set("Content-Type", "application/json")
+	autoCodeRecorder := httptest.NewRecorder()
+	router.ServeHTTP(autoCodeRecorder, autoCodeRequest)
+	if autoCodeRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create environment with auto code status 201, got %d: %s", autoCodeRecorder.Code, autoCodeRecorder.Body.String())
+	}
+	var autoCodeResponse struct {
+		Data domain.Environment `json:"data"`
+	}
+	if err := json.Unmarshal(autoCodeRecorder.Body.Bytes(), &autoCodeResponse); err != nil {
+		t.Fatalf("decode auto code response: %v", err)
+	}
+	if autoCodeResponse.Data.Code != "auto-code-prod" || autoCodeResponse.Data.ID != "env-auto-code-prod" {
+		t.Fatalf("expected auto-generated environment code/id, got %+v", autoCodeResponse.Data)
 	}
 
 	getRequest := httptest.NewRequest(http.MethodGet, "/api/environments/env-new-prod", nil)
@@ -608,7 +625,7 @@ func TestAgentHeartbeatRejectsUnknownEnvironment(t *testing.T) {
 func TestAgentHeartbeatRebindsExistingAgentEnvironment(t *testing.T) {
 	router := newTestRouter()
 
-	createEnvironmentRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-project-xjzt-test","name":"项目X联调环境","code":"project-xjzt-test","type":"PROJECT","networkMode":"AGENT","status":"HEALTHY"}`))
+	createEnvironmentRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-remote-agent-rebind-test","name":"远程 Agent 绑定测试环境","code":"remote-agent-rebind-test","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
 	createEnvironmentRequest.Header.Set("Content-Type", "application/json")
 	createEnvironmentRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createEnvironmentRecorder, createEnvironmentRequest)
@@ -616,7 +633,7 @@ func TestAgentHeartbeatRebindsExistingAgentEnvironment(t *testing.T) {
 		t.Fatalf("expected create environment status 201, got %d: %s", createEnvironmentRecorder.Code, createEnvironmentRecorder.Body.String())
 	}
 
-	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"environmentId":"env-project-xjzt-test","version":"v1-mock","capabilities":["mock-executor","http-check"]}`))
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"environmentId":"env-remote-agent-rebind-test","version":"v1-mock","capabilities":["mock-executor","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
 	heartbeatRecorder := httptest.NewRecorder()
 	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
@@ -624,7 +641,7 @@ func TestAgentHeartbeatRebindsExistingAgentEnvironment(t *testing.T) {
 		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
 	}
 
-	leaseRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"env-project-xjzt-test","maxTasks":1,"leaseSeconds":300}`))
+	leaseRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"env-remote-agent-rebind-test","maxTasks":1,"leaseSeconds":300}`))
 	leaseRequest.Header.Set("Content-Type", "application/json")
 	leaseRecorder := httptest.NewRecorder()
 	router.ServeHTTP(leaseRecorder, leaseRequest)
@@ -649,7 +666,7 @@ func TestAgentHeartbeatRebindsExistingAgentEnvironment(t *testing.T) {
 	}
 	for _, item := range payload.Data.Items {
 		if item.ID == "agent-project-x" {
-			if item.EnvironmentID != "env-project-xjzt-test" {
+			if item.EnvironmentID != "env-remote-agent-rebind-test" {
 				t.Fatalf("expected rebound environment id, got %+v", item)
 			}
 			return
@@ -737,7 +754,7 @@ func TestDeployStepActionsUpdateAgentTaskStatus(t *testing.T) {
 
 func TestEnvironmentCheckRejectsMockIntegrations(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-project-x-prod/check", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-local-prod/check", nil)
 	recorder := httptest.NewRecorder()
 
 	router.ServeHTTP(recorder, request)
@@ -746,6 +763,19 @@ func TestEnvironmentCheckRejectsMockIntegrations(t *testing.T) {
 		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "real environment integrations are not configured")
+}
+
+func TestEnvironmentCheckRejectsRemoteEnvironment(t *testing.T) {
+	router := newTestRouter()
+	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-project-x-prod/check", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "remote environment checks are handled by agent")
 }
 
 func TestCreateReleaseReturnsAgentTaskID(t *testing.T) {
@@ -1190,6 +1220,7 @@ func newTestRouter() http.Handler {
 	if err != nil {
 		panic(err)
 	}
+	seedTestEnvironments(repo)
 	return NewRouter(repo, nil, agent.NewProtocolStore(), integration.NewMockSuite())
 }
 
@@ -1199,12 +1230,59 @@ func newPermissionTestRouter(t *testing.T, user domain.CurrentUser) http.Handler
 	if err != nil {
 		t.Fatalf("load mock repository: %v", err)
 	}
+	seedTestEnvironments(repo)
 	repo.SetCurrentUserForTest(user)
 	handler := NewHandler(repo, nil, agent.NewProtocolStore(), integration.NewMockSuite())
 	router := gin.New()
 	router.POST("/api/releases", handler.CreateRelease)
 	router.POST("/api/deploy-tasks", handler.CreateDeployTask)
 	return router
+}
+
+func seedTestEnvironments(repo *repository.MockRepository) {
+	items := []domain.Environment{
+		{
+			ID:              "env-local-prod",
+			Name:            "本地生产环境",
+			Code:            "local-prod",
+			Type:            "LOCAL",
+			NetworkMode:     "DIRECT",
+			ClusterID:       "k8s-local-prod",
+			Namespace:       "default",
+			RegistryID:      "harbor-local-prod",
+			RegistryProject: "project-x",
+			Status:          "HEALTHY",
+		},
+		{
+			ID:              "env-project-x-prod",
+			Name:            "项目 X 生产",
+			Code:            "project-x-prod",
+			Type:            "PROJECT",
+			NetworkMode:     "AGENT",
+			RegistryID:      "harbor-local-prod",
+			RegistryProject: "project-x",
+			JenkinsID:       "jenkins-local-prod",
+			JenkinsView:     "project-x",
+			Status:          "HEALTHY",
+		},
+		{
+			ID:              "env-project-z-prod",
+			Name:            "项目 Z 生产",
+			Code:            "project-z-prod",
+			Type:            "PROJECT",
+			NetworkMode:     "AGENT",
+			RegistryID:      "harbor-local-prod",
+			RegistryProject: "project-z",
+			JenkinsID:       "jenkins-local-prod",
+			JenkinsView:     "project-z",
+			Status:          "UNKNOWN",
+		},
+	}
+	for _, item := range items {
+		if _, err := repo.CreateEnvironment(item); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func assertOKResponse(t *testing.T, payload []byte) {

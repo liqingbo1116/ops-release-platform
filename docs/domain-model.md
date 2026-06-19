@@ -8,20 +8,36 @@
 |---|---|---|---|
 | id | string | 是 | 环境 ID |
 | name | string | 是 | 环境名称 |
-| code | string | 是 | 环境编码；用户填写的唯一业务标识，创建时系统默认生成 `env-<code>` 作为环境 ID |
-| type | enum | 是 | LOCAL / PROJECT / TEST / STAGING |
-| networkMode | enum | 是 | DIRECT / AGENT / OFFLINE |
-| clusterId | string | 否 | 关联的 K8s 集群资源 ID |
-| namespace | string | 否 | 当前环境在 K8s 集群中的 namespace |
-| registryId | string | 否 | 关联的 Harbor/镜像仓库资源 ID |
-| registryProject | string | 否 | 当前环境使用的 Harbor 项目 |
-| jenkinsId | string | 否 | 关联的 Jenkins 实例资源 ID |
-| jenkinsView | string | 否 | 当前环境使用的 Jenkins 视图或项目范围 |
+| code | string | 是 | 环境标识；创建时系统按环境名称自动生成，页面可见且可修改，保存后系统生成 `env-<code>` 作为环境 ID。远程 Agent 配置使用生成后的环境 ID |
+| type | enum | 是 | LOCAL / PROJECT；页面展示为本地环境 / 远程环境 |
+| deployTargetType | enum | 是 | KUBERNETES / DOCKER_COMPOSE；V1 当前实现 Kubernetes，docker-compose 只预留模型入口 |
+| networkMode | enum | 是 | 内部字段：本地环境固定 DIRECT，远程环境固定 AGENT，页面不让用户选择 |
+| clusterId | string | 否 | 默认 K8s 绑定的兼容字段；本地环境使用，远程环境为空 |
+| namespace | string | 否 | 默认 K8s namespace 兼容字段；本地环境使用，远程 K8s 由 Agent 上报 |
+| registryId | string | 否 | 默认 Harbor 绑定的兼容字段；本地/远程环境都可关联平台维护的本地 Harbor |
+| registryProject | string | 否 | 默认 Harbor project 兼容字段；远程环境用于本地镜像来源和同步任务 |
+| jenkinsId | string | 否 | 默认 Jenkins 绑定的兼容字段；本地/远程环境都可关联平台维护的 Jenkins |
+| jenkinsView | string | 否 | 默认 Jenkins view 兼容字段；远程环境用于本地构建流水线范围 |
+| bindings | EnvironmentResourceBinding[] | 否 | 环境与基础资源的作用域绑定模型，可包含多个 K8s namespace、Harbor project、Jenkins view |
 | agentId | string | 否 | 绑定 Agent |
 | status | enum | 是 | HEALTHY / DEGRADED / OFFLINE / UNKNOWN |
 | lastCheckAt | datetime | 否 | 最近连接测试时间 |
 
-V1 环境管理必须把 K8s、Harbor、Jenkins 作为平台可维护的资源主数据，不把它们隐藏在 `.secrets/` 中作为正式数据来源。同一个 K8s 集群、Harbor 仓库或 Jenkins 实例可以被多个环境复用，环境记录只保存资源 ID 和环境级作用域：`namespace`、`registryProject`、`jenkinsView`。
+V1 环境管理必须把 K8s、Harbor、Jenkins 作为平台可维护的资源主数据，不把它们隐藏在 `.secrets/` 中作为正式数据来源。同一个 K8s 集群、Harbor 仓库或 Jenkins 实例可以被多个环境复用，同一环境也可以绑定多个作用域。远程环境不由平台直连远程 K8s；但仍需要关联平台侧本地 Jenkins view 和本地 Harbor project，用于触发本地构建、选择镜像来源，并生成后续 Agent 镜像同步与部署任务。
+
+## EnvironmentResourceBinding
+
+环境资源绑定是环境和基础资源之间的作用域关系。
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| id | string | 是 | 绑定 ID |
+| environmentId | string | 是 | 环境 ID |
+| resourceType | enum | 是 | K8S / HARBOR / JENKINS |
+| resourceId | string | 是 | 基础资源 ID |
+| scopeType | enum | 是 | NAMESPACE / PROJECT / VIEW |
+| scopeValue | string | 是 | namespace、Harbor project 或 Jenkins view |
+| isDefault | bool | 是 | 是否为该资源类型的默认绑定；旧兼容字段从默认绑定回填 |
 
 `.secrets/` 只用于研发阶段本地启动前后端、Agent 或连接私有工具时装载敏感值。正式使用时，平台数据库保存资源主数据，凭证字段只保存 `credentialRef`，由后续正式凭证后端或部署环境提供真实密钥。
 
@@ -43,7 +59,7 @@ K8s、Harbor、Jenkins 是独立资源，不是环境的内嵌字段。资源新
 - Harbor 缓存 projects。
 - Jenkins 缓存 views/jobs。
 
-页面必须提供“刷新/重新探测”能力。刷新失败时保留旧缓存，更新失败原因，不把旧缓存清空。本地或直连环境由平台后端 adapter 探测；项目或远程环境由 Agent 领取探测任务，访问远程 K8s/Harbor/Jenkins 后回传状态和缓存。
+页面必须提供“刷新/重新探测”能力。刷新失败时保留旧缓存，更新失败原因，不把旧缓存清空。平台基础资源由平台后端 adapter 探测，并用于本地环境关联；远程环境资源不在平台基础资源表中维护，由 Agent 后续上报状态和运行数据。
 
 ## KubernetesCluster
 

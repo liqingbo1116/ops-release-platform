@@ -91,7 +91,9 @@ Development integration variables are:
 V1 mainline rule:
 
 - `DATABASE_DSN` and `REDIS_ADDR` must point to the remote services prepared for the project, currently the remote host `100.120.3.230` recorded in `.secrets/`.
-- K8s, Harbor, and Jenkins are platform-maintained resource master data. Environment records reference resource IDs and add `namespace`, `registryProject`, and `jenkinsView`.
+- K8s, Harbor, and Jenkins are platform-maintained resource master data. Environment records reference resource IDs through binding records. One environment may bind multiple K8s namespaces, Harbor projects, and Jenkins views; default legacy fields are derived from the default binding.
+- Environment `type` is local vs remote execution (`LOCAL` / `PROJECT`). Environment `deployTargetType` is the runtime target; V1 implements `KUBERNETES` and only reserves `DOCKER_COMPOSE`.
+- Remote/project environments bind platform-side local Jenkins view and Harbor project for build/image source selection. Remote K8s/runtime operations are never platform-direct; they are Agent tasks and Agent-reported state.
 - Resource create forms must match the tool's natural inputs: K8s kubeconfig/context, Harbor URL + HTTP/HTTPS + username/password, Jenkins URL + username/password or API token. Users must not type `credentialRef`.
 - Resource status is system-owned. Keep connection test and refresh/probe actions. Cache K8s namespaces, Harbor projects, and Jenkins views/jobs; on refresh failure, keep the old cache and show the failure reason.
 - Probe execution depends on network mode: local/direct resources are checked by the platform backend; remote/project resources must be checked by Agent tasks and reported back to the platform.
@@ -110,7 +112,7 @@ Use this gate list before starting the next feature area:
    - Blocker: if resource forms expose `credentialRef`, status is user-editable, probe lists are mock, refresh is missing, or remote probes bypass Agent, stop here.
 2. Environment management
    - Required: phase 1 complete, real resource records, cached namespace/project/view options, and real backend environment persistence.
-   - Blocker: if environments embed credentials, use mock scope options, or require users to maintain both environment ID and environment code, stop here.
+   - Blocker: if environments embed credentials, use mock scope options, require users to maintain both environment ID and environment code, or directly connect from platform backend to remote K8s, stop here.
 3. Agent management and remote probing
    - Required: real environments, remote Linux host, built agent binary, `-f` config file support, outbound connectivity to platform, and Agent-side access to remote K8s/Harbor/Jenkins.
    - Blocker: if a real environment cannot be created first, or remote resource probe status/cache cannot be reported by Agent, stop here.

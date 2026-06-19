@@ -33,26 +33,43 @@ func (ServiceModel) TableName() string {
 }
 
 type EnvironmentModel struct {
-	ID              string     `gorm:"primaryKey;size:64"`
-	Name            string     `gorm:"size:128;not null"`
-	Code            string     `gorm:"size:128;uniqueIndex;not null"`
-	Type            string     `gorm:"size:32;index;not null"`
-	NetworkMode     string     `gorm:"size:32;not null"`
-	ClusterID       string     `gorm:"size:64"`
-	Namespace       string     `gorm:"size:128"`
-	RegistryID      string     `gorm:"size:64"`
-	RegistryProject string     `gorm:"size:128"`
-	JenkinsID       string     `gorm:"size:64"`
-	JenkinsView     string     `gorm:"size:128"`
-	AgentID         string     `gorm:"size:64"`
-	Status          string     `gorm:"size:32;index;not null"`
-	LastCheckAt     *time.Time `gorm:"index"`
-	CreatedAt       time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt       time.Time  `gorm:"autoUpdateTime"`
+	ID               string     `gorm:"primaryKey;size:64"`
+	Name             string     `gorm:"size:128;not null"`
+	Code             string     `gorm:"size:128;uniqueIndex;not null"`
+	Type             string     `gorm:"size:32;index;not null"`
+	DeployTargetType string     `gorm:"size:32;not null;default:KUBERNETES"`
+	NetworkMode      string     `gorm:"size:32;not null"`
+	ClusterID        string     `gorm:"size:64"`
+	Namespace        string     `gorm:"size:128"`
+	RegistryID       string     `gorm:"size:64"`
+	RegistryProject  string     `gorm:"size:128"`
+	JenkinsID        string     `gorm:"size:64"`
+	JenkinsView      string     `gorm:"size:128"`
+	AgentID          string     `gorm:"size:64"`
+	Status           string     `gorm:"size:32;index;not null"`
+	LastCheckAt      *time.Time `gorm:"index"`
+	CreatedAt        time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt        time.Time  `gorm:"autoUpdateTime"`
 }
 
 func (EnvironmentModel) TableName() string {
 	return "environments"
+}
+
+type EnvironmentResourceBindingModel struct {
+	ID            string    `gorm:"primaryKey;size:128"`
+	EnvironmentID string    `gorm:"size:64;index;not null"`
+	ResourceType  string    `gorm:"size:32;index;not null"`
+	ResourceID    string    `gorm:"size:64;index;not null"`
+	ScopeType     string    `gorm:"size:32;not null"`
+	ScopeValue    string    `gorm:"size:128;not null"`
+	IsDefault     bool      `gorm:"index;not null"`
+	CreatedAt     time.Time `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time `gorm:"autoUpdateTime"`
+}
+
+func (EnvironmentResourceBindingModel) TableName() string {
+	return "environment_resource_bindings"
 }
 
 type KubernetesClusterModel struct {
