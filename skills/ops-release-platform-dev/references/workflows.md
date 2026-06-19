@@ -57,6 +57,7 @@ Strict rule:
 - Backend must be started with Go commands, normally `go run ./cmd/server`.
 - Do not use docker-compose to start frontend or backend during development.
 - Use `ops-release-platform-deployment` for detailed runtime and deployment rules.
+- When the user asks to start frontend/backend, use the exact startup rules in `../ops-release-platform-deployment/references/deployment.md`. Do not improvise a different working directory, omit `.secrets/local-dev-env.ps1`, use `/api/health` as validation, or start processes in a way that is cleaned up when the tool session exits.
 
 Before starting the backend in PowerShell, load the local secret environment file:
 
@@ -153,7 +154,7 @@ Start local dev server:
 
 ```powershell
 cd frontend
-npm run dev
+npm run dev -- --host 0.0.0.0
 ```
 
 Build:
@@ -182,9 +183,20 @@ go mod tidy
 Start local backend with remote PostgreSQL and Redis:
 
 ```powershell
+cd backend
 . ..\.secrets\local-dev-env.ps1
 go run ./cmd/server
 ```
+
+Linux/Bash startup from this repository must convert the PowerShell env file without printing secret values:
+
+```bash
+cd /home/kuma/桌面/projects/ops-release-platform/backend
+source <(sed -E 's/^\$env:([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$/export \1=\2/' ../.secrets/local-dev-env.ps1)
+go run ./cmd/server
+```
+
+For background processes that must keep running after the current tool command exits, use the deployment skill's `setsid -f bash -lc ...` commands and log files under `/tmp/`. Verify backend with `GET /api/environments`; `/api/health` is not a valid backend startup check in the current project.
 
 Tests:
 

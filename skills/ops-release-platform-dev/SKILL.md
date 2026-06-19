@@ -39,7 +39,7 @@ Use this skill before making code, docs, deployment, or Git changes in this repo
 - Local/direct environments are probed by the platform backend. Remote/project environments are probed by Agent tasks, then Agent reports status and cache back to the platform.
 - `.secrets/` is only the development-stage private value source for local process startup and real integration checks. It is not the formal platform resource master data source.
 - Platform resource records may store non-secret metadata such as API server or service URL and only internal credential references for credentials. Never copy real credentials, kubeconfig contents, token values, database DSNs, or Redis passwords into docs, code, tests, logs, commits, or chat output.
-- Local development runtime: run frontend with npm and backend with `go run`; do not use docker-compose for frontend/backend during development. See `../ops-release-platform-deployment/`.
+- Local development runtime: run frontend with npm and backend with `go run`; do not use docker-compose for frontend/backend during development. Service startup must follow `../ops-release-platform-deployment/` exactly, including loading `.secrets/local-dev-env.ps1`, using the correct working directories, and using `setsid -f bash -lc ...` when services must survive the current Codex tool session.
 - For user requests like "继续开发", choose the next clear item from `docs/development-plan.md` and current repository state.
 - For user requests like "提交", follow `docs/git-submit-workflow.md` and the extra checks in `references/workflows.md`.
 - If you must inspect log files, only read a small tail of the newest lines, such as the latest 10 or 20 lines. Never load the full log file into context.

@@ -31,7 +31,14 @@ Start development server:
 
 ```powershell
 cd frontend
-npm run dev
+npm run dev -- --host 0.0.0.0
+```
+
+Linux/Bash:
+
+```bash
+cd /home/kuma/桌面/projects/ops-release-platform/frontend
+npm run dev -- --host 0.0.0.0
 ```
 
 Build:
@@ -62,6 +69,7 @@ Start backend from the backend directory:
 
 ```powershell
 cd backend
+. ..\.secrets\local-dev-env.ps1
 go run ./cmd/server
 ```
 
@@ -78,6 +86,44 @@ Tests:
 cd backend
 go test ./...
 ```
+
+Linux/Bash startup from this repository must load the same `.secrets/local-dev-env.ps1` file by converting the PowerShell assignments in the current shell. Do not print the converted values:
+
+```bash
+cd /home/kuma/桌面/projects/ops-release-platform/backend
+source <(sed -E 's/^\$env:([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$/export \1=\2/' ../.secrets/local-dev-env.ps1)
+go run ./cmd/server
+```
+
+## Long Running Local Startup
+
+When the user asks to start the platform frontend and backend for later testing, start them as detached local processes so they survive the current Codex command session.
+
+Backend:
+
+```bash
+setsid -f bash -lc 'cd /home/kuma/桌面/projects/ops-release-platform/backend && source <(sed -E '\''s/^\$env:([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$/export \1=\2/'\'' ../.secrets/local-dev-env.ps1) && exec go run ./cmd/server > /tmp/ops-release-platform-backend.log 2>&1'
+```
+
+Frontend:
+
+```bash
+setsid -f bash -lc 'cd /home/kuma/桌面/projects/ops-release-platform/frontend && exec npm run dev -- --host 0.0.0.0 > /tmp/ops-release-platform-frontend.log 2>&1'
+```
+
+Validation:
+
+```bash
+ss -ltnp | rg ':8080|:5173'
+curl -fsS http://127.0.0.1:8080/api/environments
+curl -I -fsS http://127.0.0.1:5173/
+tail -n 20 /tmp/ops-release-platform-backend.log
+tail -n 20 /tmp/ops-release-platform-frontend.log
+```
+
+Do not use `GET /api/health` as the backend startup check unless that endpoint is added later; the current verified backend check is `GET /api/environments`.
+
+If a frontend startup log includes runtime mock fallback warnings from older release or baseline sample endpoints, do not treat that alone as a backend startup failure. Verify the real API being worked on, such as environment management, against the backend endpoint directly.
 
 ## Agent Commands
 

@@ -26,8 +26,12 @@ For formal remote deployment, the Agent still uses the packaged `docker compose`
 1. Read `references/deployment.md`.
 2. Check `.secrets/local-dev-env.ps1` exists before starting backend.
 3. Treat missing `.secrets/local-dev-env.ps1` as a blocker for normal backend development startup and ask the user to restore it instead of inventing replacement connection settings.
-4. Use npm/go commands for local frontend/backend runtime, and use `go build` output for Agent runtime.
-5. Use docker-compose only for explicit infrastructure/deployment tasks during development; keep it as the formal Agent deployment path.
+4. Start backend from `backend/` and frontend from `frontend/`; never launch from the repository root by accident.
+5. For Linux/Bash startup, convert `.secrets/local-dev-env.ps1` into shell exports in-process and do not print the resulting values.
+6. When services need to remain running after the current command finishes, start them with the documented `setsid -f bash -lc ...` commands and write logs to `/tmp/ops-release-platform-backend.log` and `/tmp/ops-release-platform-frontend.log`.
+7. Validate backend with `/api/environments` and frontend with `/`; do not use `/api/health` unless that endpoint is added later.
+8. Use npm/go commands for local frontend/backend runtime, and use `go build` output for Agent runtime.
+9. Use docker-compose only for explicit infrastructure/deployment tasks during development; keep it as the formal Agent deployment path.
 
 ## Security
 
