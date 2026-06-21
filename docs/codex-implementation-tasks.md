@@ -11,13 +11,15 @@
   1. 基础资源管理
   2. 环境管理
   3. Agent 管理与远程探测
-  4. 服务与版本来源
-  5. 发布单创建
-  6. 基线管理
-  7. 部署执行
-  8. 发布详情 / 部署详情
-  9. 登录与权限
-  10. 清理剩余 mock
+  4. 项目管理
+  5. 产品管理
+  6. 服务与版本来源
+  7. 发布单创建
+  8. 基线管理
+  9. 部署执行
+  10. 发布详情 / 部署详情
+  11. 登录与权限
+  12. 清理剩余 mock
 - 每个阶段必须切到真实数据；该阶段 mock 数据、mock repository、mock fallback 没删掉时，不能进入下一阶段。
 - 包体优化、构建 warning 清理、UI 打磨、纯重构清理都放在这条主链路之后，除非已经阻塞功能交付。
 
@@ -40,11 +42,17 @@
   - Agent 操作的目标环境是远程 Kubernetes 集群
   - 不把 Agent 自身先部署进 Kubernetes 作为 V1 前置条件
 - V1 项目环境发版/部署的硬前提：
+  - Agent 可以先凭平台地址和注册密钥接入平台，平台必须支持未绑定/待认领 Agent，再由平台绑定到项目/产品；当前环境记录在 V1 中承接产品部署范围
+  - Agent 启动参数可预填环境 ID 作为便捷绑定，但不能作为唯一绑定方式
+  - Agent 心跳、任务租约和执行回传接口必须校验 Agent token
   - Agent 必须能独立部署到项目环境侧 Linux 主机
   - 项目环境默认平台不可连通，不能要求平台访问 Agent endpoint，也不能由平台向 Agent 主动推送任务
   - Agent 只支持出站访问平台 API，必须能主动领取/租约获取发布/部署任务和执行数据
   - Agent 必须能主动向平台上报心跳、服务列表、镜像版本、步骤状态、日志和最终结果
   - 以上三项未完成前，不能进入真实远程环境发版/部署验收
+- V1 用户视角层级固定为：项目 -> 产品 -> 服务 -> 发布 / 部署。例如项目A、项目B下面有数据中台、物联中台等产品，产品下面有服务A、服务B等服务。
+- 当前“环境”概念在 V1 中对应上面的“产品”概念：环境已有的资源绑定、状态、Agent 就绪等能力作为产品部署范围的过渡实现，不在产品下面再额外暴露一层环境。
+- 已完成的基础资源管理和环境管理不推翻重做，后续在“项目管理”“产品管理”和“服务与版本来源”阶段补齐项目归属、产品归属和服务映射。
 - 默认需要重点提前确认的外部组件：
   - Jenkins：测试 Job、凭证接入方式、可用视图或命名规则
   - Harbor/Registry：测试仓库、镜像推送与拉取权限、测试 tag 策略
@@ -54,7 +62,7 @@
 
 ## 历史 Agent-first 实现规划（已废弃为执行基线）
 
-本节保留为历史上下文，不再作为 Codex 后续继续研发的默认顺序。后续必须按 `docs/development-plan.md` 的“V1 研发主线路径”和 `skills/ops-release-platform-dev/SKILL.md` 的 “V1 Mainline Gates” 执行。
+本节保留为历史上下文，不再作为 Codex 后续继续研发的默认顺序。后续必须按 `docs/development-plan.md` 的“V1 研发主线路径”和 `skills/ops-release-platform-todo/SKILL.md` 的 “V1 Ordered Path” 执行；本地启动、验证和提交流程仍按 `skills/ops-release-platform-dev/SKILL.md`。
 
 1. 远程 Agent 独立部署包
    - 实现 `agent/cmd/agent` 可运行进程
@@ -245,7 +253,7 @@
 
 ## 总提示词
 
-> 下面这段是历史任务模板，仅作背景参考，不作为当前 V1 执行基线。当前唯一有效顺序以 `docs/development-plan.md` 的“V1 研发主线路径”和 `skills/ops-release-platform-dev/SKILL.md` 的 “V1 Mainline Gates” 为准，且必须优先资源管理与真实探测缓存，不能再以 mock adapter 作为阶段完成标准。
+> 下面这段是历史任务模板，仅作背景参考，不作为当前 V1 执行基线。当前唯一有效顺序以 `docs/development-plan.md` 的“V1 研发主线路径”和 `skills/ops-release-platform-todo/SKILL.md` 的 “V1 Ordered Path” 为准，且必须优先资源管理与真实探测缓存，不能再以 mock adapter 作为阶段完成标准。
 
 ```text
 你正在开发一个企业内部运维发布交付平台。请以 docs/PRD.md 为业务依据，以 design/ops-release-console-v3.html 为视觉和页面结构参考，以 docs/domain-model.md、docs/state-machine.md、docs/api-contract.md、mocks/ 为开发约束。

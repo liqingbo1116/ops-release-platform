@@ -48,7 +48,7 @@ Latest pushed milestone:
   - 基础资源管理: functionally complete for V1; keep only bug fixes and integration follow-up.
   - 环境管理: functionally complete for V1; environments can bind multiple K8s namespaces, Harbor projects, and Jenkins views for later service association.
 - Next default step:
-  - Agent 管理与远程探测: verify real Agent registration, heartbeat, environment binding, online status, task leasing, and remote resource probing through the platform API.
+  - Agent 管理与远程探测: verify real Agent registration, token validation, heartbeat, unbound/pending-claim status, project/product binding, online status, task leasing, and remote resource probing through the platform API.
 - Completed and pushed mock-first status:
   - release/deploy detail closure
   - Agent protocol mock closure
@@ -71,15 +71,32 @@ This is the authoritative order for subsequent development. Each phase must use 
 1. 基础资源管理.
 2. 环境管理.
 3. Agent 管理与远程探测.
-4. 服务与版本来源.
-5. 发布单创建.
-6. 基线管理.
-7. 部署执行.
-8. 发布详情 / 部署详情.
-9. 登录与权限.
-10. 清理剩余 mock.
+4. 项目管理.
+5. 产品管理.
+6. 服务与版本来源.
+7. 发布单创建.
+8. 基线管理.
+9. 部署执行.
+10. 发布详情 / 部署详情.
+11. 登录与权限.
+12. 清理剩余 mock.
 
-Current step is step 3: Agent 管理与远程探测. Do not move to 服务与版本来源 until Agent registration, heartbeat, environment binding, status visibility, task leasing, and remote probing use real backend data and the mock/fallback boundary is removed or explicitly recorded as blocked by missing real runtime or infrastructure.
+Current step is step 3: Agent 管理与远程探测. Do not move to 项目管理 until Agent registration, token validation, heartbeat, unbound/pending-claim status, project/product binding, status visibility, task leasing, and remote probing use real backend data and the mock/fallback boundary is removed or explicitly recorded as blocked by missing real runtime or infrastructure.
+
+Agent registration design for V1:
+
+- Agent should connect to the platform with platform URL and registration secret/token first.
+- The platform must support unbound or pending-claim Agents so an Agent can appear before it is associated with a project environment.
+- Environment/product ID may be accepted as an optional startup convenience, but product binding must also be manageable from the platform.
+- Agent token validation is part of the Agent phase gate; generating tokens without validating them on heartbeat/task APIs is not acceptable for V1 closure.
+
+Project/product model decision for V1:
+
+- The user-facing hierarchy should be 项目 -> 产品 -> 服务 -> 发布 / 部署.
+- Examples: 项目A、项目B are projects; 数据中台、物联中台 are products; 服务A、服务B are services under a product.
+- The current environment concept corresponds to the product concept for V1. Treat environment records and resource bindings as the transition implementation of product deployment scope, not as an extra user-facing level under product.
+- Do not rebuild completed 基础资源管理 or 环境管理 solely for this hierarchy change.
+- Add projects in step 4 and product ownership in step 5, then make service, release, deployment, baseline, and permission flows consume that ownership in later steps.
 
 Environment management is considered ready for the next phase only because it supports multi-scope bindings:
 
@@ -98,22 +115,28 @@ Environment management is considered ready for the next phase only because it su
    - User-visible outcome: users can create local and remote environments, bind multiple K8s namespaces, Harbor projects, and Jenkins views, and see resource readiness separately from Agent execution readiness.
    - Remaining scope: follow-up adjustments only when service association consumes these bindings.
 3. Agent 管理与远程探测. Next.
-   - User-visible outcome: users can see real Agent registration, heartbeat, environment binding, online/offline/unbound status, and remote resource probe results.
+   - User-visible outcome: users can see real Agent registration, heartbeat, unbound/pending-claim status, product/project binding, online/offline status, and remote resource probe results.
    - Required before next phase: real Agent binary or docker-compose runtime, outbound connectivity to platform API, and remote resource access from Agent.
-4. 服务与版本来源.
-   - User-visible outcome: users can create services and select actual namespace, Harbor project, Jenkins view/job, repository, branch, image name, and version source inside the target environment.
-   - Dependency: environment bindings from step 2 must be consumed here, not duplicated.
-5. 发布单创建.
-   - User-visible outcome: users can select services, target environment, and version source to create a release order with environment, resource, and Agent readiness checks.
-6. 基线管理.
+4. 项目管理.
+   - User-visible outcome: users can create and select top-level projects such as 项目A and 项目B as the business ownership boundary.
+   - Dependency: completed environments/products must be attachable to projects without rewriting resource management.
+5. 产品管理.
+   - User-visible outcome: users can create products such as 数据中台 and 物联中台 under a project. The current environment model is reused as the V1 transition implementation for product deployment scope and resource bindings.
+   - Dependency: completed environment bindings from step 2 must be consumed here as product resource scope, not duplicated.
+6. 服务与版本来源.
+   - User-visible outcome: users can create services under products and select actual namespace, Harbor project, Jenkins view/job, repository, branch, image name, and version source inside the target product scope.
+   - Dependency: project ownership from step 4, product deployment scope from step 5, and environment bindings from step 2 as the V1 transition implementation must be consumed here, not duplicated.
+7. 发布单创建.
+   - User-visible outcome: users can select project, product, services, and version source to create a release order with product resource and Agent readiness checks.
+8. 基线管理.
    - User-visible outcome: users can view environment baselines, record service version snapshots, and compare target release versions with the current baseline.
-7. 部署执行.
+9. 部署执行.
    - User-visible outcome: users can execute deployments; local environments run through platform-direct K8s access, remote environments run through Agent.
-8. 发布详情 / 部署详情.
+10. 发布详情 / 部署详情.
    - User-visible outcome: users can inspect execution progress, step status, logs, failure reason, retry/rollback entry, and Agent-reported results.
-9. 登录与权限.
-   - User-visible outcome: users log in with real identity, and key operations are controlled by role/environment/service permissions.
-10. 清理剩余 mock.
+11. 登录与权限.
+   - User-visible outcome: users log in with real identity, and key operations are controlled by role/project/product/service permissions.
+12. 清理剩余 mock.
    - User-visible outcome: the V1 mainline no longer depends on page fallback data, mock repositories, or mock-only API behavior.
 
 ## V1 Mainline Goal
@@ -121,6 +144,7 @@ Environment management is considered ready for the next phase only because it su
 V1 must prioritize functional closure over optimization work. The minimum acceptable V1 outcome is:
 
 - the platform can manage project environments
+- the platform can group products under projects before services, releases, and deployments are created
 - the platform can create and track project-environment deployment/release tasks
 - Agent can be started directly by binary during development and deployed by docker-compose in formal project environments
 - remote Agent can lease/pull release/deploy task payloads and required execution data from the platform API

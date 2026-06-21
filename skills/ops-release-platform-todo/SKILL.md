@@ -51,6 +51,8 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - 基础资源管理
   - 环境管理
   - Agent 管理与远程探测
+  - 项目管理
+  - 产品管理
   - 服务与版本来源
   - 发布单创建
   - 基线管理
@@ -66,15 +68,17 @@ Use this skill to keep project progress explicit and avoid losing the current de
 
 1. 基础资源管理: real K8s, Harbor, and Jenkins resource data, connectivity checks, probe refresh, and cached namespaces/projects/views.
 2. 环境管理: real local/remote environments, multi-scope resource bindings, status visibility, and Agent readiness separation.
-3. Agent 管理与远程探测: real registration, heartbeat, environment binding, online status, task lease data, and remote probing.
-4. 服务与版本来源: real services consuming environment-bound namespace/project/view/job ranges and real version source configuration.
-5. 发布单创建: real environments, agents, services, version sources, and readiness checks.
-6. 基线管理: real baseline list, detail, source metadata, and service snapshot source.
-7. 部署执行: real platform-direct or Agent execution against the target infrastructure.
-8. 发布详情 / 部署详情: persisted real task status, steps, logs, and results.
-9. 登录与权限: real login, users, roles, permissions, and environment-level authorization.
-10. 清理剩余 mock: remove remaining runtime mock handlers, mock repositories, page fallbacks, and mock-only mainline dependencies.
-11. Non-functional optimization work after V1 functional closure.
+3. Agent 管理与远程探测: real registration, heartbeat, token validation, online status, unbound/pending-claim visibility, project/product binding, task lease data, and remote probing.
+4. 项目管理: real project records such as 项目A and 项目B, used as the top-level business ownership boundary.
+5. 产品管理: real product records such as 数据中台 and 物联中台 under projects; current environment records are the V1 transition implementation for product deployment scope.
+6. 服务与版本来源: real services under products, consuming product deployment-scope namespace/project/view/job ranges and real version source configuration.
+7. 发布单创建: real projects, products, agents, services, version sources, and readiness checks.
+8. 基线管理: real baseline list, detail, source metadata, and service snapshot source.
+9. 部署执行: real platform-direct or Agent execution against the target infrastructure.
+10. 发布详情 / 部署详情: persisted real task status, steps, logs, and results.
+11. 登录与权限: real login, users, roles, permissions, and project/product/service-level authorization.
+12. 清理剩余 mock: remove remaining runtime mock handlers, mock repositories, page fallbacks, and mock-only mainline dependencies.
+13. Non-functional optimization work after V1 functional closure.
 
 ## User-View Acceptance Path
 
