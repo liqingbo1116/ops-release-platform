@@ -38,7 +38,7 @@ func (s *DatabaseStore) ListEnvironments(query string) []domain.Environment {
 	for _, model := range models {
 		items = append(items, toDomainEnvironment(model, agentStatuses[model.AgentID]))
 	}
-	return s.attachEnvironmentBindings(items)
+	return s.refreshEnvironmentStatuses(s.attachEnvironmentBindings(items))
 }
 
 func (s *DatabaseStore) GetEnvironment(id string) (domain.Environment, bool) {
@@ -48,6 +48,7 @@ func (s *DatabaseStore) GetEnvironment(id string) (domain.Environment, bool) {
 	}
 	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
 	items := s.attachEnvironmentBindings([]domain.Environment{item})
+	items = s.refreshEnvironmentStatuses(items)
 	return items[0], true
 }
 
@@ -176,11 +177,15 @@ func (s *DatabaseStore) UpdateEnvironmentCheck(id string, status string, checked
 	}
 	model.Status = fallbackString(strings.TrimSpace(status), "UNKNOWN")
 	model.LastCheckAt = &checkedAt
+	itemForStatus := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
+	itemForStatus = s.attachEnvironmentBindings([]domain.Environment{itemForStatus})[0]
+	model.Status = s.environmentStatusByScopeCache(itemForStatus, model.Status)
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.Environment{}, false, err
 	}
 	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
 	items := s.attachEnvironmentBindings([]domain.Environment{item})
+	items = s.refreshEnvironmentStatuses(items)
 	return items[0], true, nil
 }
 
@@ -1230,7 +1235,11 @@ func (s *DatabaseStore) environmentStatusByScopeCache(item domain.Environment, c
 }
 
 func (s *DatabaseStore) environmentHasUnverifiedScopes(item domain.Environment) bool {
-	for _, binding := range item.Bindings {
+	bindings := item.Bindings
+	if len(bindings) == 0 {
+		bindings = defaultEnvironmentBindings(item)
+	}
+	for _, binding := range bindings {
 		switch binding.ResourceType {
 		case "K8S":
 			cluster, exists := s.GetKubernetesCluster(binding.ResourceID)
@@ -1250,6 +1259,13 @@ func (s *DatabaseStore) environmentHasUnverifiedScopes(item domain.Environment) 
 		}
 	}
 	return false
+}
+
+func (s *DatabaseStore) refreshEnvironmentStatuses(items []domain.Environment) []domain.Environment {
+	for index := range items {
+		items[index].Status = s.environmentStatusByScopeCache(items[index], items[index].Status)
+	}
+	return items
 }
 
 func verifiedEnvironmentStatus(currentStatus string) string {

@@ -49,6 +49,7 @@ describe('environment API', () => {
         name: '真实生产环境',
         code: 'real-prod',
         type: 'PROJECT',
+        deployTargetType: 'KUBERNETES',
         networkMode: 'AGENT',
         clusterId: '',
         namespace: '',
@@ -59,6 +60,7 @@ describe('environment API', () => {
         status: 'HEALTHY',
         agentStatus: 'ONLINE',
         lastCheckAt: '2026-06-12T10:00:00+08:00',
+        bindings: [],
       },
     ])
   })

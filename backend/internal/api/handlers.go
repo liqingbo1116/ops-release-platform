@@ -222,12 +222,12 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 		NotFound(c, "environment not found")
 		return
 	}
-	if environment.Type != "LOCAL" {
-		BadRequest(c, "remote environment checks are handled by agent")
+	if h.integrations.IsMock() {
+		h.checkEnvironmentByCachedScopes(c, environment)
 		return
 	}
-	if h.integrations.IsMock() {
-		BadRequest(c, "real environment integrations are not configured")
+	if environment.Type != "LOCAL" {
+		h.checkEnvironmentByCachedScopes(c, environment)
 		return
 	}
 	environment, err := h.environmentWithIntegrationResources(environment)
@@ -264,6 +264,105 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 		"checkedAt":     checkedAt.Format(time.RFC3339),
 		"checks":        checks,
 	})
+}
+
+func (h *Handler) checkEnvironmentByCachedScopes(c *gin.Context, environment domain.Environment) {
+	checkedAt := time.Now()
+	status := "UNKNOWN"
+	checks := h.cachedScopeChecks(environment)
+	for _, check := range checks {
+		if check.Status != "HEALTHY" {
+			status = "DEGRADED"
+			break
+		}
+	}
+	if status == "UNKNOWN" && len(checks) > 0 {
+		status = "HEALTHY"
+	}
+	updated, ok, _ := h.repo.UpdateEnvironmentCheck(environment.ID, status, checkedAt)
+	if ok {
+		status = updated.Status
+	}
+	OK(c, gin.H{
+		"environmentId": environment.ID,
+		"status":        status,
+		"checkedAt":     checkedAt.Format(time.RFC3339),
+		"checks":        checks,
+	})
+}
+
+func (h *Handler) cachedScopeChecks(environment domain.Environment) []integration.IntegrationCheck {
+	checks := []integration.IntegrationCheck{}
+	bindings := environment.Bindings
+	if len(bindings) == 0 {
+		bindings = defaultEnvironmentBindingsForCheck(environment)
+	}
+	for _, binding := range bindings {
+		switch binding.ResourceType {
+		case "K8S":
+			if environment.Type != "LOCAL" {
+				continue
+			}
+			cluster, exists := h.repo.GetKubernetesCluster(binding.ResourceID)
+			checks = append(checks, cachedScopeCheck("K8s 命名空间", exists && containsTrimmedString(cluster.Namespaces, binding.ScopeValue), binding.ScopeValue))
+		case "HARBOR":
+			registry, exists := h.repo.GetHarborRegistry(binding.ResourceID)
+			checks = append(checks, cachedScopeCheck("Harbor 镜像项目", exists && containsTrimmedString(registry.Projects, binding.ScopeValue), binding.ScopeValue))
+		case "JENKINS":
+			instance, exists := h.repo.GetJenkinsInstance(binding.ResourceID)
+			checks = append(checks, cachedScopeCheck("Jenkins 流水线视图", exists && containsTrimmedString(instance.Views, binding.ScopeValue), binding.ScopeValue))
+		}
+	}
+	return checks
+}
+
+func defaultEnvironmentBindingsForCheck(environment domain.Environment) []domain.EnvironmentResourceBinding {
+	bindings := []domain.EnvironmentResourceBinding{}
+	if strings.TrimSpace(environment.ClusterID) != "" || strings.TrimSpace(environment.Namespace) != "" {
+		bindings = append(bindings, domain.EnvironmentResourceBinding{
+			ResourceType: "K8S",
+			ResourceID:   strings.TrimSpace(environment.ClusterID),
+			ScopeType:    "NAMESPACE",
+			ScopeValue:   strings.TrimSpace(environment.Namespace),
+			IsDefault:    true,
+		})
+	}
+	if strings.TrimSpace(environment.RegistryID) != "" || strings.TrimSpace(environment.RegistryProject) != "" {
+		bindings = append(bindings, domain.EnvironmentResourceBinding{
+			ResourceType: "HARBOR",
+			ResourceID:   strings.TrimSpace(environment.RegistryID),
+			ScopeType:    "PROJECT",
+			ScopeValue:   strings.TrimSpace(environment.RegistryProject),
+			IsDefault:    true,
+		})
+	}
+	if strings.TrimSpace(environment.JenkinsID) != "" || strings.TrimSpace(environment.JenkinsView) != "" {
+		bindings = append(bindings, domain.EnvironmentResourceBinding{
+			ResourceType: "JENKINS",
+			ResourceID:   strings.TrimSpace(environment.JenkinsID),
+			ScopeType:    "VIEW",
+			ScopeValue:   strings.TrimSpace(environment.JenkinsView),
+			IsDefault:    true,
+		})
+	}
+	return bindings
+}
+
+func cachedScopeCheck(name string, exists bool, scope string) integration.IntegrationCheck {
+	if exists {
+		return integration.IntegrationCheck{Component: name, Status: "HEALTHY", Message: scope + " 已在最近探测结果中发现", CheckedAt: time.Now().Format(time.RFC3339)}
+	}
+	return integration.IntegrationCheck{Component: name, Status: "DEGRADED", Message: scope + " 未在最近探测结果中发现", CheckedAt: time.Now().Format(time.RFC3339)}
+}
+
+func containsTrimmedString(values []string, target string) bool {
+	trimmedTarget := strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == trimmedTarget {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) environmentWithIntegrationResources(environment domain.Environment) (domain.Environment, error) {

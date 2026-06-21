@@ -53,7 +53,8 @@ export type EnvironmentCheckResult = {
   status: string
   checkedAt: string
   checks: Array<{
-    name: string
+    component?: string
+    name?: string
     status: string
     message: string
   }>

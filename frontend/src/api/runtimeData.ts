@@ -5,7 +5,6 @@ import { baselineMockData } from './mockData/baseline'
 import { changelogMockData } from './mockData/changelog'
 import { deployMockData } from './mockData/deploy'
 import { environmentMockData } from './mockData/environment'
-import { releaseMockData } from './mockData/release'
 import { userMockData } from './mockData/user'
 
 type ListKey =
@@ -62,17 +61,7 @@ export async function loadRuntimeData() {
       loadList('environments', '/api/environments'),
       loadList('agents', '/api/agents'),
       loadList('baselines', '/api/baselines'),
-      getData<typeof baselineMockData.baselineDetail>('/api/baselines/BL-20260607-0001').then((data) => {
-        baselineMockData.baselineDetail = data
-      }),
-      postCompare(),
-      getData<typeof releaseMockData.releaseDetail>('/api/releases/REL-20260607-031').then((data) => {
-        releaseMockData.releaseDetail = data
-      }),
       loadList('deployTasks', '/api/deploy-tasks'),
-      getData<typeof deployMockData.deployDetail>('/api/deploy-tasks/DEP-20260607-009').then((data) => {
-        deployMockData.deployDetail = data
-      }),
       getData<typeof authMockData.currentUser>('/api/auth/me').then((data) => {
         authMockData.currentUser = data
       }),
@@ -84,15 +73,4 @@ export async function loadRuntimeData() {
   } catch (error) {
     console.warn('Backend API unavailable, falling back to local mock data.', error)
   }
-}
-
-async function postCompare() {
-  const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8080'}/api/baselines/BL-20260607-0001/compare`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{}',
-  })
-  if (!response.ok) throw new Error(`compare failed: ${response.status}`)
-  const payload = await response.json()
-  baselineMockData.diffResult = payload.data
 }

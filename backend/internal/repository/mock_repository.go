@@ -70,13 +70,18 @@ func loadJSON(path string, dest any) error {
 }
 
 func (r *MockRepository) ListEnvironments(query string) []domain.Environment {
-	return filter(r.environments, query, func(item domain.Environment) string {
+	items := filter(r.environments, query, func(item domain.Environment) string {
 		return item.ID + " " + item.Name + " " + item.Code + " " + item.Type + " " + item.NetworkMode + " " + item.Status
 	})
+	return r.refreshEnvironmentStatuses(items)
 }
 
 func (r *MockRepository) GetEnvironment(id string) (domain.Environment, bool) {
-	return r.getEnvironment(id)
+	item, ok := r.getEnvironment(id)
+	if !ok {
+		return domain.Environment{}, false
+	}
+	return r.refreshEnvironmentStatuses([]domain.Environment{item})[0], true
 }
 
 func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Environment, error) {
@@ -171,7 +176,7 @@ func (r *MockRepository) UpdateEnvironmentCheck(id string, status string, checke
 		if r.environments[index].ID != id {
 			continue
 		}
-		r.environments[index].Status = firstNonEmpty(strings.TrimSpace(status), "UNKNOWN")
+		r.environments[index].Status = r.environmentStatusByScopeCache(r.environments[index], firstNonEmpty(strings.TrimSpace(status), "UNKNOWN"))
 		r.environments[index].LastCheckAt = checkedAt.Format(time.RFC3339)
 		return r.environments[index], true, nil
 	}
@@ -186,7 +191,11 @@ func (r *MockRepository) environmentStatusByScopeCache(item domain.Environment, 
 }
 
 func (r *MockRepository) environmentHasUnverifiedScopes(item domain.Environment) bool {
-	for _, binding := range item.Bindings {
+	bindings := item.Bindings
+	if len(bindings) == 0 {
+		bindings = defaultEnvironmentBindings(item)
+	}
+	for _, binding := range bindings {
 		switch binding.ResourceType {
 		case "K8S":
 			cluster, exists := r.GetKubernetesCluster(binding.ResourceID)
@@ -206,6 +215,13 @@ func (r *MockRepository) environmentHasUnverifiedScopes(item domain.Environment)
 		}
 	}
 	return false
+}
+
+func (r *MockRepository) refreshEnvironmentStatuses(items []domain.Environment) []domain.Environment {
+	for index := range items {
+		items[index].Status = r.environmentStatusByScopeCache(items[index], items[index].Status)
+	}
+	return items
 }
 
 func (r *MockRepository) ListKubernetesClusters(query string) []domain.KubernetesCluster {

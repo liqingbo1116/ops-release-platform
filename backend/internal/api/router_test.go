@@ -819,30 +819,115 @@ func TestDeployStepActionsUpdateAgentTaskStatus(t *testing.T) {
 	}
 }
 
-func TestEnvironmentCheckRejectsMockIntegrations(t *testing.T) {
+func TestEnvironmentCheckUsesCachedScopesWithMockIntegrations(t *testing.T) {
 	router := newTestRouter()
 	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-local-prod/check", nil)
 	recorder := httptest.NewRecorder()
 
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "real environment integrations are not configured")
+	var payload struct {
+		Data struct {
+			Status string                         `json:"status"`
+			Checks []integration.IntegrationCheck `json:"checks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode check response: %v", err)
+	}
+	if payload.Data.Status != "HEALTHY" {
+		t.Fatalf("expected cached local check healthy, got %+v", payload.Data)
+	}
+	if len(payload.Data.Checks) != 2 {
+		t.Fatalf("expected cached local checks for configured scopes, got %+v", payload.Data.Checks)
+	}
 }
 
-func TestEnvironmentCheckRejectsRemoteEnvironment(t *testing.T) {
+func TestEnvironmentCheckUsesCachedScopesForRemoteEnvironment(t *testing.T) {
 	router := newTestRouter()
 	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-project-x-prod/check", nil)
 	recorder := httptest.NewRecorder()
 
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "remote environment checks are handled by agent")
+	var payload struct {
+		Data struct {
+			Status string                         `json:"status"`
+			Checks []integration.IntegrationCheck `json:"checks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode check response: %v", err)
+	}
+	if payload.Data.Status != "HEALTHY" {
+		t.Fatalf("expected cached remote check healthy, got %+v", payload.Data)
+	}
+	if len(payload.Data.Checks) != 2 {
+		t.Fatalf("expected remote harbor/jenkins checks only, got %+v", payload.Data.Checks)
+	}
+}
+
+func TestEnvironmentCheckMarksMissingRemoteJenkinsViewDegraded(t *testing.T) {
+	router := newTestRouter()
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-missing-jenkins-view","name":"缺失 Jenkins 视图环境","code":"missing-jenkins-view","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"view-not-found","status":"HEALTHY"}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create environment status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-missing-jenkins-view/check", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Status string                         `json:"status"`
+			Checks []integration.IntegrationCheck `json:"checks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode check response: %v", err)
+	}
+	if payload.Data.Status != "DEGRADED" {
+		t.Fatalf("expected missing jenkins view to degrade remote environment, got %+v", payload.Data)
+	}
+}
+
+func TestLocalEnvironmentMissingNamespaceIsListedAsDegraded(t *testing.T) {
+	router := newTestRouter()
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-missing-namespace","name":"缺失命名空间环境","code":"missing-namespace","type":"LOCAL","networkMode":"DIRECT","clusterId":"k8s-local-prod","namespace":"namespace-not-found","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create environment status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/environments/env-missing-namespace", nil)
+	getRecorder := httptest.NewRecorder()
+	router.ServeHTTP(getRecorder, getRequest)
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("expected get environment status 200, got %d: %s", getRecorder.Code, getRecorder.Body.String())
+	}
+	var payload struct {
+		Data domain.Environment `json:"data"`
+	}
+	if err := json.Unmarshal(getRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if payload.Data.Status != "DEGRADED" {
+		t.Fatalf("expected missing namespace to be listed as degraded, got %+v", payload.Data)
+	}
 }
 
 func TestCreateReleaseReturnsAgentTaskID(t *testing.T) {
