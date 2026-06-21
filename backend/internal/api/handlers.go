@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/goccy/go-yaml"
 
 	"ops-release-platform/backend/internal/agent"
 	"ops-release-platform/backend/internal/domain"
@@ -402,7 +403,11 @@ func (h *Handler) environmentWithIntegrationResources(environment domain.Environ
 }
 
 func (h *Handler) ListKubernetesClusters(c *gin.Context) {
-	OK(c, paginate(h.repo.ListKubernetesClusters(c.Query("keyword")), c))
+	items := h.repo.ListKubernetesClusters(c.Query("keyword"))
+	for index := range items {
+		items[index] = resolveKubernetesClusterAPIServer(items[index])
+	}
+	OK(c, paginate(items, c))
 }
 
 func (h *Handler) CreateKubernetesCluster(c *gin.Context) {
@@ -411,18 +416,19 @@ func (h *Handler) CreateKubernetesCluster(c *gin.Context) {
 		BadRequest(c, "invalid kubernetes cluster request")
 		return
 	}
-	item, err := h.repo.CreateKubernetesCluster(domain.KubernetesCluster{
+	input := resolveKubernetesClusterAPIServer(domain.KubernetesCluster{
 		ID:         request.ID,
 		Name:       request.Name,
 		APIServer:  request.APIServer,
 		Context:    request.Context,
 		Kubeconfig: request.Kubeconfig,
 	})
+	item, err := h.repo.CreateKubernetesCluster(input)
 	if err != nil {
 		BadRequest(c, "invalid kubernetes cluster request")
 		return
 	}
-	Created(c, item)
+	Created(c, resolveKubernetesClusterAPIServer(item))
 }
 
 func (h *Handler) UpdateKubernetesCluster(c *gin.Context) {
@@ -431,13 +437,14 @@ func (h *Handler) UpdateKubernetesCluster(c *gin.Context) {
 		BadRequest(c, "invalid kubernetes cluster request")
 		return
 	}
-	item, ok, err := h.repo.UpdateKubernetesCluster(c.Param("id"), domain.KubernetesCluster{
+	input := resolveKubernetesClusterAPIServer(domain.KubernetesCluster{
 		ID:         request.ID,
 		Name:       request.Name,
 		APIServer:  request.APIServer,
 		Context:    request.Context,
 		Kubeconfig: request.Kubeconfig,
 	})
+	item, ok, err := h.repo.UpdateKubernetesCluster(c.Param("id"), input)
 	if err != nil {
 		BadRequest(c, "invalid kubernetes cluster request")
 		return
@@ -446,7 +453,23 @@ func (h *Handler) UpdateKubernetesCluster(c *gin.Context) {
 		NotFound(c, "kubernetes cluster not found")
 		return
 	}
-	OK(c, item)
+	OK(c, resolveKubernetesClusterAPIServer(item))
+}
+
+func resolveKubernetesClusterAPIServer(item domain.KubernetesCluster) domain.KubernetesCluster {
+	if strings.TrimSpace(item.APIServer) != "" || strings.TrimSpace(item.Kubeconfig) == "" {
+		return item
+	}
+	var parsed resourceKubeconfig
+	if err := yaml.Unmarshal([]byte(item.Kubeconfig), &parsed); err != nil {
+		return item
+	}
+	cluster, _, err := selectResourceKubeEntries(parsed, item.Context)
+	if err != nil {
+		return item
+	}
+	item.APIServer = strings.TrimSpace(cluster.Server)
+	return item
 }
 
 func (h *Handler) ListHarborRegistries(c *gin.Context) {

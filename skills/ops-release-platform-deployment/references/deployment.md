@@ -97,7 +97,16 @@ go run ./cmd/server
 
 ## Long Running Local Startup
 
-When the user asks to start the platform frontend and backend for later testing, start them as detached local processes so they survive the current Codex command session.
+When the user asks to start the platform frontend and backend for later testing, this is the fixed startup method. Start them as detached local processes so they survive the current Codex command session. Do not use plain background `go run ... &` from a tool command because the process may be cleaned up with the session.
+
+Before starting or restarting, check the real listener processes:
+
+```bash
+ss -ltnp | rg ':8080|:5173' || true
+ps -ef | rg 'go run ./cmd/server|/tmp/go-build|npm run dev|vite' | rg -v rg || true
+```
+
+If port `8080` is occupied by a compiled `server` child process from a previous `go run`, stop that actual listener before restarting. Stopping only the `go run` parent is not enough if the compiled child keeps listening.
 
 Backend:
 
@@ -123,7 +132,7 @@ tail -n 20 /tmp/ops-release-platform-frontend.log
 
 Do not use `GET /api/health` as the backend startup check unless that endpoint is added later; the current verified backend check is `GET /api/environments`.
 
-If a frontend startup log includes runtime mock fallback warnings from older release or baseline sample endpoints, do not treat that alone as a backend startup failure. Verify the real API being worked on, such as environment management, against the backend endpoint directly.
+If a frontend startup log includes runtime mock fallback warnings from older release or baseline sample endpoints, do not treat that alone as a backend startup failure. Verify the real API being worked on, such as environment management or K8s resource management, against the backend endpoint directly. For K8s resource field changes, verify `GET /api/kubernetes-clusters` and confirm the changed fields are present in the response.
 
 ## Agent Commands
 

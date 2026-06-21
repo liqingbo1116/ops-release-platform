@@ -520,6 +520,15 @@ current-context: local-context
 	if createRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected kubernetes create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
 	}
+	var createPayload struct {
+		Data domain.KubernetesCluster `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode kubernetes create response: %v", err)
+	}
+	if createPayload.Data.APIServer != kubernetesAPI.URL {
+		t.Fatalf("expected kubernetes api server %q, got %q", kubernetesAPI.URL, createPayload.Data.APIServer)
+	}
 	if strings.Contains(createRecorder.Body.String(), "test-token") || strings.Contains(createRecorder.Body.String(), "kubeconfig") {
 		t.Fatalf("expected kubeconfig secret fields not to be returned: %s", createRecorder.Body.String())
 	}

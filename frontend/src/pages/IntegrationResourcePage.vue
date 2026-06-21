@@ -18,6 +18,9 @@
         <el-card shadow="never">
           <el-table v-loading="loading" :data="kubernetesClusters" class="wide-table">
             <el-table-column prop="name" label="名称" min-width="150" />
+            <el-table-column label="API Server" min-width="260">
+              <template #default="{ row }">{{ resourceText(row.apiServer) }}</template>
+            </el-table-column>
             <el-table-column label="命名空间" min-width="110">
               <template #default="{ row }">{{ row.namespaces.length }}</template>
             </el-table-column>
@@ -204,6 +207,10 @@ function resourceKindName(kind: IntegrationResourceKind) {
 
 function formatCheckTime(value: string) {
   return value ? formatDateTime(value) : '-'
+}
+
+function resourceText(value: string) {
+  return value?.trim() || '-'
 }
 
 function resourceActionKey(kind: IntegrationResourceKind, id: string, action: ResourceAction) {

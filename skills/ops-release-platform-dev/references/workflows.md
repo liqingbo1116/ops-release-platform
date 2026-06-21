@@ -57,7 +57,7 @@ Strict rule:
 - Backend must be started with Go commands, normally `go run ./cmd/server`.
 - Do not use docker-compose to start frontend or backend during development.
 - Use `ops-release-platform-deployment` for detailed runtime and deployment rules.
-- When the user asks to start frontend/backend, use the exact startup rules in `../ops-release-platform-deployment/references/deployment.md`. Do not improvise a different working directory, omit `.secrets/local-dev-env.ps1`, use `/api/health` as validation, or start processes in a way that is cleaned up when the tool session exits.
+- When the user asks to start frontend/backend, use the exact long-running startup rules in `../ops-release-platform-deployment/references/deployment.md`. Do not improvise a different working directory, omit `.secrets/local-dev-env.ps1`, use `/api/health` as validation, or start processes in a way that is cleaned up when the tool session exits.
 
 Before starting the backend in PowerShell, load the local secret environment file:
 
@@ -197,6 +197,8 @@ go run ./cmd/server
 ```
 
 For background processes that must keep running after the current tool command exits, use the deployment skill's `setsid -f bash -lc ...` commands and log files under `/tmp/`. Verify backend with `GET /api/environments`; `/api/health` is not a valid backend startup check in the current project.
+
+When validating a recently changed API, also request that exact business endpoint. For example, after changing K8s resource fields, verify `GET /api/kubernetes-clusters` instead of relying only on frontend refresh or generic health checks.
 
 Tests:
 
