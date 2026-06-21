@@ -3,11 +3,14 @@
     <div v-if="environment" class="drawer-stack">
       <div class="kv"><span>环境标识</span><strong>{{ environment.code }}</strong></div>
       <div class="kv"><span>环境类型</span><strong>{{ isLocalEnvironment ? '本地环境' : '远程环境' }}</strong></div>
+      <div class="kv"><span>环境状态</span><StatusTag :status="environment.status" /></div>
       <template v-if="isLocalEnvironment">
         <BindingList title="K8s 命名空间" :items="k8sBindings" empty-text="未关联 K8s 命名空间" />
         <BindingList title="Harbor 镜像项目" :items="harborBindings" empty-text="未关联 Harbor 镜像项目" />
         <BindingList title="Jenkins 流水线视图" :items="jenkinsBindings" empty-text="未关联 Jenkins 流水线视图" />
         <div class="kv"><span>最近测试</span><span>{{ checkTimeText }}</span></div>
+        <div class="check-help">{{ checkHelpText }}</div>
+        <DiagnosticList :items="diagnostics" />
         <el-button type="primary" :loading="checking" @click="emit('check', environment.id)">执行连接测试</el-button>
       </template>
       <template v-else>
@@ -16,6 +19,9 @@
         <BindingList title="Harbor 镜像项目" :items="harborBindings" empty-text="未关联 Harbor 镜像项目" />
         <BindingList title="Jenkins 流水线视图" :items="jenkinsBindings" empty-text="未关联 Jenkins 流水线视图" />
         <div class="kv"><span>最近上报</span><span>{{ checkTimeText }}</span></div>
+        <div class="check-help">{{ checkHelpText }}</div>
+        <DiagnosticList :items="diagnostics" />
+        <el-button type="primary" :loading="checking" @click="emit('check', environment.id)">执行连接测试</el-button>
       </template>
     </div>
   </el-drawer>
@@ -39,6 +45,7 @@ type Environment = {
   registryProject: string
   jenkinsId: string
   jenkinsView: string
+  status: string
   agentStatus: string
   lastCheckAt: string
   bindings?: EnvironmentResourceBinding[]
@@ -50,6 +57,13 @@ type BindingListItem = {
   isDefault: boolean
 }
 
+type EnvironmentDiagnostic = {
+  component: string
+  status: 'HEALTHY' | 'DEGRADED' | 'UNKNOWN'
+  message: string
+  nextStep: string
+}
+
 const visible = defineModel<boolean>('visible', { required: true })
 const emit = defineEmits<{
   check: [id: string]
@@ -58,6 +72,8 @@ const props = defineProps<{
   environment: Environment | null
   resourceName?: (resourceType: EnvironmentResourceBinding['resourceType'], resourceId: string) => string
   checking?: boolean
+  diagnostics: EnvironmentDiagnostic[]
+  checkHelpText?: string
 }>()
 
 const isLocalEnvironment = computed(() => props.environment?.type === 'LOCAL')
@@ -99,9 +115,116 @@ const BindingList = defineComponent({
     ])
   },
 })
+
+const DiagnosticList = defineComponent({
+  name: 'DiagnosticList',
+  props: {
+    items: { type: Array as PropType<EnvironmentDiagnostic[]>, required: true },
+  },
+  setup(listProps) {
+    return () => h('div', { class: 'diagnostic-block' }, [
+      h('div', { class: 'binding-title' }, '诊断结果'),
+      listProps.items.length > 0
+        ? h('div', { class: 'diagnostic-list' }, listProps.items.map((item) => h('div', { class: 'diagnostic-item' }, [
+          h('div', { class: 'diagnostic-head' }, [
+            h('strong', item.component),
+            h('span', { class: `diagnostic-status diagnostic-status-${item.status.toLowerCase()}` }, statusText(item.status)),
+          ]),
+          h('p', item.message),
+          h('small', `下一步：${item.nextStep}`),
+        ])))
+        : h('div', { class: 'binding-empty' }, '暂无诊断结果，请执行连接测试或刷新基础资源探测结果'),
+    ])
+  },
+})
+
+function statusText(status: EnvironmentDiagnostic['status']) {
+  if (status === 'HEALTHY') return '正常'
+  if (status === 'DEGRADED') return '需处理'
+  return '待确认'
+}
 </script>
 
 <style scoped>
+.check-help {
+  background: #f6f8fb;
+  border: 1px solid #e7ebf2;
+  border-radius: 6px;
+  color: #5f6878;
+  font-size: 13px;
+  line-height: 20px;
+  padding: 10px 12px;
+}
+
+.diagnostic-block {
+  border-top: 1px solid #edf0f5;
+  padding-top: 12px;
+}
+
+.diagnostic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diagnostic-item {
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.diagnostic-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.diagnostic-head strong {
+  color: #2f3847;
+  font-size: 13px;
+}
+
+.diagnostic-status {
+  border-radius: 10px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 20px;
+  padding: 0 8px;
+}
+
+.diagnostic-status-healthy {
+  background: #eef8f0;
+  color: #1f8a4c;
+}
+
+.diagnostic-status-degraded {
+  background: #fff4e5;
+  color: #b76a00;
+}
+
+.diagnostic-status-unknown {
+  background: #eef2f7;
+  color: #606a7b;
+}
+
+.diagnostic-item p {
+  color: #2f3847;
+  font-size: 13px;
+  line-height: 20px;
+  margin: 8px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.diagnostic-item small {
+  color: #7a8294;
+  display: block;
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
 .binding-block {
   border-top: 1px solid #edf0f5;
   padding-top: 12px;

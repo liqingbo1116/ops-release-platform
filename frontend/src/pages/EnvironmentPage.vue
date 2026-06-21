@@ -68,6 +68,14 @@
         <el-table-column label="状态" min-width="100">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
+        <el-table-column label="问题 / 下一步" min-width="320">
+          <template #default="{ row }">
+            <div class="diagnosis-cell">
+              <strong>{{ diagnosisSummary(row).message }}</strong>
+              <span>{{ diagnosisSummary(row).nextStep }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" fixed="right" width="170">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
@@ -82,6 +90,8 @@
       :environment="activeEnvironment"
       :resource-name="drawerResourceName"
       :checking="checkingEnvironment"
+      :diagnostics="activeDiagnostics"
+      :check-help-text="activeCheckHelpText"
       @check="handleCheckEnvironment"
     />
 
@@ -192,6 +202,7 @@ import {
   createEnvironment,
   listEnvironments,
   updateEnvironment,
+  type EnvironmentCheckResult,
   type EnvironmentInfo,
   type EnvironmentPayload,
   type EnvironmentResourceBinding,
@@ -220,11 +231,18 @@ const loading = ref(false)
 const submitting = ref(false)
 const checkingEnvironment = ref(false)
 const errorMessage = ref('')
+type EnvironmentDiagnostic = {
+  component: string
+  status: 'HEALTHY' | 'DEGRADED' | 'UNKNOWN'
+  message: string
+  nextStep: string
+}
 type EnvironmentForm = EnvironmentPayload & {
   namespaces: string[]
   registryProjects: string[]
   jenkinsViews: string[]
 }
+const checkResultsByEnvironmentId = ref<Record<string, EnvironmentDiagnostic[]>>({})
 
 const form = ref<EnvironmentForm>(emptyEnvironmentForm())
 
@@ -249,6 +267,17 @@ const filteredRows = computed(() => {
 const selectedNamespaces = computed(() => kubernetesClusters.value.find((item) => item.id === form.value.clusterId)?.namespaces ?? [])
 const selectedProjects = computed(() => harborRegistries.value.find((item) => item.id === form.value.registryId)?.projects ?? [])
 const selectedViews = computed(() => jenkinsInstances.value.find((item) => item.id === form.value.jenkinsId)?.views ?? [])
+const activeDiagnostics = computed(() => {
+  if (!activeEnvironment.value) return []
+  return environmentDiagnostics(activeEnvironment.value)
+})
+const activeCheckHelpText = computed(() => {
+  if (!activeEnvironment.value) return ''
+  if (activeEnvironment.value.type === 'LOCAL') {
+    return '本地环境连接测试表示平台后端直接校验已绑定的 K8s 命名空间、Harbor 镜像项目和 Jenkins 流水线视图。本地环境不依赖 Agent；当前未配置真实集成时，会使用基础资源最近探测结果判断这些范围是否存在。'
+  }
+  return '远程环境的 K8s 操作由 Agent 执行；连接测试主要校验本地 Harbor/Jenkins 资源范围和 Agent 在线状态。'
+})
 
 function emptyEnvironmentForm(): EnvironmentForm {
   return {
@@ -316,6 +345,92 @@ function resourceDisplayName(resourceType: EnvironmentResourceBinding['resourceT
 
 function drawerResourceName(resourceType: EnvironmentResourceBinding['resourceType'], resourceId: string) {
   return resourceDisplayName(resourceType, resourceId)
+}
+
+function diagnosisSummary(row: EnvironmentInfo) {
+  const diagnostics = environmentDiagnostics(row)
+  const problem = diagnostics.find((item) => item.status !== 'HEALTHY')
+  if (problem) return { message: problem.message, nextStep: problem.nextStep }
+  if (row.status === 'HEALTHY') return { message: '当前未发现问题', nextStep: '可用于后续服务关联、发布和部署' }
+  return {
+    message: '环境待验证，尚未发现明确缺失项',
+    nextStep: '请在详情中执行连接测试；如仍待验证，请到基础资源刷新探测结果',
+  }
+}
+
+function environmentDiagnostics(row: EnvironmentInfo): EnvironmentDiagnostic[] {
+  const latestChecks = checkResultsByEnvironmentId.value[row.id]
+  if (latestChecks) return latestChecks
+  const diagnostics: EnvironmentDiagnostic[] = []
+  if (row.type === 'PROJECT') {
+    diagnostics.push({
+      component: 'Agent',
+      status: row.agentStatus === 'ONLINE' ? 'HEALTHY' : 'DEGRADED',
+      message: row.agentStatus === 'ONLINE' ? '远程 Agent 在线' : `远程 Agent 当前状态为 ${row.agentStatus || '未知'}`,
+      nextStep: row.agentStatus === 'ONLINE'
+        ? '可继续校验 Harbor/Jenkins 资源范围'
+        : '请启动并注册该环境 Agent，确认 Agent 配置的环境 ID 与详情中的 Agent 环境 ID 一致',
+    })
+  }
+  if (row.type === 'LOCAL') {
+    appendScopeDiagnostics(diagnostics, row, 'K8S')
+  }
+  appendScopeDiagnostics(diagnostics, row, 'HARBOR')
+  appendScopeDiagnostics(diagnostics, row, 'JENKINS')
+  return diagnostics
+}
+
+function appendScopeDiagnostics(
+  output: EnvironmentDiagnostic[],
+  row: EnvironmentInfo,
+  resourceType: EnvironmentResourceBinding['resourceType'],
+) {
+  for (const binding of bindingsForDiagnostics(row, resourceType)) {
+    const availableValues = availableScopes(resourceType, binding.resourceId)
+    const label = scopeLabel(resourceType)
+    const exists = availableValues.includes(binding.scopeValue)
+    output.push({
+      component: label,
+      status: exists ? 'HEALTHY' : 'DEGRADED',
+      message: exists
+        ? `${label} ${binding.scopeValue} 已在最近探测结果中发现`
+        : `${label} ${binding.scopeValue} 未在最近探测结果中发现`,
+      nextStep: exists ? '无需处理' : missingScopeNextStep(resourceType),
+    })
+  }
+}
+
+function bindingsForDiagnostics(row: EnvironmentInfo, resourceType: EnvironmentResourceBinding['resourceType']) {
+  const bindings = row.bindings?.filter((item) => item.resourceType === resourceType) ?? []
+  if (bindings.length > 0) return bindings
+  if (resourceType === 'K8S' && row.clusterId && row.namespace) {
+    return [{ resourceType, resourceId: row.clusterId, scopeType: 'NAMESPACE' as const, scopeValue: row.namespace, isDefault: true }]
+  }
+  if (resourceType === 'HARBOR' && row.registryId && row.registryProject) {
+    return [{ resourceType, resourceId: row.registryId, scopeType: 'PROJECT' as const, scopeValue: row.registryProject, isDefault: true }]
+  }
+  if (resourceType === 'JENKINS' && row.jenkinsId && row.jenkinsView) {
+    return [{ resourceType, resourceId: row.jenkinsId, scopeType: 'VIEW' as const, scopeValue: row.jenkinsView, isDefault: true }]
+  }
+  return []
+}
+
+function availableScopes(resourceType: EnvironmentResourceBinding['resourceType'], resourceId: string) {
+  if (resourceType === 'K8S') return kubernetesClusters.value.find((item) => item.id === resourceId)?.namespaces ?? []
+  if (resourceType === 'HARBOR') return harborRegistries.value.find((item) => item.id === resourceId)?.projects ?? []
+  return jenkinsInstances.value.find((item) => item.id === resourceId)?.views ?? []
+}
+
+function scopeLabel(resourceType: EnvironmentResourceBinding['resourceType']) {
+  if (resourceType === 'K8S') return 'K8s 命名空间'
+  if (resourceType === 'HARBOR') return 'Harbor 镜像项目'
+  return 'Jenkins 流水线视图'
+}
+
+function missingScopeNextStep(resourceType: EnvironmentResourceBinding['resourceType']) {
+  if (resourceType === 'K8S') return '请到基础资源刷新 K8s 探测；若仍不存在，请在集群中创建命名空间或修改环境绑定'
+  if (resourceType === 'HARBOR') return '请到基础资源刷新 Harbor 探测；若仍不存在，请在 Harbor 创建镜像项目或修改环境绑定'
+  return '请到基础资源刷新 Jenkins 探测；若仍不存在，请在 Jenkins 创建流水线视图或修改环境绑定'
 }
 
 function applyEnvironmentTypeDefaults(type: EnvironmentPayload['type']) {
@@ -535,13 +650,44 @@ async function handleCheckEnvironment(id: string) {
   checkingEnvironment.value = true
   try {
     const result = await checkEnvironment(id)
-    ElMessage.success(`连接测试完成：${result.status}`)
+    checkResultsByEnvironmentId.value[id] = diagnosticsFromCheckResult(result)
+    const problemCount = checkResultsByEnvironmentId.value[id].filter((item) => item.status !== 'HEALTHY').length
+    if (problemCount > 0) {
+      ElMessage.warning(`连接测试完成：发现 ${problemCount} 个问题，请查看详情诊断结果`)
+    } else {
+      ElMessage.success('连接测试完成：未发现问题')
+    }
     await loadAll()
+    activeEnvironment.value = environments.value.find((item) => item.id === id) ?? activeEnvironment.value
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '连接测试失败')
+    const message = error instanceof Error ? error.message : '连接测试失败'
+    checkResultsByEnvironmentId.value[id] = [{
+      component: '连接测试',
+      status: 'DEGRADED',
+      message: `连接测试失败：${message}`,
+      nextStep: '请检查基础资源配置、远程 Agent 状态或后端集成配置后重新测试',
+    }]
+    ElMessage.error(message)
   } finally {
     checkingEnvironment.value = false
   }
+}
+
+function diagnosticsFromCheckResult(result: EnvironmentCheckResult): EnvironmentDiagnostic[] {
+  return result.checks.map((item) => ({
+    component: item.component || item.name || '连接测试',
+    status: item.status === 'HEALTHY' ? 'HEALTHY' : item.status === 'DEGRADED' ? 'DEGRADED' : 'UNKNOWN',
+    message: item.message || `${item.component || item.name || '连接测试'} 状态为 ${item.status}`,
+    nextStep: item.status === 'HEALTHY' ? '无需处理' : nextStepForCheckMessage(`${item.component || item.name || ''} ${item.message}`),
+  }))
+}
+
+function nextStepForCheckMessage(message = '') {
+  if (message.includes('K8s') || message.includes('命名空间')) return missingScopeNextStep('K8S')
+  if (message.includes('Harbor') || message.includes('镜像项目')) return missingScopeNextStep('HARBOR')
+  if (message.includes('Jenkins') || message.includes('流水线视图')) return missingScopeNextStep('JENKINS')
+  if (message.includes('Agent')) return '请启动并注册该环境 Agent，确认 Agent 配置的环境 ID 与详情中的 Agent 环境 ID 一致'
+  return '请根据失败信息检查基础资源配置，修正后重新执行连接测试'
 }
 
 function generateEnvironmentCode(name: string, type: EnvironmentPayload['type']) {
@@ -617,6 +763,25 @@ onMounted(loadAll)
 
 .environment-alert {
   margin-bottom: 12px;
+}
+
+.diagnosis-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 18px;
+}
+
+.diagnosis-cell strong {
+  color: #2f3847;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.diagnosis-cell span {
+  color: #7a8294;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .form-tip {

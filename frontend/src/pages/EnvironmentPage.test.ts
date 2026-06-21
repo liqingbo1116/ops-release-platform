@@ -298,6 +298,170 @@ describe('EnvironmentPage', () => {
     expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('环境已保存，但存在未验证的资源范围'))
   })
 
+  it('shows local environment missing namespace reason and next step', async () => {
+    listKubernetesClusters.mockResolvedValue([
+      { id: 'k8s-local', name: '本地 k3s', status: 'HEALTHY', namespaces: ['default'] },
+    ])
+    listHarborRegistries.mockResolvedValue([
+      { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listEnvironments.mockResolvedValue([
+      {
+        id: 'env-local-missing',
+        name: '本地缺失环境',
+        code: 'local-missing',
+        type: 'LOCAL',
+        networkMode: 'DIRECT',
+        clusterId: 'k8s-local',
+        namespace: 'missing-ns',
+        registryId: 'harbor-local',
+        registryProject: 'project-x',
+        status: 'UNKNOWN',
+        agentStatus: 'NOT_REQUIRED',
+        lastCheckAt: '',
+        bindings: [
+          {
+            resourceType: 'K8S',
+            resourceId: 'k8s-local',
+            scopeType: 'NAMESPACE',
+            scopeValue: 'missing-ns',
+            isDefault: true,
+          },
+          {
+            resourceType: 'HARBOR',
+            resourceId: 'harbor-local',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+        ],
+      },
+    ])
+    const wrapper = mount(EnvironmentPage, {
+      global: {
+        stubs: {
+          EnvironmentConfigDrawer: true,
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('K8s 命名空间 missing-ns 未在最近探测结果中发现')
+    expect(wrapper.text()).toContain('请到基础资源刷新 K8s 探测')
+  })
+
+  it('shows remote environment missing jenkins view reason and next step', async () => {
+    listHarborRegistries.mockResolvedValue([
+      { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listJenkinsInstances.mockResolvedValue([
+      { id: 'jenkins-local', name: '本地 Jenkins', status: 'HEALTHY', views: ['project-x'] },
+    ])
+    listEnvironments.mockResolvedValue([
+      {
+        id: 'env-remote-missing',
+        name: '远程缺失环境',
+        code: 'remote-missing',
+        type: 'PROJECT',
+        networkMode: 'AGENT',
+        registryId: 'harbor-local',
+        registryProject: 'project-x',
+        jenkinsId: 'jenkins-local',
+        jenkinsView: 'missing-view',
+        status: 'UNKNOWN',
+        agentStatus: 'ONLINE',
+        lastCheckAt: '',
+        bindings: [
+          {
+            resourceType: 'HARBOR',
+            resourceId: 'harbor-local',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'JENKINS',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'missing-view',
+            isDefault: true,
+          },
+        ],
+      },
+    ])
+    const wrapper = mount(EnvironmentPage, {
+      global: {
+        stubs: {
+          EnvironmentConfigDrawer: true,
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Jenkins 流水线视图 missing-view 未在最近探测结果中发现')
+    expect(wrapper.text()).toContain('请到基础资源刷新 Jenkins 探测')
+  })
+
+  it('passes local connection test explanation to the detail drawer', async () => {
+    listKubernetesClusters.mockResolvedValue([
+      { id: 'k8s-local', name: '本地 k3s', status: 'HEALTHY', namespaces: ['default'] },
+    ])
+    listHarborRegistries.mockResolvedValue([
+      { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listEnvironments.mockResolvedValue([
+      {
+        id: 'env-local-detail',
+        name: '本地详情环境',
+        code: 'local-detail',
+        type: 'LOCAL',
+        networkMode: 'DIRECT',
+        clusterId: 'k8s-local',
+        namespace: 'default',
+        registryId: 'harbor-local',
+        registryProject: 'project-x',
+        status: 'UNKNOWN',
+        agentStatus: 'NOT_REQUIRED',
+        lastCheckAt: '',
+        bindings: [],
+      },
+    ])
+    const wrapper = mount(EnvironmentPage, {
+      global: {
+        stubs: {
+          EnvironmentConfigDrawer: {
+            template: '<aside>{{ checkHelpText }} {{ diagnostics.map((item) => item.message).join(" ") }}</aside>',
+            props: ['environment', 'resourceName', 'checking', 'diagnostics', 'checkHelpText'],
+          },
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+    ;(wrapper.vm as unknown as { openDrawer: (row: unknown) => void; environments: unknown[] }).openDrawer(
+      (wrapper.vm as unknown as { environments: unknown[] }).environments[0],
+    )
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('本地环境连接测试表示平台后端直接校验')
+    expect(wrapper.text()).toContain('本地环境不依赖 Agent')
+    expect(wrapper.text()).toContain('K8s 命名空间 default 已在最近探测结果中发现')
+  })
+
   it('creates local environments with selected platform integration resources', async () => {
     listKubernetesClusters.mockResolvedValue([
       { id: 'k8s-local', name: '本地 k3s', status: 'HEALTHY', namespaces: ['default', 'project-x'] },
