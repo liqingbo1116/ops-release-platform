@@ -71,8 +71,23 @@
         <el-table-column label="问题 / 下一步" min-width="320">
           <template #default="{ row }">
             <div class="diagnosis-cell">
-              <strong>{{ diagnosisSummary(row).message }}</strong>
-              <span>{{ diagnosisSummary(row).nextStep }}</span>
+              <template v-if="problemDiagnostics(row).length > 0">
+                <strong>{{ problemSummary(row).title }}</strong>
+                <span>{{ problemSummary(row).nextStep }}</span>
+                <el-button
+                  v-if="refreshableProblemTargets(row).length > 0"
+                  link
+                  type="primary"
+                  :loading="refreshingEnvironmentId === row.id"
+                  @click="handleRefreshProblemResources(row)"
+                >
+                  刷新相关探测
+                </el-button>
+              </template>
+              <template v-else>
+                <strong>当前未发现问题</strong>
+                <span>可用于后续服务关联、发布和部署</span>
+              </template>
             </div>
           </template>
         </el-table-column>
@@ -211,6 +226,9 @@ import {
   listHarborRegistries,
   listJenkinsInstances,
   listKubernetesClusters,
+  refreshHarborRegistry,
+  refreshJenkinsInstance,
+  refreshKubernetesCluster,
   type HarborRegistry,
   type IntegrationResource,
   type JenkinsInstance,
@@ -230,12 +248,15 @@ const jenkinsInstances = ref<JenkinsInstance[]>([])
 const loading = ref(false)
 const submitting = ref(false)
 const checkingEnvironment = ref(false)
+const refreshingEnvironmentId = ref('')
 const errorMessage = ref('')
 type EnvironmentDiagnostic = {
   component: string
   status: 'HEALTHY' | 'DEGRADED' | 'UNKNOWN'
   message: string
   nextStep: string
+  resourceType?: EnvironmentResourceBinding['resourceType']
+  resourceId?: string
 }
 type EnvironmentForm = EnvironmentPayload & {
   namespaces: string[]
@@ -274,9 +295,9 @@ const activeDiagnostics = computed(() => {
 const activeCheckHelpText = computed(() => {
   if (!activeEnvironment.value) return ''
   if (activeEnvironment.value.type === 'LOCAL') {
-    return '本地环境连接测试表示平台后端直接校验已绑定的 K8s 命名空间、Harbor 镜像项目和 Jenkins 流水线视图。本地环境不依赖 Agent；当前未配置真实集成时，会使用基础资源最近探测结果判断这些范围是否存在。'
+    return '本地连接测试：平台后端直接校验已绑定的 K8s、Harbor、Jenkins 范围，不依赖 Agent。'
   }
-  return '远程环境的 K8s 操作由 Agent 执行；连接测试主要校验本地 Harbor/Jenkins 资源范围和 Agent 在线状态。'
+  return '远程连接测试：校验 Agent 在线状态，以及本地 Harbor/Jenkins 范围是否可用。'
 })
 
 function emptyEnvironmentForm(): EnvironmentForm {
@@ -347,15 +368,33 @@ function drawerResourceName(resourceType: EnvironmentResourceBinding['resourceTy
   return resourceDisplayName(resourceType, resourceId)
 }
 
-function diagnosisSummary(row: EnvironmentInfo) {
-  const diagnostics = environmentDiagnostics(row)
-  const problem = diagnostics.find((item) => item.status !== 'HEALTHY')
-  if (problem) return { message: problem.message, nextStep: problem.nextStep }
-  if (row.status === 'HEALTHY') return { message: '当前未发现问题', nextStep: '可用于后续服务关联、发布和部署' }
-  return {
-    message: '环境待验证，尚未发现明确缺失项',
-    nextStep: '请在详情中执行连接测试；如仍待验证，请到基础资源刷新探测结果',
+function problemDiagnostics(row: EnvironmentInfo) {
+  return environmentDiagnostics(row).filter((item) => item.status !== 'HEALTHY')
+}
+
+function problemSummary(row: EnvironmentInfo) {
+  const problems = problemDiagnostics(row)
+  if (problems.length > 0) {
+    return {
+      title: problems.map((item) => item.message).join('；'),
+      nextStep: compactNextStep(problems),
+    }
   }
+  return {
+    title: row.status === 'HEALTHY' ? '当前未发现问题' : '环境待验证，尚未发现明确缺失项',
+    nextStep: row.status === 'HEALTHY' ? '可用于后续服务关联、发布和部署' : '请执行连接测试或刷新基础资源探测结果',
+  }
+}
+
+function compactNextStep(problems: EnvironmentDiagnostic[]) {
+  const steps = Array.from(new Set(problems.map((item) => item.nextStep).filter(Boolean)))
+  if (steps.length === 0) return '请检查环境绑定和基础资源探测结果'
+  if (steps.length === 1) return steps[0]
+  const hasAgentProblem = problems.some((item) => item.component === 'Agent')
+  const hasResourceProblem = problems.some((item) => item.resourceType && item.resourceId)
+  if (hasAgentProblem && hasResourceProblem) return '请先启动或注册 Agent，并刷新相关基础资源探测'
+  if (hasResourceProblem) return '请刷新相关基础资源探测；若仍不存在，请创建资源范围或修改环境绑定'
+  return steps.join('；')
 }
 
 function environmentDiagnostics(row: EnvironmentInfo): EnvironmentDiagnostic[] {
@@ -396,8 +435,23 @@ function appendScopeDiagnostics(
         ? `${label} ${binding.scopeValue} 已在最近探测结果中发现`
         : `${label} ${binding.scopeValue} 未在最近探测结果中发现`,
       nextStep: exists ? '无需处理' : missingScopeNextStep(resourceType),
+      resourceType,
+      resourceId: binding.resourceId,
     })
   }
+}
+
+function refreshableProblemTargets(row: EnvironmentInfo) {
+  const targetKeys = new Set<string>()
+  const targets: Array<{ resourceType: EnvironmentResourceBinding['resourceType']; resourceId: string }> = []
+  for (const item of problemDiagnostics(row)) {
+    if (!item.resourceType || !item.resourceId) continue
+    const key = `${item.resourceType}:${item.resourceId}`
+    if (targetKeys.has(key)) continue
+    targetKeys.add(key)
+    targets.push({ resourceType: item.resourceType, resourceId: item.resourceId })
+  }
+  return targets
 }
 
 function bindingsForDiagnostics(row: EnvironmentInfo, resourceType: EnvironmentResourceBinding['resourceType']) {
@@ -670,6 +724,34 @@ async function handleCheckEnvironment(id: string) {
     ElMessage.error(message)
   } finally {
     checkingEnvironment.value = false
+  }
+}
+
+async function handleRefreshProblemResources(row: EnvironmentInfo) {
+  const targets = refreshableProblemTargets(row)
+  if (targets.length === 0) {
+    ElMessage.warning('当前问题不需要刷新基础资源探测')
+    return
+  }
+  refreshingEnvironmentId.value = row.id
+  try {
+    await Promise.all(targets.map((target) => refreshProblemTarget(target.resourceType, target.resourceId)))
+    ElMessage.success('相关基础资源探测已刷新')
+    await loadAll()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '刷新探测失败')
+  } finally {
+    refreshingEnvironmentId.value = ''
+  }
+}
+
+async function refreshProblemTarget(resourceType: EnvironmentResourceBinding['resourceType'], resourceId: string) {
+  if (resourceType === 'K8S') {
+    await refreshKubernetesCluster(resourceId)
+  } else if (resourceType === 'HARBOR') {
+    await refreshHarborRegistry(resourceId)
+  } else {
+    await refreshJenkinsInstance(resourceId)
   }
 }
 

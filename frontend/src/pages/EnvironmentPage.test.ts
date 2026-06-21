@@ -8,10 +8,20 @@ const { listEnvironments, createEnvironment, updateEnvironment, checkEnvironment
   checkEnvironment: vi.fn(),
 }))
 
-const { listKubernetesClusters, listHarborRegistries, listJenkinsInstances } = vi.hoisted(() => ({
+const {
+  listKubernetesClusters,
+  listHarborRegistries,
+  listJenkinsInstances,
+  refreshKubernetesCluster,
+  refreshHarborRegistry,
+  refreshJenkinsInstance,
+} = vi.hoisted(() => ({
   listKubernetesClusters: vi.fn(),
   listHarborRegistries: vi.fn(),
   listJenkinsInstances: vi.fn(),
+  refreshKubernetesCluster: vi.fn(),
+  refreshHarborRegistry: vi.fn(),
+  refreshJenkinsInstance: vi.fn(),
 }))
 
 vi.mock('@/api/environments', () => ({
@@ -25,6 +35,9 @@ vi.mock('@/api/integrationResources', () => ({
   listKubernetesClusters,
   listHarborRegistries,
   listJenkinsInstances,
+  refreshKubernetesCluster,
+  refreshHarborRegistry,
+  refreshJenkinsInstance,
 }))
 
 vi.mock('element-plus', async (importOriginal) => {
@@ -51,9 +64,15 @@ describe('EnvironmentPage', () => {
     listKubernetesClusters.mockReset()
     listHarborRegistries.mockReset()
     listJenkinsInstances.mockReset()
+    refreshKubernetesCluster.mockReset()
+    refreshHarborRegistry.mockReset()
+    refreshJenkinsInstance.mockReset()
     listKubernetesClusters.mockResolvedValue([])
     listHarborRegistries.mockResolvedValue([])
     listJenkinsInstances.mockResolvedValue([])
+    refreshKubernetesCluster.mockResolvedValue({})
+    refreshHarborRegistry.mockResolvedValue({})
+    refreshJenkinsInstance.mockResolvedValue({})
     listEnvironments.mockResolvedValue([
       {
         id: 'env-local-prod',
@@ -298,12 +317,15 @@ describe('EnvironmentPage', () => {
     expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('环境已保存，但存在未验证的资源范围'))
   })
 
-  it('shows local environment missing namespace reason and next step', async () => {
+  it('shows all local environment missing scopes and allows refreshing related probes', async () => {
     listKubernetesClusters.mockResolvedValue([
       { id: 'k8s-local', name: '本地 k3s', status: 'HEALTHY', namespaces: ['default'] },
     ])
     listHarborRegistries.mockResolvedValue([
       { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listJenkinsInstances.mockResolvedValue([
+      { id: 'jenkins-local', name: '本地 Jenkins', status: 'HEALTHY', views: ['project-x'] },
     ])
     listEnvironments.mockResolvedValue([
       {
@@ -316,6 +338,8 @@ describe('EnvironmentPage', () => {
         namespace: 'missing-ns',
         registryId: 'harbor-local',
         registryProject: 'project-x',
+        jenkinsId: 'jenkins-local',
+        jenkinsView: 'missing-view',
         status: 'UNKNOWN',
         agentStatus: 'NOT_REQUIRED',
         lastCheckAt: '',
@@ -332,6 +356,13 @@ describe('EnvironmentPage', () => {
             resourceId: 'harbor-local',
             scopeType: 'PROJECT',
             scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'JENKINS',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'missing-view',
             isDefault: true,
           },
         ],
@@ -352,7 +383,17 @@ describe('EnvironmentPage', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('K8s 命名空间 missing-ns 未在最近探测结果中发现')
-    expect(wrapper.text()).toContain('请到基础资源刷新 K8s 探测')
+    expect(wrapper.text()).toContain('Jenkins 流水线视图 missing-view 未在最近探测结果中发现')
+    expect(wrapper.text()).toContain('请刷新相关基础资源探测')
+    expect(wrapper.text()).toContain('刷新相关探测')
+
+    await wrapper.findAll('button').find((item) => item.text().includes('刷新相关探测'))?.trigger('click')
+    await flushPromises()
+
+    expect(refreshKubernetesCluster).toHaveBeenCalledWith('k8s-local')
+    expect(refreshJenkinsInstance).toHaveBeenCalledWith('jenkins-local')
+    expect(refreshHarborRegistry).not.toHaveBeenCalled()
+    expect(ElMessage.success).toHaveBeenCalledWith('相关基础资源探测已刷新')
   })
 
   it('shows remote environment missing jenkins view reason and next step', async () => {
@@ -457,8 +498,7 @@ describe('EnvironmentPage', () => {
     )
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('本地环境连接测试表示平台后端直接校验')
-    expect(wrapper.text()).toContain('本地环境不依赖 Agent')
+    expect(wrapper.text()).toContain('本地连接测试：平台后端直接校验已绑定的 K8s、Harbor、Jenkins 范围，不依赖 Agent。')
     expect(wrapper.text()).toContain('K8s 命名空间 default 已在最近探测结果中发现')
   })
 
