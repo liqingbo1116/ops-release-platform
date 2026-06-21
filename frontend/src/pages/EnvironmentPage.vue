@@ -41,57 +41,64 @@
         </div>
       </div>
       <el-alert v-if="errorMessage" class="environment-alert" type="warning" :closable="false" :title="errorMessage" />
-      <el-table v-loading="loading" :data="filteredRows" class="wide-table">
-        <el-table-column prop="name" label="环境" min-width="150" />
-        <el-table-column prop="code" label="环境标识" min-width="150" />
-        <el-table-column label="类型" min-width="110">
-          <template #default="{ row }">{{ environmentTypeLabel(row.type) }}</template>
+      <el-table v-loading="loading" :data="filteredRows" class="environment-table">
+        <el-table-column label="环境与状态" min-width="300">
+          <template #default="{ row }">
+            <div class="environment-cell">
+              <div class="environment-title">
+                <strong>{{ row.name }}</strong>
+                <StatusTag :status="row.status" />
+              </div>
+              <div class="environment-meta">
+                <span>{{ row.code }}</span>
+                <span>{{ environmentTypeLabel(row.type) }}</span>
+                <span>{{ deployTargetTypeLabel(row.deployTargetType) }}</span>
+              </div>
+              <div class="environment-problem" :class="{ healthy: problemDiagnostics(row).length === 0 }">
+                <strong>{{ problemSummary(row).title }}</strong>
+              </div>
+              <el-button
+                v-if="refreshableProblemTargets(row).length > 0"
+                link
+                type="primary"
+                class="inline-action"
+                :loading="refreshingEnvironmentId === row.id"
+                @click="handleRefreshProblemResources(row)"
+              >
+                刷新相关探测
+              </el-button>
+            </div>
+          </template>
         </el-table-column>
-        <el-table-column label="部署目标" min-width="110">
-          <template #default="{ row }">{{ deployTargetTypeLabel(row.deployTargetType) }}</template>
+        <el-table-column label="资源范围" min-width="300">
+          <template #default="{ row }">
+            <div class="resource-cell">
+              <div v-if="row.type === 'LOCAL'">
+                <span>K8s</span>
+                <strong>{{ scopedResourceText(row, 'k8s') }}</strong>
+              </div>
+              <div v-else>
+                <span>K8s</span>
+                <strong>远程 Agent 执行</strong>
+              </div>
+              <div>
+                <span>Harbor</span>
+                <strong>{{ scopedResourceText(row, 'harbor') }}</strong>
+              </div>
+              <div>
+                <span>Jenkins</span>
+                <strong>{{ scopedResourceText(row, 'jenkins') }}</strong>
+              </div>
+            </div>
+          </template>
         </el-table-column>
-        <el-table-column label="K8s / 命名空间" min-width="210">
-          <template #default="{ row }">{{ scopedResourceText(row, 'k8s') }}</template>
-        </el-table-column>
-        <el-table-column label="Harbor / 镜像项目" min-width="210">
-          <template #default="{ row }">{{ scopedResourceText(row, 'harbor') }}</template>
-        </el-table-column>
-        <el-table-column label="Jenkins / 流水线视图" min-width="210">
-          <template #default="{ row }">{{ scopedResourceText(row, 'jenkins') }}</template>
-        </el-table-column>
-        <el-table-column label="Agent" min-width="100">
+        <el-table-column label="Agent" width="110">
           <template #default="{ row }">
             <span v-if="row.type === 'LOCAL'">无需 Agent</span>
             <StatusTag v-else :status="row.agentStatus" />
           </template>
         </el-table-column>
-        <el-table-column label="状态" min-width="100">
-          <template #default="{ row }"><StatusTag :status="row.status" /></template>
-        </el-table-column>
-        <el-table-column label="问题 / 下一步" min-width="320">
-          <template #default="{ row }">
-            <div class="diagnosis-cell">
-              <template v-if="problemDiagnostics(row).length > 0">
-                <strong>{{ problemSummary(row).title }}</strong>
-                <span>{{ problemSummary(row).nextStep }}</span>
-                <el-button
-                  v-if="refreshableProblemTargets(row).length > 0"
-                  link
-                  type="primary"
-                  :loading="refreshingEnvironmentId === row.id"
-                  @click="handleRefreshProblemResources(row)"
-                >
-                  刷新相关探测
-                </el-button>
-              </template>
-              <template v-else>
-                <strong>当前未发现问题</strong>
-                <span>可用于后续服务关联、发布和部署</span>
-              </template>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" fixed="right" width="170">
+        <el-table-column label="操作" fixed="right" width="120">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
             <el-button link type="primary" @click="openDrawer(row)">详情</el-button>
@@ -847,22 +854,79 @@ onMounted(loadAll)
   margin-bottom: 12px;
 }
 
-.diagnosis-cell {
+.environment-table :deep(.cell) {
+  overflow-wrap: anywhere;
+}
+
+.environment-cell,
+.resource-cell {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+}
+
+.environment-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.environment-title strong {
+  color: #2f3847;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.environment-meta {
+  color: #7a8294;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 12px;
   line-height: 18px;
 }
 
-.diagnosis-cell strong {
+.environment-problem {
+  border-left: 3px solid #e6a23c;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 18px;
+  padding-left: 8px;
+}
+
+.environment-problem.healthy {
+  border-left-color: #67c23a;
+}
+
+.environment-problem strong {
   color: #2f3847;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 
-.diagnosis-cell span {
+.inline-action {
+  align-self: flex-start;
+  padding: 0;
+}
+
+.resource-cell div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 62px minmax(0, 1fr);
+  line-height: 18px;
+}
+
+.resource-cell span {
   color: #7a8294;
   font-size: 12px;
+}
+
+.resource-cell strong {
+  color: #2f3847;
+  font-size: 12px;
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 

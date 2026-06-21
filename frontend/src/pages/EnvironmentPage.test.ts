@@ -384,7 +384,7 @@ describe('EnvironmentPage', () => {
 
     expect(wrapper.text()).toContain('K8s 命名空间 missing-ns 未在最近探测结果中发现')
     expect(wrapper.text()).toContain('Jenkins 流水线视图 missing-view 未在最近探测结果中发现')
-    expect(wrapper.text()).toContain('请刷新相关基础资源探测')
+    expect(wrapper.text()).not.toContain('请刷新相关基础资源探测')
     expect(wrapper.text()).toContain('刷新相关探测')
 
     await wrapper.findAll('button').find((item) => item.text().includes('刷新相关探测'))?.trigger('click')
@@ -396,7 +396,7 @@ describe('EnvironmentPage', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('相关基础资源探测已刷新')
   })
 
-  it('shows remote environment missing jenkins view reason and next step', async () => {
+  it('shows remote environment missing jenkins view reason in list and next step in detail', async () => {
     listHarborRegistries.mockResolvedValue([
       { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
     ])
@@ -438,7 +438,10 @@ describe('EnvironmentPage', () => {
     const wrapper = mount(EnvironmentPage, {
       global: {
         stubs: {
-          EnvironmentConfigDrawer: true,
+          EnvironmentConfigDrawer: {
+            template: '<aside v-if="visible">{{ diagnostics.map((item) => item.nextStep).join(" ") }}</aside>',
+            props: ['visible', 'environment', 'resourceName', 'checking', 'diagnostics', 'checkHelpText'],
+          },
           StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
         },
         directives: {
@@ -450,6 +453,13 @@ describe('EnvironmentPage', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Jenkins 流水线视图 missing-view 未在最近探测结果中发现')
+    expect(wrapper.text()).not.toContain('请到基础资源刷新 Jenkins 探测')
+
+    ;(wrapper.vm as unknown as { openDrawer: (row: unknown) => void; environments: unknown[] }).openDrawer(
+      (wrapper.vm as unknown as { environments: unknown[] }).environments[0],
+    )
+    await wrapper.vm.$nextTick()
+
     expect(wrapper.text()).toContain('请到基础资源刷新 Jenkins 探测')
   })
 
