@@ -413,6 +413,73 @@ func TestEnvironmentCRUD(t *testing.T) {
 	}
 }
 
+func TestEnvironmentWithUnverifiedScopesIsSavedAsDegraded(t *testing.T) {
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-unverified-scope","name":"未验证范围环境","code":"unverified-scope","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-not-probed","jenkinsId":"jenkins-local-prod","jenkinsView":"view-not-probed","status":"HEALTHY"}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create environment status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var createResponse struct {
+		Data domain.Environment `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResponse); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createResponse.Data.Status != "DEGRADED" {
+		t.Fatalf("expected unverified scopes to create degraded environment, got %+v", createResponse.Data)
+	}
+}
+
+func TestEnvironmentVerifiedScopesClearDegradedOnSave(t *testing.T) {
+	repo := newTestRepository()
+	router := newTestRouterWithRepository(repo)
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-verified-later","name":"后续验证环境","code":"verified-later","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-later","jenkinsId":"jenkins-local-prod","jenkinsView":"view-later","status":"HEALTHY"}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create environment status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var createResponse struct {
+		Data domain.Environment `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResponse); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createResponse.Data.Status != "DEGRADED" {
+		t.Fatalf("expected initial unverified scopes to be degraded, got %+v", createResponse.Data)
+	}
+
+	if _, _, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x", "project-later"}, time.Now()); err != nil {
+		t.Fatalf("update harbor probe: %v", err)
+	}
+	if _, _, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "view-later"}, []string{"mock-release"}, time.Now()); err != nil {
+		t.Fatalf("update jenkins probe: %v", err)
+	}
+
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/environments/env-verified-later", strings.NewReader(`{"name":"后续验证环境-已更新"}`))
+	updateRequest.Header.Set("Content-Type", "application/json")
+	updateRecorder := httptest.NewRecorder()
+	router.ServeHTTP(updateRecorder, updateRequest)
+	if updateRecorder.Code != http.StatusOK {
+		t.Fatalf("expected update environment status 200, got %d: %s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+	var updateResponse struct {
+		Data domain.Environment `json:"data"`
+	}
+	if err := json.Unmarshal(updateRecorder.Body.Bytes(), &updateResponse); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updateResponse.Data.Status != "UNKNOWN" {
+		t.Fatalf("expected verified scopes to clear degraded status to unknown, got %+v", updateResponse.Data)
+	}
+}
+
 func TestResourceManagementCreatesAndRefreshesKubernetesFromKubeconfig(t *testing.T) {
 	kubernetesAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1216,11 +1283,19 @@ func leaseAgentTask(t *testing.T, router http.Handler, body string) leaseRespons
 }
 
 func newTestRouter() http.Handler {
+	return newTestRouterWithRepository(newTestRepository())
+}
+
+func newTestRepository() *repository.MockRepository {
 	repo, err := repository.NewMockRepository()
 	if err != nil {
 		panic(err)
 	}
 	seedTestEnvironments(repo)
+	return repo
+}
+
+func newTestRouterWithRepository(repo repository.Store) http.Handler {
 	return NewRouter(repo, nil, agent.NewProtocolStore(), integration.NewMockSuite())
 }
 
@@ -1240,6 +1315,36 @@ func newPermissionTestRouter(t *testing.T, user domain.CurrentUser) http.Handler
 }
 
 func seedTestEnvironments(repo *repository.MockRepository) {
+	if _, err := repo.CreateKubernetesCluster(domain.KubernetesCluster{
+		ID:        "k8s-local-prod",
+		Name:      "本地生产 K8s",
+		APIServer: "https://k8s.local",
+	}); err != nil {
+		panic(err)
+	}
+	if _, err := repo.CreateHarborRegistry(domain.HarborRegistry{
+		ID:   "harbor-local-prod",
+		Name: "本地生产 Harbor",
+		URL:  "https://harbor.local",
+	}); err != nil {
+		panic(err)
+	}
+	if _, err := repo.CreateJenkinsInstance(domain.JenkinsInstance{
+		ID:   "jenkins-local-prod",
+		Name: "本地生产 Jenkins",
+		URL:  "https://jenkins.local",
+	}); err != nil {
+		panic(err)
+	}
+	if _, ok, err := repo.UpdateKubernetesClusterProbe("k8s-local-prod", "HEALTHY", "", []string{"default", "project-x"}, time.Now()); err != nil || !ok {
+		panic("seed kubernetes probe failed")
+	}
+	if _, ok, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x"}, time.Now()); err != nil || !ok {
+		panic("seed harbor probe failed")
+	}
+	if _, ok, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x"}, []string{"mock-release"}, time.Now()); err != nil || !ok {
+		panic("seed jenkins probe failed")
+	}
 	items := []domain.Environment{
 		{
 			ID:              "env-local-prod",

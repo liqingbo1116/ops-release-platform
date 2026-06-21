@@ -82,6 +82,14 @@ This is the authoritative order for subsequent development. Each phase must use 
 
 Current step is step 1: Environment management. Do not move to Agent management until environment list/detail/create/update/status/dependency visibility use real backend data and the phase-1 mock/fallback boundary is removed or explicitly recorded as blocked by missing real integrations.
 
+Environment management must also handle multi-scope bindings before moving on:
+
+- An environment must not be modeled as only one Harbor project, one K8s namespace, and one Jenkins view/job.
+- Add or complete the environment resource binding model so one environment can bind multiple K8s namespaces, Harbor projects, and Jenkins views/jobs.
+- Multi-scope bindings are for later service-to-environment association: each service must be able to use the correct namespace, Harbor project, and Jenkins view/job inside an environment. Do not implement multi-binding as an isolated configuration feature with no service-level consumer.
+- The page may keep a minimal default-binding UI in V1, but backend models, APIs, and persistence must support the full binding list.
+- Release/deploy task creation must snapshot the actual namespace/project/view/job used by that task, so historical tasks are not affected when environment bindings change later.
+
 ## V1 Mainline Goal
 
 V1 must prioritize functional closure over optimization work. The minimum acceptable V1 outcome is:

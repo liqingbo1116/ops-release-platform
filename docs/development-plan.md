@@ -163,14 +163,17 @@ V1 最低交付目标：
 - 远程环境内部固定为 `AGENT`；远程 K8s/运行环境由 Agent 执行，平台不直连远程 K8s。
 - 环境不维护 K8s/Harbor/Jenkins 凭据，只关联阶段 1 的资源。
 - 环境通过资源绑定模型关联阶段 1 的资源，一个环境可关联多个作用域；当前页面先维护每类资源的默认绑定，后续多选编辑在此模型上扩展。
+- V1 环境管理阶段必须先完成多作用域绑定的模型、后端接口和数据库持久化，不能继续把环境设计成只能绑定一个 K8s namespace、一个 Harbor project、一个 Jenkins view/job。
+- 多作用域绑定的用户价值是服务关联：后续用户在环境内维护服务时，可以把服务关联到实际使用的 namespace、Harbor project、Jenkins view/job；发布/部署时平台据此选择构建来源、镜像范围和部署目标。不能把多绑定做成只有环境配置页可见、后续业务不用的孤立配置。
 - 本地环境通过资源 ID 关联 K8s/Harbor/Jenkins，并填写环境级作用域：
   - K8s `namespace`
   - Harbor `registryProject`
   - Jenkins `jenkinsView`
 - 远程环境关联本地 Jenkins view 与本地 Harbor project，用于本地构建和选择待同步镜像；远程 K8s namespace 不在平台直连资源中维护，由 Agent 后续上报和执行。
 - 同一个 K8s、Harbor、Jenkins 可以被多个环境复用，不同环境可使用不同 namespace/project/view；同一环境也可以绑定多个 namespace/project/view。
+- 页面交互可先只维护每类资源的默认绑定，但环境详情接口必须返回完整 bindings 列表；发布/部署创建时必须记录实际选用的 namespace/project/view，避免后续环境绑定变化影响历史任务。
 - 创建环境时面向用户填写环境名称，系统自动生成可见的“环境标识”；用户可按需修改标识，环境 ID 由系统按 `env-环境标识` 生成，不要求用户同时维护两套标识。
-- 选择 namespace/project/view 时优先使用阶段 1 的缓存列表，同时允许手工输入作为兜底。
+- 选择 namespace/project/view 时优先使用阶段 1 的缓存列表，同时允许手工输入作为兜底；如果手工输入的作用域不在最近探测缓存中，环境允许保存但状态必须进入 `DEGRADED`，前端显示“需验证”，直到资源探测补齐或连接检查确认。
 - 删除环境管理页面和后端接口中的环境 mock 数据与 fallback。
 
 必须准备：
@@ -184,6 +187,9 @@ V1 最低交付目标：
 
 - 如果环境仍内嵌维护 K8s/Harbor/Jenkins 凭据，本阶段未完成。
 - 如果本地环境关联的 namespace/project/view 仍来自 mock，本阶段未完成。
+- 如果环境资源绑定仍是单 namespace、单 Harbor project、单 Jenkins view/job 的单值模型，本阶段未完成。
+- 如果环境多绑定没有为后续服务关联预留模型或接口入口，本阶段未完成。
+- 如果发布/部署任务不能保存实际选用的 namespace/project/view 快照，本阶段未完成。
 - 如果环境创建仍要求用户同时理解和填写环境 ID 与环境标识，或环境标识不能自动生成，本阶段未完成。
 - 如果远程环境仍允许平台后端直连远程 K8s 或执行远程直连检查，本阶段未完成。
 

@@ -40,6 +40,7 @@ vi.mock('element-plus', async (importOriginal) => {
 })
 
 import EnvironmentPage from './EnvironmentPage.vue'
+import { ElMessage } from 'element-plus'
 
 describe('EnvironmentPage', () => {
   beforeEach(() => {
@@ -116,8 +117,8 @@ describe('EnvironmentPage', () => {
     expect(wrapper.text()).toContain('远程环境')
     expect(wrapper.text()).toContain('无需 Agent')
     expect(wrapper.text()).toContain('ONLINE')
-    expect(wrapper.text()).toContain('本地环境关联 K8s namespace')
-    expect(wrapper.text()).toContain('远程环境关联本地 Harbor project')
+    expect(wrapper.text()).toContain('本地环境关联 K8s 命名空间')
+    expect(wrapper.text()).toContain('远程环境关联本地 Harbor 镜像项目')
     expect(wrapper.text()).toContain('1 个远程环境 Agent 未就绪')
     expect(wrapper.text()).not.toContain('网络模式')
   })
@@ -185,15 +186,15 @@ describe('EnvironmentPage', () => {
     const vm = wrapper.vm as unknown as {
       openCreateDialog: () => void
       submitEnvironment: () => Promise<void>
-      form: Record<string, string>
+      form: Record<string, string | string[]>
     }
     vm.openCreateDialog()
     vm.form.name = 'remote new prod'
     await wrapper.vm.$nextTick()
     vm.form.clusterId = 'cluster-should-clear'
     vm.form.namespace = 'namespace-should-clear'
-    vm.form.registryProject = 'project-x'
-    vm.form.jenkinsView = 'project-x'
+    vm.form.registryProjects = ['project-x', 'project-y']
+    vm.form.jenkinsViews = ['project-x', 'project-y']
     await vm.submitEnvironment()
 
     expect(createEnvironment).toHaveBeenCalledWith(
@@ -208,8 +209,93 @@ describe('EnvironmentPage', () => {
         registryProject: 'project-x',
         jenkinsId: 'jenkins-local',
         jenkinsView: 'project-x',
+        bindings: [
+          {
+            resourceType: 'HARBOR',
+            resourceId: 'harbor-local',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'HARBOR',
+            resourceId: 'harbor-local',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-y',
+            isDefault: false,
+          },
+          {
+            resourceType: 'JENKINS',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'JENKINS',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'project-y',
+            isDefault: false,
+          },
+        ],
       }),
     )
+  })
+
+  it('keeps manual scopes savable and warns when they are not in probe cache', async () => {
+    listHarborRegistries.mockResolvedValue([
+      { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listJenkinsInstances.mockResolvedValue([
+      { id: 'jenkins-local', name: '本地 Jenkins', status: 'HEALTHY', views: ['project-x'] },
+    ])
+    createEnvironment.mockResolvedValue({
+      id: 'env-remote-manual-scope',
+      name: 'remote manual scope',
+      code: 'remote-manual-scope',
+      type: 'PROJECT',
+      networkMode: 'AGENT',
+      registryId: 'harbor-local',
+      registryProject: 'project-not-probed',
+      jenkinsId: 'jenkins-local',
+      jenkinsView: 'view-not-probed',
+      status: 'DEGRADED',
+      agentStatus: 'UNBOUND',
+      lastCheckAt: '',
+      bindings: [],
+    })
+    const wrapper = mount(EnvironmentPage, {
+      global: {
+        stubs: {
+          EnvironmentConfigDrawer: true,
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openCreateDialog: () => void
+      submitEnvironment: () => Promise<void>
+      form: Record<string, string | string[]>
+    }
+    vm.openCreateDialog()
+    vm.form.name = 'remote manual scope'
+    vm.form.registryProjects = ['project-not-probed']
+    vm.form.jenkinsViews = ['view-not-probed']
+    await vm.submitEnvironment()
+
+    expect(createEnvironment).toHaveBeenCalledWith(expect.objectContaining({
+      registryProject: 'project-not-probed',
+      jenkinsView: 'view-not-probed',
+    }))
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('未在最近探测结果中发现'))
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('环境已保存，但存在未验证的资源范围'))
   })
 
   it('creates local environments with selected platform integration resources', async () => {
@@ -255,15 +341,15 @@ describe('EnvironmentPage', () => {
     const vm = wrapper.vm as unknown as {
       openCreateDialog: () => void
       submitEnvironment: () => Promise<void>
-      form: Record<string, string>
+      form: Record<string, string | string[]>
     }
     vm.openCreateDialog()
     vm.form.type = 'LOCAL'
     await wrapper.vm.$nextTick()
     vm.form.name = '本地项目 X'
-    vm.form.namespace = 'project-x'
-    vm.form.registryProject = 'project-x'
-    vm.form.jenkinsView = 'project-x'
+    vm.form.namespaces = ['project-x', 'default']
+    vm.form.registryProjects = ['project-x', 'project-y']
+    vm.form.jenkinsViews = ['project-x']
     await vm.submitEnvironment()
 
     expect(createEnvironment).toHaveBeenCalledWith(
@@ -277,6 +363,43 @@ describe('EnvironmentPage', () => {
         registryProject: 'project-x',
         jenkinsId: 'jenkins-local',
         jenkinsView: 'project-x',
+        bindings: [
+          {
+            resourceType: 'K8S',
+            resourceId: 'k8s-local',
+            scopeType: 'NAMESPACE',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'K8S',
+            resourceId: 'k8s-local',
+            scopeType: 'NAMESPACE',
+            scopeValue: 'default',
+            isDefault: false,
+          },
+          {
+            resourceType: 'HARBOR',
+            resourceId: 'harbor-local',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'HARBOR',
+            resourceId: 'harbor-local',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-y',
+            isDefault: false,
+          },
+          {
+            resourceType: 'JENKINS',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+        ],
       }),
     )
   })
@@ -314,7 +437,7 @@ describe('EnvironmentPage', () => {
     const vm = wrapper.vm as unknown as {
       openCreateDialog: () => void
       submitEnvironment: () => Promise<void>
-      form: Record<string, string>
+      form: Record<string, string | string[]>
     }
     vm.openCreateDialog()
     vm.form.name = 'remote prod'

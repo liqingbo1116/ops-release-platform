@@ -15,7 +15,12 @@
       <el-alert
         type="info"
         :closable="false"
-        title="V1 主线：本地环境关联 K8s namespace、Harbor project、Jenkins view；远程环境关联本地 Harbor project 与 Jenkins view，远程 K8s 由 Agent 执行。"
+        title="V1 主线：本地环境关联 K8s 命名空间、Harbor 镜像项目、Jenkins 流水线视图；远程环境关联本地 Harbor 镜像项目与 Jenkins 流水线视图，远程 K8s 由 Agent 执行。"
+      />
+      <el-alert
+        type="info"
+        :closable="false"
+        title="这些资源范围用于后续服务关联：服务会在环境内选择实际使用的命名空间、镜像项目和流水线视图，发布/部署时据此确定构建来源、镜像范围和部署目标。"
       />
       <el-alert
         v-if="blockedProjectEnvironmentCount > 0"
@@ -45,13 +50,13 @@
         <el-table-column label="部署目标" min-width="110">
           <template #default="{ row }">{{ deployTargetTypeLabel(row.deployTargetType) }}</template>
         </el-table-column>
-        <el-table-column label="K8s / namespace" min-width="210">
+        <el-table-column label="K8s / 命名空间" min-width="210">
           <template #default="{ row }">{{ scopedResourceText(row, 'k8s') }}</template>
         </el-table-column>
-        <el-table-column label="Harbor / project" min-width="210">
+        <el-table-column label="Harbor / 镜像项目" min-width="210">
           <template #default="{ row }">{{ scopedResourceText(row, 'harbor') }}</template>
         </el-table-column>
-        <el-table-column label="Jenkins / view" min-width="210">
+        <el-table-column label="Jenkins / 流水线视图" min-width="210">
           <template #default="{ row }">{{ scopedResourceText(row, 'jenkins') }}</template>
         </el-table-column>
         <el-table-column label="Agent" min-width="100">
@@ -75,6 +80,7 @@
     <EnvironmentConfigDrawer
       v-model:visible="drawerVisible"
       :environment="activeEnvironment"
+      :resource-name="drawerResourceName"
       :checking="checkingEnvironment"
       @check="handleCheckEnvironment"
     />
@@ -82,12 +88,12 @@
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增环境' : '编辑环境'" width="580px" destroy-on-close>
       <el-form :model="form" label-width="120px">
         <el-form-item label="环境名称" required><el-input v-model="form.name" placeholder="项目 X 生产" /></el-form-item>
-        <el-form-item label="环境标识">
+        <el-form-item v-if="dialogMode === 'edit'" label="环境标识">
           <el-input v-model="form.code" placeholder="保存时自动生成" disabled />
           <div class="form-tip">由系统自动生成，用于远程 Agent 配置；保存后系统生成环境 ID：env-环境标识</div>
         </el-form-item>
         <el-form-item label="环境类型" required><el-segmented v-model="form.type" :options="typeOptions" /></el-form-item>
-        <el-form-item label="部署目标">
+        <el-form-item v-if="dialogMode === 'edit'" label="部署目标">
           <el-input :value="deployTargetTypeLabel(form.deployTargetType)" disabled />
           <div class="form-tip">V1 当前支持 Kubernetes；docker-compose 仅预留模型，不进入当前主线实现。</div>
         </el-form-item>
@@ -98,34 +104,55 @@
             </el-select>
           </el-form-item>
           <el-form-item label="命名空间" required>
-            <el-select v-model="form.namespace" placeholder="选择或输入 namespace" filterable allow-create default-first-option>
+            <el-select
+              v-model="form.namespaces"
+              placeholder="选择或输入一个或多个命名空间"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+            >
               <el-option v-for="item in selectedNamespaces" :key="item" :label="item" :value="item" />
             </el-select>
+            <div class="form-tip">可绑定多个命名空间，首个命名空间作为默认部署目标；手工输入未探测到的值后，环境会进入需验证状态。</div>
           </el-form-item>
           <el-form-item label="Harbor 仓库" required>
             <el-select v-model="form.registryId" placeholder="先在基础资源维护 Harbor 仓库" filterable>
               <el-option v-for="item in harborRegistries" :key="item.id" :label="item.name" :value="item.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="Harbor project" required>
-            <el-select v-model="form.registryProject" placeholder="选择或输入 project" filterable allow-create default-first-option>
+          <el-form-item label="镜像项目" required>
+            <el-select
+              v-model="form.registryProjects"
+              placeholder="选择或输入一个或多个镜像项目"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+            >
               <el-option v-for="item in selectedProjects" :key="item" :label="item" :value="item" />
             </el-select>
+            <div class="form-tip">可绑定多个镜像项目，首个镜像项目作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
           </el-form-item>
         </template>
         <template v-else>
-          <el-form-item label="远程 K8s">
-            <el-input value="由远程 Agent 连接并执行" disabled />
-          </el-form-item>
           <el-form-item label="Harbor 仓库" required>
             <el-select v-model="form.registryId" placeholder="选择本地 Harbor 仓库" filterable>
               <el-option v-for="item in harborRegistries" :key="item.id" :label="item.name" :value="item.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="Harbor project" required>
-            <el-select v-model="form.registryProject" placeholder="选择或输入本地 project" filterable allow-create default-first-option>
+          <el-form-item label="镜像项目" required>
+            <el-select
+              v-model="form.registryProjects"
+              placeholder="选择或输入一个或多个本地镜像项目"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+            >
               <el-option v-for="item in selectedProjects" :key="item" :label="item" :value="item" />
             </el-select>
+            <div class="form-tip">远程环境可绑定多个本地镜像项目，首个镜像项目作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
           </el-form-item>
         </template>
         <el-form-item label="Jenkins">
@@ -133,10 +160,18 @@
             <el-option v-for="item in jenkinsInstances" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="Jenkins view">
-          <el-select v-model="form.jenkinsView" placeholder="选择或输入 view" clearable filterable allow-create default-first-option>
+        <el-form-item v-if="form.jenkinsId" label="流水线视图">
+          <el-select
+            v-model="form.jenkinsViews"
+            placeholder="选择或输入一个或多个流水线视图"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+          >
             <el-option v-for="item in selectedViews" :key="item" :label="item" :value="item" />
           </el-select>
+          <div class="form-tip">可绑定多个流水线视图，首个流水线视图作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -152,7 +187,15 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import EnvironmentConfigDrawer from '@/components/EnvironmentConfigDrawer.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { checkEnvironment, createEnvironment, listEnvironments, updateEnvironment, type EnvironmentInfo, type EnvironmentPayload } from '@/api/environments'
+import {
+  checkEnvironment,
+  createEnvironment,
+  listEnvironments,
+  updateEnvironment,
+  type EnvironmentInfo,
+  type EnvironmentPayload,
+  type EnvironmentResourceBinding,
+} from '@/api/environments'
 import {
   listHarborRegistries,
   listJenkinsInstances,
@@ -177,7 +220,13 @@ const loading = ref(false)
 const submitting = ref(false)
 const checkingEnvironment = ref(false)
 const errorMessage = ref('')
-const form = ref<EnvironmentPayload>(emptyEnvironmentForm())
+type EnvironmentForm = EnvironmentPayload & {
+  namespaces: string[]
+  registryProjects: string[]
+  jenkinsViews: string[]
+}
+
+const form = ref<EnvironmentForm>(emptyEnvironmentForm())
 
 const typeOptions = [
   { label: '远程环境', value: 'PROJECT' },
@@ -201,7 +250,7 @@ const selectedNamespaces = computed(() => kubernetesClusters.value.find((item) =
 const selectedProjects = computed(() => harborRegistries.value.find((item) => item.id === form.value.registryId)?.projects ?? [])
 const selectedViews = computed(() => jenkinsInstances.value.find((item) => item.id === form.value.jenkinsId)?.views ?? [])
 
-function emptyEnvironmentForm(): EnvironmentPayload {
+function emptyEnvironmentForm(): EnvironmentForm {
   return {
     id: '',
     name: '',
@@ -216,6 +265,9 @@ function emptyEnvironmentForm(): EnvironmentPayload {
     jenkinsId: '',
     jenkinsView: '',
     bindings: [],
+    namespaces: [],
+    registryProjects: [],
+    jenkinsViews: [],
   }
 }
 
@@ -234,9 +286,36 @@ function deployTargetTypeLabel(type: string) {
 
 function scopedResourceText(row: EnvironmentInfo, resourceType: 'k8s' | 'harbor' | 'jenkins') {
   if (row.type === 'PROJECT' && resourceType === 'k8s') return 'Agent 执行'
+  const type = bindingResourceType(resourceType)
+  const bindings = row.bindings?.filter((item) => item.resourceType === type) ?? []
+  if (bindings.length > 0) {
+    const defaultBinding = bindings.find((item) => item.isDefault) ?? bindings[0]
+    const orderedBindings = [defaultBinding, ...bindings.filter((item) => item !== defaultBinding)]
+    const resourceIds = Array.from(new Set(orderedBindings.map((item) => item.resourceId)))
+    if (resourceIds.length === 1) {
+      return `${resourceDisplayName(type, defaultBinding.resourceId)} / ${orderedBindings.map((item) => item.scopeValue).join('、')}`
+    }
+    return orderedBindings.map((item) => `${resourceDisplayName(type, item.resourceId)} / ${item.scopeValue}`).join('；')
+  }
   if (resourceType === 'k8s') return `${resourceName(kubernetesClusters.value, row.clusterId)} / ${row.namespace || '-'}`
   if (resourceType === 'harbor') return `${resourceName(harborRegistries.value, row.registryId)} / ${row.registryProject || '-'}`
   return `${resourceName(jenkinsInstances.value, row.jenkinsId)} / ${row.jenkinsView || '-'}`
+}
+
+function bindingResourceType(resourceType: 'k8s' | 'harbor' | 'jenkins'): EnvironmentResourceBinding['resourceType'] {
+  if (resourceType === 'k8s') return 'K8S'
+  if (resourceType === 'harbor') return 'HARBOR'
+  return 'JENKINS'
+}
+
+function resourceDisplayName(resourceType: EnvironmentResourceBinding['resourceType'], resourceId: string) {
+  if (resourceType === 'K8S') return resourceName(kubernetesClusters.value, resourceId)
+  if (resourceType === 'HARBOR') return resourceName(harborRegistries.value, resourceId)
+  return resourceName(jenkinsInstances.value, resourceId)
+}
+
+function drawerResourceName(resourceType: EnvironmentResourceBinding['resourceType'], resourceId: string) {
+  return resourceDisplayName(resourceType, resourceId)
 }
 
 function applyEnvironmentTypeDefaults(type: EnvironmentPayload['type']) {
@@ -244,6 +323,7 @@ function applyEnvironmentTypeDefaults(type: EnvironmentPayload['type']) {
     form.value.networkMode = 'AGENT'
     form.value.clusterId = ''
     form.value.namespace = ''
+    form.value.namespaces = []
     form.value.registryId ||= harborRegistries.value[0]?.id || ''
     form.value.jenkinsId ||= jenkinsInstances.value[0]?.id || ''
     return
@@ -292,7 +372,7 @@ function openCreateDialog() {
 
 function openEditDialog(row: EnvironmentInfo) {
   dialogMode.value = 'edit'
-  form.value = { ...row }
+  form.value = environmentToForm(row)
   dialogVisible.value = true
 }
 
@@ -301,24 +381,32 @@ async function submitEnvironment() {
     ElMessage.warning('请填写环境名称')
     return
   }
-  if (form.value.type === 'LOCAL' && (!form.value.clusterId || !form.value.namespace.trim())) {
-    ElMessage.warning('请完整选择 K8s/Harbor 资源并填写 namespace 与 project')
+  if (form.value.type === 'LOCAL' && (!form.value.clusterId || normalizeScopes(form.value.namespaces, form.value.namespace).length === 0)) {
+    ElMessage.warning('请完整选择 K8s 集群、Harbor 仓库，并填写命名空间与镜像项目')
     return
   }
-  if (!form.value.registryId || !form.value.registryProject.trim()) {
-    ElMessage.warning('请完整选择 Harbor 仓库并填写 project')
+  if (!form.value.registryId || normalizeScopes(form.value.registryProjects, form.value.registryProject).length === 0) {
+    ElMessage.warning('请完整选择 Harbor 仓库并填写镜像项目')
     return
   }
 
   submitting.value = true
   try {
     const payload = trimEnvironmentPayload(form.value)
+    const missingScopes = missingScopesBeforeSave()
+    if (missingScopes.length > 0) {
+      ElMessage.warning(`存在未在最近探测结果中发现的资源范围：${missingScopes.join('、')}，环境将保存为需验证状态`)
+    }
+    let savedEnvironment: EnvironmentInfo
     if (dialogMode.value === 'create') {
-      await createEnvironment(payload)
-      ElMessage.success('环境已创建')
+      savedEnvironment = await createEnvironment(payload)
     } else {
-      await updateEnvironment(form.value.id, { ...payload, status: form.value.status })
-      ElMessage.success('环境已更新')
+      savedEnvironment = await updateEnvironment(form.value.id, { ...payload, status: form.value.status })
+    }
+    if (savedEnvironment.status === 'DEGRADED' || missingScopes.length > 0) {
+      ElMessage.warning('环境已保存，但存在未验证的资源范围，请刷新探测或执行连接测试后再用于发布/部署')
+    } else {
+      ElMessage.success(dialogMode.value === 'create' ? '环境已创建' : '环境已更新')
     }
     dialogVisible.value = false
     await loadAll()
@@ -329,19 +417,39 @@ async function submitEnvironment() {
   }
 }
 
-function trimEnvironmentPayload(payload: EnvironmentPayload): EnvironmentPayload {
+function environmentToForm(row: EnvironmentInfo): EnvironmentForm {
+  return {
+    ...emptyEnvironmentForm(),
+    ...row,
+    namespaces: scopedValuesFromBindings(row, 'K8S', row.namespace),
+    registryProjects: scopedValuesFromBindings(row, 'HARBOR', row.registryProject),
+    jenkinsViews: scopedValuesFromBindings(row, 'JENKINS', row.jenkinsView),
+  }
+}
+
+function scopedValuesFromBindings(row: EnvironmentInfo, resourceType: EnvironmentResourceBinding['resourceType'], fallback: string) {
+  const bindings = row.bindings?.filter((item) => item.resourceType === resourceType) ?? []
+  if (bindings.length === 0) return fallback ? [fallback] : []
+  const defaultBinding = bindings.find((item) => item.isDefault)
+  const ordered = defaultBinding ? [defaultBinding, ...bindings.filter((item) => item !== defaultBinding)] : bindings
+  return normalizeScopes(ordered.map((item) => item.scopeValue))
+}
+
+function trimEnvironmentPayload(payload: EnvironmentForm): EnvironmentPayload {
   const type = payload.type === 'LOCAL' ? 'LOCAL' : 'PROJECT'
   const networkMode = type === 'LOCAL' ? 'DIRECT' : 'AGENT'
+  const namespaces = type === 'LOCAL' ? normalizeScopes(payload.namespaces, payload.namespace) : []
+  const registryProjects = normalizeScopes(payload.registryProjects, payload.registryProject)
+  const jenkinsViews = normalizeScopes(payload.jenkinsViews, payload.jenkinsView)
   const resourcePayload = {
     clusterId: type === 'LOCAL' ? payload.clusterId.trim() : '',
-    namespace: type === 'LOCAL' ? payload.namespace.trim() : '',
+    namespace: namespaces[0] ?? '',
     registryId: payload.registryId.trim(),
-    registryProject: payload.registryProject.trim(),
+    registryProject: registryProjects[0] ?? '',
     jenkinsId: payload.jenkinsId.trim(),
-    jenkinsView: payload.jenkinsView.trim(),
+    jenkinsView: jenkinsViews[0] ?? '',
   }
   return {
-    ...payload,
     id: payload.id.trim(),
     name: payload.name.trim(),
     code: payload.code.trim() || generateEnvironmentCode(payload.name, type),
@@ -349,40 +457,78 @@ function trimEnvironmentPayload(payload: EnvironmentPayload): EnvironmentPayload
     deployTargetType: payload.deployTargetType === 'DOCKER_COMPOSE' ? 'DOCKER_COMPOSE' : 'KUBERNETES',
     networkMode,
     ...resourcePayload,
-    bindings: buildDefaultBindings(type, resourcePayload),
+    bindings: buildBindings(type, resourcePayload, {
+      namespaces,
+      registryProjects,
+      jenkinsViews,
+    }),
   }
 }
 
-function buildDefaultBindings(type: EnvironmentPayload['type'], payload: Pick<EnvironmentPayload, 'clusterId' | 'namespace' | 'registryId' | 'registryProject' | 'jenkinsId' | 'jenkinsView'>) {
+function buildBindings(
+  type: EnvironmentPayload['type'],
+  payload: Pick<EnvironmentPayload, 'clusterId' | 'registryId' | 'jenkinsId'>,
+  scopes: Pick<EnvironmentForm, 'namespaces' | 'registryProjects' | 'jenkinsViews'>,
+) {
   const bindings: EnvironmentPayload['bindings'] = []
-  if (type === 'LOCAL' && payload.clusterId && payload.namespace) {
-    bindings.push({
+  if (type === 'LOCAL' && payload.clusterId) {
+    scopes.namespaces.forEach((namespace, index) => bindings.push({
       resourceType: 'K8S',
       resourceId: payload.clusterId,
       scopeType: 'NAMESPACE',
-      scopeValue: payload.namespace,
-      isDefault: true,
-    })
+      scopeValue: namespace,
+      isDefault: index === 0,
+    }))
   }
-  if (payload.registryId && payload.registryProject) {
-    bindings.push({
+  if (payload.registryId) {
+    scopes.registryProjects.forEach((project, index) => bindings.push({
       resourceType: 'HARBOR',
       resourceId: payload.registryId,
       scopeType: 'PROJECT',
-      scopeValue: payload.registryProject,
-      isDefault: true,
-    })
+      scopeValue: project,
+      isDefault: index === 0,
+    }))
   }
-  if (payload.jenkinsId && payload.jenkinsView) {
-    bindings.push({
+  if (payload.jenkinsId) {
+    scopes.jenkinsViews.forEach((view, index) => bindings.push({
       resourceType: 'JENKINS',
       resourceId: payload.jenkinsId,
       scopeType: 'VIEW',
-      scopeValue: payload.jenkinsView,
-      isDefault: true,
-    })
+      scopeValue: view,
+      isDefault: index === 0,
+    }))
   }
   return bindings
+}
+
+function normalizeScopes(values: string[], fallback = '') {
+  const uniqueValues: string[] = []
+  for (const value of [...values, fallback]) {
+    const scope = value.trim()
+    if (scope && !uniqueValues.includes(scope)) uniqueValues.push(scope)
+  }
+  return uniqueValues
+}
+
+function missingScopesBeforeSave() {
+  const missingScopes: string[] = []
+  if (form.value.type === 'LOCAL') {
+    appendMissingScopes(missingScopes, 'K8s 命名空间', normalizeScopes(form.value.namespaces, form.value.namespace), selectedNamespaces.value)
+  }
+  appendMissingScopes(missingScopes, 'Harbor 镜像项目', normalizeScopes(form.value.registryProjects, form.value.registryProject), selectedProjects.value)
+  if (form.value.jenkinsId) {
+    appendMissingScopes(missingScopes, 'Jenkins 流水线视图', normalizeScopes(form.value.jenkinsViews, form.value.jenkinsView), selectedViews.value)
+  }
+  return missingScopes
+}
+
+function appendMissingScopes(output: string[], label: string, values: string[], availableValues: string[]) {
+  const availableSet = new Set(availableValues.map((item) => item.trim()).filter(Boolean))
+  for (const value of values) {
+    if (!availableSet.has(value)) {
+      output.push(`${label} ${value}`)
+    }
+  }
 }
 
 async function handleCheckEnvironment(id: string) {
@@ -441,6 +587,16 @@ watch(
   (name) => {
     if (dialogMode.value === 'create') {
       form.value.code = name.trim() ? generateEnvironmentCode(name, form.value.type) : ''
+    }
+  },
+)
+
+watch(
+  () => form.value.jenkinsId,
+  (jenkinsId) => {
+    if (!jenkinsId) {
+      form.value.jenkinsView = ''
+      form.value.jenkinsViews = []
     }
   },
 )

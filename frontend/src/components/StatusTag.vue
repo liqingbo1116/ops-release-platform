@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const statusMap: Record<string, { label: string; type: 'success' | 'warning' | 'danger' | 'info' | 'primary' }> = {
   HEALTHY: { label: '健康', type: 'success' },
+  DEGRADED: { label: '需验证', type: 'warning' },
   UNKNOWN: { label: '未知', type: 'info' },
   ONLINE: { label: '在线', type: 'success' },
   OFFLINE: { label: '离线', type: 'danger' },

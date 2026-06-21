@@ -101,7 +101,7 @@ func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Env
 		RegistryProject:  normalized.RegistryProject,
 		JenkinsID:        normalized.JenkinsID,
 		JenkinsView:      normalized.JenkinsView,
-		Status:           firstNonEmpty(normalized.Status, "UNKNOWN"),
+		Status:           r.environmentStatusByScopeCache(normalized, firstNonEmpty(normalized.Status, "UNKNOWN")),
 		AgentStatus:      "UNBOUND",
 		LastCheckAt:      "",
 		Bindings:         withEnvironmentID(normalized.Bindings, id),
@@ -159,6 +159,7 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 		r.environments[index].RegistryProject = normalized.RegistryProject
 		r.environments[index].JenkinsID = normalized.JenkinsID
 		r.environments[index].JenkinsView = normalized.JenkinsView
+		r.environments[index].Status = r.environmentStatusByScopeCache(normalized, r.environments[index].Status)
 		r.environments[index].Bindings = withEnvironmentID(normalized.Bindings, r.environments[index].ID)
 		return r.environments[index], true, nil
 	}
@@ -175,6 +176,36 @@ func (r *MockRepository) UpdateEnvironmentCheck(id string, status string, checke
 		return r.environments[index], true, nil
 	}
 	return domain.Environment{}, false, nil
+}
+
+func (r *MockRepository) environmentStatusByScopeCache(item domain.Environment, currentStatus string) string {
+	if r.environmentHasUnverifiedScopes(item) {
+		return "DEGRADED"
+	}
+	return verifiedEnvironmentStatus(currentStatus)
+}
+
+func (r *MockRepository) environmentHasUnverifiedScopes(item domain.Environment) bool {
+	for _, binding := range item.Bindings {
+		switch binding.ResourceType {
+		case "K8S":
+			cluster, exists := r.GetKubernetesCluster(binding.ResourceID)
+			if !exists || !stringListContains(cluster.Namespaces, binding.ScopeValue) {
+				return true
+			}
+		case "HARBOR":
+			registry, exists := r.GetHarborRegistry(binding.ResourceID)
+			if !exists || !stringListContains(registry.Projects, binding.ScopeValue) {
+				return true
+			}
+		case "JENKINS":
+			instance, exists := r.GetJenkinsInstance(binding.ResourceID)
+			if !exists || !stringListContains(instance.Views, binding.ScopeValue) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *MockRepository) ListKubernetesClusters(query string) []domain.KubernetesCluster {

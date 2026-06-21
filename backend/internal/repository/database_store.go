@@ -75,6 +75,7 @@ func (s *DatabaseStore) CreateEnvironment(input domain.Environment) (domain.Envi
 		JenkinsView:      normalized.JenkinsView,
 		Status:           fallbackString(strings.TrimSpace(normalized.Status), "UNKNOWN"),
 	}
+	model.Status = s.environmentStatusByScopeCache(normalized, model.Status)
 	if model.ID == "" || model.Name == "" || model.Code == "" || model.Type == "" || model.NetworkMode == "" {
 		return domain.Environment{}, errors.New("missing required fields")
 	}
@@ -151,6 +152,7 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 	model.RegistryProject = normalized.RegistryProject
 	model.JenkinsID = normalized.JenkinsID
 	model.JenkinsView = normalized.JenkinsView
+	model.Status = s.environmentStatusByScopeCache(normalized, model.Status)
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&model).Error; err != nil {
 			return err
@@ -911,6 +913,16 @@ func compactStringList(values []string) []string {
 	return output
 }
 
+func stringListContains(values []string, target string) bool {
+	trimmedTarget := strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == trimmedTarget {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeScheme(scheme string, rawURL string) string {
 	value := strings.ToLower(strings.TrimSpace(scheme))
 	if value == "http" || value == "https" {
@@ -1208,6 +1220,44 @@ func applyDefaultBindingsToLegacyFields(item *domain.Environment) {
 			item.JenkinsView = binding.ScopeValue
 		}
 	}
+}
+
+func (s *DatabaseStore) environmentStatusByScopeCache(item domain.Environment, currentStatus string) string {
+	if s.environmentHasUnverifiedScopes(item) {
+		return "DEGRADED"
+	}
+	return verifiedEnvironmentStatus(currentStatus)
+}
+
+func (s *DatabaseStore) environmentHasUnverifiedScopes(item domain.Environment) bool {
+	for _, binding := range item.Bindings {
+		switch binding.ResourceType {
+		case "K8S":
+			cluster, exists := s.GetKubernetesCluster(binding.ResourceID)
+			if !exists || !stringListContains(cluster.Namespaces, binding.ScopeValue) {
+				return true
+			}
+		case "HARBOR":
+			registry, exists := s.GetHarborRegistry(binding.ResourceID)
+			if !exists || !stringListContains(registry.Projects, binding.ScopeValue) {
+				return true
+			}
+		case "JENKINS":
+			instance, exists := s.GetJenkinsInstance(binding.ResourceID)
+			if !exists || !stringListContains(instance.Views, binding.ScopeValue) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func verifiedEnvironmentStatus(currentStatus string) string {
+	status := strings.TrimSpace(currentStatus)
+	if status == "" || status == "DEGRADED" {
+		return "UNKNOWN"
+	}
+	return status
 }
 
 func withEnvironmentID(bindings []domain.EnvironmentResourceBinding, environmentID string) []domain.EnvironmentResourceBinding {
