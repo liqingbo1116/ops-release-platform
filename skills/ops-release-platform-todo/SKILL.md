@@ -42,11 +42,12 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - Agent only communicates outbound to the platform API; the platform must not call Agent endpoints or push tasks to Agent
 - Assume the V1 Agent deployment model unless docs are explicitly changed:
   - Linux host
-  - direct binary startup during development verification
-  - `docker compose` for formal deployment
+  - direct binary startup during development and integration debugging
+  - `docker compose` only for later formal production deployment verification
   - Agent operates remote Kubernetes, but is not itself required to run in Kubernetes
   - Agent must be independently deployable before V1 remote release/deploy can be accepted
   - Agent leases/pulls release/deploy task payloads from the platform and reports heartbeat, service list, image versions, status, logs, and final result back to the platform
+- Agent work must not be closed with mock data. If real Agent runtime, registration, heartbeat, token validation, remote probing, or required project-side configuration is missing, stop and tell the user exactly what must be deployed or changed in the project environment.
 - Treat the following path as the mainline unless the user explicitly reprioritizes:
   - 基础资源管理
   - 环境管理
@@ -68,7 +69,7 @@ Use this skill to keep project progress explicit and avoid losing the current de
 
 1. 基础资源管理: real K8s, Harbor, and Jenkins resource data, connectivity checks, probe refresh, and cached namespaces/projects/views.
 2. 环境管理: real local/remote environments, multi-scope resource bindings, status visibility, and Agent readiness separation.
-3. Agent 管理与远程探测: real registration, heartbeat, token validation, online status, unbound/pending-claim visibility, project/product binding, task lease data, and remote probing.
+3. Agent 管理与远程探测: real registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, online status, unbound/pending-claim visibility, project/product binding, task lease data, and remote probing.
 4. 项目管理: real project records such as 项目A and 项目B, used as the top-level business ownership boundary.
 5. 产品管理: real product records such as 数据中台 and 物联中台 under projects; current environment records are the V1 transition implementation for product deployment scope.
 6. 服务与版本来源: real services under products, consuming product deployment-scope namespace/project/view/job ranges and real version source configuration.
@@ -86,7 +87,7 @@ When reconciling TODO with implementation, prefer checking whether the user can 
 
 1. log in and enter the platform
 2. view remote environments and Agent status
-3. verify the remote Agent can start by direct binary in development and can be formally deployed by `docker compose`, both with outbound connectivity to the platform
+3. verify the remote Agent can start by direct binary in development with outbound connectivity to the platform; defer `docker compose` to formal production deployment verification
 4. create a release for target-existing services
 5. create a deploy task for target-missing services
 6. track execution state, logs, failure reasons, and action history in detail pages

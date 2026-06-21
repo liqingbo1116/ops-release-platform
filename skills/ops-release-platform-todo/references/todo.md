@@ -29,17 +29,12 @@ Always verify this file against `git status --short --branch`, `git log -1 --one
 
 Latest pushed milestone:
 
-- `d84d7f3 feat: add v1 remote agent lease flow`
+- `0dd329d docs: align v1 project product roadmap`
 
 ## Current Local Work
 
-- Local uncommitted environment page refinement:
-  - environment list separates resource readiness from remote Agent execution readiness
-  - remote Agent `UNBOUND` is displayed as Chinese `未绑定`
-  - resource scope problems stay in the environment/status summary
-  - Agent readiness is shown independently and documented in environment detail
-- Validation for current local work:
-  - `npm run test:unit -- EnvironmentPage` passed in `frontend`
+- Local uncommitted documentation update:
+  - Agent V1 registration, claim, binary deployment, and no-mock development rules are being fixed in docs and this TODO.
 
 ## Current Step
 
@@ -48,7 +43,7 @@ Latest pushed milestone:
   - 基础资源管理: functionally complete for V1; keep only bug fixes and integration follow-up.
   - 环境管理: functionally complete for V1; environments can bind multiple K8s namespaces, Harbor projects, and Jenkins views for later service association.
 - Next default step:
-  - Agent 管理与远程探测: verify real Agent registration, token validation, heartbeat, unbound/pending-claim status, project/product binding, online status, task leasing, and remote resource probing through the platform API.
+  - Agent 管理与远程探测: verify real registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, unbound/pending-claim status, project/product binding, online status, task leasing, and remote resource probing through the platform API.
 - Completed and pushed mock-first status:
   - release/deploy detail closure
   - Agent protocol mock closure
@@ -62,7 +57,7 @@ Latest pushed milestone:
   - frontend unit tests passed on 2026-06-09: 10 files, 39 tests
   - frontend build passed on 2026-06-09 with existing dependency annotation warnings only
 - Next default step:
-  - run the Agent from `agent/docker-compose.yml` on a remote Linux host or local remote-like host and verify heartbeat, lease, duplicate lease protection, expired lease retry, mock execution logs, and final result through platform APIs
+  - build and run the Agent binary on a remote Linux host or local remote-like host with real platform registration, heartbeat, token validation, task lease, and remote probing. Do not use mock execution or mock data as completion evidence.
 
 ## V1 Implementation Baseline
 
@@ -81,14 +76,21 @@ This is the authoritative order for subsequent development. Each phase must use 
 11. 登录与权限.
 12. 清理剩余 mock.
 
-Current step is step 3: Agent 管理与远程探测. Do not move to 项目管理 until Agent registration, token validation, heartbeat, unbound/pending-claim status, project/product binding, status visibility, task leasing, and remote probing use real backend data and the mock/fallback boundary is removed or explicitly recorded as blocked by missing real runtime or infrastructure.
+Current step is step 3: Agent 管理与远程探测. Do not move to 项目管理 until Agent registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, unbound/pending-claim status, project/product binding, status visibility, task leasing, and remote probing use real backend data and the mock/fallback boundary is removed or explicitly recorded as blocked by missing real runtime or infrastructure.
 
 Agent registration design for V1:
 
-- Agent should connect to the platform with platform URL and registration secret/token first.
-- The platform must support unbound or pending-claim Agents so an Agent can appear before it is associated with a project environment.
+- The Agent registration secret/token is generated from the Agent management page.
+- The page must show the platform URL, one-time registration token, expiration, and a binary startup/config example. Downloadable config may be added later, but copyable text is enough for V1.
+- The project-side operator copies the platform URL and registration token into the Agent config file, then starts the Agent binary with `-f <config-file>`.
+- Agent should connect to the platform with platform URL and one-time registration token first.
+- After first registration, the platform issues a long-lived Agent token/secret. Heartbeat, task lease, probing, and callback APIs must use and validate this Agent token; the one-time registration token must not be reused for runtime calls.
+- The platform must support unbound or pending-claim Agents so an Agent can appear before it is associated with a project/product.
 - Environment/product ID may be accepted as an optional startup convenience, but product binding must also be manageable from the platform.
 - Agent token validation is part of the Agent phase gate; generating tokens without validating them on heartbeat/task APIs is not acceptable for V1 closure.
+- If an Agent is online and can already report service versions or remote resource summaries but is still unbound, show it as `在线 / 待认领`. Its reported data may be displayed as unowned probe data for claim decisions, but it must not enter the official product/service view or execute release/deploy tasks until it is bound to a project/product.
+- Before requiring the user to deploy or change project-side Agent config, tell the user exactly which file/value/command must be changed and what success signal should appear on the platform page.
+- Do not use mock Agent data, mock probe data, or mock execution as V1 completion evidence.
 
 Project/product model decision for V1:
 
@@ -115,8 +117,8 @@ Environment management is considered ready for the next phase only because it su
    - User-visible outcome: users can create local and remote environments, bind multiple K8s namespaces, Harbor projects, and Jenkins views, and see resource readiness separately from Agent execution readiness.
    - Remaining scope: follow-up adjustments only when service association consumes these bindings.
 3. Agent 管理与远程探测. Next.
-   - User-visible outcome: users can see real Agent registration, heartbeat, unbound/pending-claim status, product/project binding, online/offline status, and remote resource probe results.
-   - Required before next phase: real Agent binary or docker-compose runtime, outbound connectivity to platform API, and remote resource access from Agent.
+   - User-visible outcome: users can generate a registration token on the Agent page, copy platform URL/token into project-side Agent config, start the Agent binary, see `在线 / 待认领`, inspect unowned probe summaries, bind the Agent to project/product, and then see it as ready for official remote tasks.
+   - Required before next phase: real Agent binary runtime, outbound connectivity to platform API, real registration/token validation, and remote resource access from Agent. `docker compose` is not required for development closure and is deferred to formal production deployment verification.
 4. 项目管理.
    - User-visible outcome: users can create and select top-level projects such as 项目A and 项目B as the business ownership boundary.
    - Dependency: completed environments/products must be attachable to projects without rewriting resource management.
@@ -146,7 +148,7 @@ V1 must prioritize functional closure over optimization work. The minimum accept
 - the platform can manage project environments
 - the platform can group products under projects before services, releases, and deployments are created
 - the platform can create and track project-environment deployment/release tasks
-- Agent can be started directly by binary during development and deployed by docker-compose in formal project environments
+- Agent can be started directly by binary during development and later deployed by docker-compose in formal production use
 - remote Agent can lease/pull release/deploy task payloads and required execution data from the platform API
 - Agent-driven execution and status reporting are visible end to end
 
@@ -160,8 +162,8 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
   - Agent only communicates outbound to the platform API; the platform must not call Agent endpoints or push tasks to Agent
 - V1 Agent deployment model:
   - Linux host
-  - direct binary startup is the preferred development-time path
-  - `docker compose` is the formal packaged deployment path
+  - direct binary startup is the required development-time path for debugging and integration
+  - `docker compose` is the later formal production deployment path, not the current development gate
   - Agent is outside Kubernetes
   - Agent does not need to expose an endpoint reachable by the platform
   - Agent connects outbound to the platform API to lease/pull tasks and report heartbeat, service list, image versions, step status, logs, and final result
@@ -180,12 +182,10 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
    - add health endpoint and concise logs
    - user-visible outcomes:
      - developers can start Agent on a Linux host directly from the built binary during development
-     - environment owner can deploy Agent on a Linux host with `docker compose` in formal use
+     - environment owner can later deploy Agent on a Linux host with `docker compose` in formal production use
      - platform can show the Agent as registered or reachable
    - external readiness:
      - Linux host
-     - `docker`
-     - `docker compose`
      - network path from Agent to platform API
 2. Complete Agent outbound task lease/pull protocol. Locally implemented.
    - Agent registration and environment binding
@@ -200,10 +200,9 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
      - detail page shows dispatch result, execution steps, logs, and final result from Agent callbacks
    - external readiness:
      - Agent Linux host
-     - `docker compose`
      - outbound connectivity from Agent to platform API
      - repeatable test service
-3. Complete mock executor in remote Agent. Locally implemented.
+3. Complete historical mock executor in remote Agent. Locally implemented, but not a current V1 completion gate.
    - no Jenkins/Harbor/K8s dependency yet
    - Agent leases/pulls release/deploy payloads
    - Agent simulates execution steps and callbacks
@@ -296,9 +295,9 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
    - build `agent/cmd/agent` into a binary
    - copy `agent/.env.example` to an Agent config file on the host and fill non-secret identifiers
    - run the Agent with `-f <config-file>` for development-time verification
-   - then verify the formal `docker compose` deployment path
+   - verify the formal `docker compose` deployment path only after development-time binary verification is complete and production deployment packaging is in scope
    - verify `/healthz`
-   - verify heartbeat reaches `/api/agents/{id}/heartbeat`
+   - verify registration token exchange, long-lived Agent token validation, and heartbeat reaches the platform
 2. Verify Agent outbound task lease/pull dispatch:
    - create a project-environment release/deploy task
    - verify `/api/agent-tasks/lease` returns the bound task only to the matching Agent/environment
@@ -314,7 +313,6 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 5. Before remote Agent verification, prepare:
   - one Linux host for Agent
   - Go toolchain or a prebuilt Agent binary for development-time direct startup
-  - `docker` and `docker compose` for formal deployment verification
    - platform API connectivity from Agent host
    - one repeatable test project or service
 6. Before real Jenkins/Harbor/K8s integration, also prepare:

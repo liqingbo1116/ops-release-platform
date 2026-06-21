@@ -199,9 +199,13 @@ V1 最低交付目标：
 
 - Agent 注册、心跳、环境绑定、在线状态、最近任务状态全部改为真实数据。
 - Agent 管理页面不再依赖 mock Agent 列表。
+- Agent 管理页面可以生成一次性注册密钥，并展示平台地址、密钥有效期和二进制启动配置示例。
+- 项目现场人员把平台地址和注册密钥写入 Agent 配置文件后，用二进制方式启动 Agent。
+- Agent 首次注册成功后由平台签发长期 Agent token，一次性注册密钥不得用于运行期接口。
 - Agent 支持先凭平台地址和注册密钥接入平台，平台能展示未绑定/待认领 Agent，再由平台绑定到项目/产品；当前环境记录在 V1 中承接产品部署范围。
 - Agent 启动时可选预填环境 ID 作为便捷绑定，但不能要求所有 Agent 启动前必须指定环境。
-- Agent 心跳、任务租约、执行回传接口必须校验 Agent token，不能只生成 token 不校验。
+- Agent 心跳、任务租约、远程探测和执行回传接口必须校验长期 Agent token，不能只生成 token 不校验。
+- Agent 处于 `在线 / 待认领` 时可以展示未归属探测摘要，但不能进入正式产品/服务视图，也不能执行发布/部署任务。
 - 项目/远程环境的资源测试连接和刷新探测通过 Agent 任务执行。
 - Agent 探测 K8s namespace、Harbor project、Jenkins view/job 后回传状态和缓存。
 
@@ -218,7 +222,10 @@ V1 最低交付目标：
 门禁：
 
 - 如果 Agent 只能在启动时绑定环境，平台不支持未绑定/待认领 Agent，本阶段未完成。
-- 如果 Agent token 没有在心跳、任务租约和执行回传接口校验，本阶段未完成。
+- 如果注册密钥不能从页面生成，或不能一次性注册后换长期 Agent token，本阶段未完成。
+- 如果 Agent token 没有在心跳、任务租约、远程探测和执行回传接口校验，本阶段未完成。
+- 如果待认领 Agent 的探测数据进入正式产品/服务视图，或待认领 Agent 可执行发布/部署任务，本阶段未完成。
+- 如果 Agent 管理仍依赖 mock Agent、mock 探测数据或 mock 执行结果，本阶段未完成。
 - 如果远程 Linux 主机、二进制启动方式、或平台出站连通性未准备好，Agent 管理无法替换 mock，不能进入阶段 4。
 - 如果远程资源探测不能通过 Agent 回传状态和缓存，不能进入阶段 4。
 
@@ -407,7 +414,9 @@ V1 最低交付目标：
 - 项目环境默认平台侧不可连通，必须通过部署在项目环境内或可访问项目环境的 Agent 接入。
 - 平台不能依赖访问项目环境 Agent endpoint，也不能向 Agent 主动推送任务。
 - Agent 只支持出站访问平台 API：主动领取/租约获取任务 payload，并主动上报心跳、服务列表、镜像版本、运行态快照、任务状态、日志和最终结果。
-- V1 Agent 部署方式固定为项目环境侧 Linux 主机 + `docker compose`，不要求先把 Agent 自身部署进 Kubernetes。
+- V1 研发阶段 Agent 部署方式固定为项目环境侧 Linux 主机 + 二进制启动，不要求先把 Agent 自身部署进 Kubernetes。
+- `docker compose` 只作为后续正式上线部署方式，不作为当前研发阶段门禁。
+- Agent 当前阶段不能用 mock 数据作为完成标准；缺真实 Agent、网络、配置或外部资源时，要记录阻塞并及时说明需要用户准备什么。
 
 ### 当前状态
 
@@ -426,19 +435,19 @@ V1 最低交付目标：
 ### V1 后续执行顺序
 
 1. 远程 Agent 独立部署包（本地实现已完成，待远程主机验证）
-   - 交付：可运行 Agent 进程、配置读取、健康检查、任务领取客户端、结果回传客户端、`agent/Dockerfile`、远程 Agent `docker-compose.yml`、`.env.example`。
-   - 用户视角：环境负责人可以在远程 Linux 主机执行 `docker compose up -d` 启动 Agent，平台可以看到 Agent 在线或健康。
-   - 环境准备：Linux 主机、`docker`、`docker compose`、Agent 到平台 API 的出站连通性。
+   - 交付：可运行 Agent 进程、配置读取、健康检查、任务领取客户端、结果回传客户端、二进制启动配置示例、`.env.example`。
+   - 用户视角：环境负责人可以在远程 Linux 主机执行 Agent 二进制启动，平台可以看到 Agent 在线或健康。
+   - 环境准备：Linux 主机、Agent 到平台 API 的出站连通性。
    - 不需要：Jenkins、Harbor/Registry、Kubernetes。
 2. Agent 主动领取/租约任务链路（本地实现已完成，待远程主机验证）
    - 交付：环境与 Agent 绑定、待执行任务 payload、领取/租约接口、领取确认、租约超时、幂等执行键、状态/日志/结果回传。
    - 用户视角：提交发布/部署后，详情页能看到任务被远程 Agent 领取、执行和回传结果。
-   - 环境准备：第 1 步 Agent 可远程运行，Agent 可访问平台 API，可重复提交的 mock 发布/部署任务。
+   - 环境准备：第 1 步 Agent 可远程运行，Agent 可访问平台 API，可重复提交的真实测试任务。
    - 不需要：Jenkins、Harbor/Registry、Kubernetes。
-3. 远程 Agent mock executor（本地实现已完成，待远程主机验证）
-   - 交付：Agent 领取任务后模拟 Jenkins 构建、Harbor 同步、K8s 部署/更新、健康检查，并回传步骤、日志、失败原因和最终结果。
-   - 用户视角：平台提交任务后，远程进程实际收到并模拟执行，详情页展示远程 Agent 回传内容。
-   - 环境准备：Agent 主机和网络连通性。
+3. Agent 管理与远程探测真实闭环
+   - 交付：页面生成一次性注册密钥、Agent 首次注册、长期 Agent token 签发和校验、心跳、`在线 / 待认领`、项目/产品绑定、远程资源探测和缓存回传。
+   - 用户视角：用户在 Agent 页面生成密钥，项目侧用二进制启动 Agent；平台看到 `在线 / 待认领`，可查看未归属探测摘要，绑定到项目/产品后才进入正式任务。
+   - 环境准备：Agent 主机、平台 API 出站网络、Agent 访问远程 K8s/Harbor/Jenkins 的网络和凭据来源。
    - 不需要：Jenkins、Harbor/Registry、Kubernetes。
 4. 发布/部署详情与远程 Agent 回调收口
    - 交付：`agentTaskId` 关联、任务状态刷新、日志、失败原因、执行记录、发布报告、重试/跳过/人工确认/回滚入口与状态一致性。
@@ -470,15 +479,18 @@ V1 最低交付目标：
 ### V1 关键前提调整
 
 - V1 要实现真实项目环境发版/部署，必须先具备可独立部署的项目环境 Agent。
-- Agent V1 部署方式固定为项目环境侧 Linux 主机 + `docker compose`。
+- 研发联调阶段 Agent 部署方式固定为项目环境侧 Linux 主机 + 二进制启动；`docker compose` 只用于后续正式上线部署验证。
 - 本地环境按平台侧可连通处理，不需要 Agent；项目环境按平台侧不可连通处理，必须通过 Agent 接入。
+- Agent 管理页面生成一次性注册密钥；Agent 首次注册后换长期 Agent token，运行期心跳、任务租约、远程探测和执行回传都必须校验长期 Agent token。
+- Agent 支持 `在线 / 待认领`，待认领 Agent 只展示未归属探测摘要，不能进入正式产品/服务视图，也不能执行发布/部署任务。
 - Agent 只支持出站访问平台 API，上报心跳、服务列表、镜像版本、运行态快照、任务状态、日志和执行结果，并通过领取/租约机制获取发布/部署任务。
-- 在 Agent 不能独立部署、Agent 不能主动连接平台领取任务并回传结果前，项目环境发版/部署只能停留在平台侧 mock 验证，不能算真实 V1 联调通过。
+- 在 Agent 不能二进制启动、不能真实注册/心跳/token 校验/探测回传前，不能用 mock 数据替代完成。
 - Jenkins、Harbor、Kubernetes 的真实接入必须排在“Agent 可部署 + Agent 出站任务领取链路打通”之后。
 
 ### Agent 部署方案
 
-- V1 默认方案：Agent 部署在独立 Linux 主机上，使用 `docker compose` 运行。
+- V1 研发默认方案：Agent 部署在独立 Linux 主机上，使用直接构建出的二进制运行。
+- V1 正式上线方案：后续再验证 `docker compose` 运行方式。
 - V1 默认不把 Agent 自身作为 Kubernetes 内 workload 部署前提。
 - V1 中 Agent 的职责是：
   - 主动访问平台 API 领取/租约获取发布/部署任务和执行数据
@@ -500,6 +512,7 @@ V1 最低交付目标：
   - Redis Stream mock Agent worker
   - mock 集成 adapter 预留
 - 已完成并已推送的 mock-first V1 基础：
+  - 以下内容只作为历史实现背景，不作为当前 Agent 管理与远程探测阶段的完成标准。
   - 阶段 A：发布详情/部署详情闭环
   - 已补齐 `agentTaskId` 关联、详情轮询、执行记录、发布报告、失败重试、人工确认、跳过步骤、回滚入口
   - 阶段 B：Agent 协议 mock 闭环
@@ -510,18 +523,18 @@ V1 最低交付目标：
   - 阶段 D 前置：差异结果到发布/部署任务的端到端 mock 链路
   - 已验证 `NEED_UPDATE` 创建服务发版、`MISSING_IN_TARGET` 创建服务部署、详情页通过 `agentTaskId` 读取 mock Agent 状态和日志
   - 已完成服务发版/服务部署边界收口：服务发版不再依赖来源基线，支持 Jenkins Job 与本地 Harbor 镜像来源；服务部署继续基于来源基线，只处理目标缺失服务
-  - 已补齐环境管理页与 Agent 管理页的 mock-first 用户视角准备状态：环境页从 API/mock fallback 读取状态，显示真实联调前置依赖；Agent 页显示 Linux + `docker compose` 部署假设，并在 Agent 离线时提示对应项目环境远程发布/部署会被阻断
+  - 已补齐环境管理页与 Agent 管理页的 mock-first 用户视角准备状态；当前研发基线已调整为真实 Agent 注册、二进制启动、长期 token 校验和真实探测，不再用 mock-first 结果作为完成标准
   - 已补齐失败动作与 Agent 任务状态一致性：发布重试、发布回滚、部署步骤重试/跳过/人工确认都会同步更新 mock Agent task status，详情页轮询可看到对应结果
 - 当前明确缺口：
   - 独立 Agent 本地实现、Dockerfile、docker-compose 模板、出站任务租约接口、租约超时回收、单任务租约约束和 Agent mock executor 已完成
-  - 当前缺口是尚未在真实远程 Linux 主机验证 Agent `docker compose` 部署与跨主机出站回传
-  - 尚未完成跨主机出站网络下的心跳、任务租约领取、mock 执行日志和最终结果回传验收
+  - 当前缺口是尚未在真实远程 Linux 主机验证 Agent 二进制启动、真实注册、长期 token 校验、心跳和跨主机出站回传
+  - 尚未完成跨主机出站网络下的真实心跳、任务租约领取、远程探测和最终结果回传验收
   - 尚未接入真实 Jenkins、Harbor/Registry、Kubernetes
-  - 真实远程环境发版/部署测试尚不能开始，必须先完成 Agent 远程部署验证
+  - 真实远程环境发版/部署测试尚不能开始，必须先完成 Agent 真实注册与远程探测验证
 - 下一步默认进入：
-  - 在远程 Linux 主机或远程等价环境中部署 `agent/docker-compose.yml`
-  - 验证 Agent 心跳、任务租约领取、mock 执行日志和最终结果都能回传平台
-  - 在 Jenkins、Harbor、Kubernetes 尚未准备好时，继续只用远程 Agent mock executor 验证跨主机执行、日志回传和结果回传
+  - 在远程 Linux 主机或远程等价环境中构建并启动 Agent 二进制
+  - 验证页面生成一次性注册密钥、Agent 首次注册、长期 token 校验、心跳、待认领展示、绑定项目/产品和远程探测回传
+  - 如 Jenkins、Harbor、Kubernetes 或 Agent 主机未准备好，记录阻塞并及时说明需要用户准备的配置、网络和成功信号，不能用 mock 数据替代完成
 
 ### V1 用户视角功能主线
 
@@ -586,21 +599,19 @@ V1 最低交付目标：
 
 - 实现可运行的 Agent 进程
 - 支持配置读取、健康检查、任务领取、执行调度和结果回传
-- 提供 `agent/Dockerfile`
-- 提供远程 Agent `docker-compose.yml`
+- 支持二进制方式启动，命令形态为 `agent -f <config-file>`
+- 后续正式上线再验证 `agent/Dockerfile` 和远程 Agent `docker-compose.yml`
 - 提供 `.env.example`，只包含变量名和示例，不包含真实密钥
 
 进入本阶段前需要准备：
 
 - 1 台远程 Linux 主机
-- 已安装 `docker`
-- 已安装 `docker compose`
 - Agent 到平台 API 的网络连通性
 - 不需要 Jenkins、Harbor、Kubernetes
 
 用户视角交付：
 
-- 用户或环境负责人可以在项目环境侧主机执行 `docker compose up -d` 启动 Agent
+- 用户或环境负责人可以在项目环境侧主机执行 Agent 二进制启动
 - 平台可以看到 Agent 在线或健康
 - Agent 可以主动从平台领取测试任务并回传结果
 
@@ -628,7 +639,9 @@ V1 最低交付目标：
 - 领取或租约失败时，详情页明确提示失败原因和下一步动作
 - 详情页日志来自远程 Agent 回传，而不是平台进程内 mock
 
-### 阶段 C：远程 Agent mock executor 验证
+### 阶段 C：远程 Agent mock executor 验证（历史背景）
+
+本阶段只保留为早期 mock-first 研发背景，不再作为当前 V1 Agent 管理与远程探测的完成标准。当前阶段必须以真实 Agent 进程、真实注册、真实心跳、长期 token 校验和真实远程探测为准。
 
 研发目标：
 
@@ -687,14 +700,13 @@ V1 最低交付目标：
 - Agent 管理页已使用后端 Agent 列表数据展示在线状态、心跳、当前任务
 - 环境管理页已使用后端环境列表数据展示本地/远程环境类型、Agent 状态、环境阻断提示和真实联调前置条件
 - 真实 Agent 进程、Agent 主动领取任务链路、租约超时回收和单任务租约策略已本地实现
-- 当前仍需在远程 Linux 主机验证 Agent `docker compose` 部署、心跳、租约领取、mock 执行日志和最终结果回传
+- 当前仍需在远程 Linux 主机验证 Agent 二进制启动、真实注册、心跳、长期 token 校验、租约领取、远程探测和最终结果回传
 - 真实 Jenkins、Harbor、K8s 联调必须等待远程 Agent 可部署且任务领取链路打通
 
 进入本阶段前需要准备：
 
 - Agent 宿主机：
   - Linux
-  - 已安装 `docker` 与 `docker compose`
   - 具备基础日志查看和配置更新能力
 - 网络连通性：
   - Agent 可访问平台 API
@@ -711,9 +723,9 @@ V1 最低交付目标：
 下一步需要做什么：
 
 - mock-first 已打通平台侧任务与 Agent 状态展示的最小闭环
-- 后续真实验证时，需要先在远程 Linux 主机验证远程 Agent 可部署包和 Agent 主动领取任务链路
+- 后续真实验证时，需要先在远程 Linux 主机验证远程 Agent 二进制启动、真实注册和 Agent 主动领取任务链路
 - 运行态快照与基线生成 mock 链路已补齐用户可见元数据
-- 在 Jenkins、Harbor、Kubernetes 准备完成前，可先用远程 Agent mock executor 验证跨主机任务领取和结果回传
+- 在 Jenkins、Harbor、Kubernetes 准备完成前，只能验证不依赖外部资源的真实 Agent 注册、心跳、token 校验、任务租约和探测阻塞提示，不能用 mock executor 作为完成标准
 
 ### 阶段 F：真实发布链路联调
 
@@ -727,7 +739,7 @@ V1 最低交付目标：
 
 - 远程 Agent：
   - 阶段 A、B、C 已完成
-  - Agent 可通过 `docker compose` 稳定运行
+  - Agent 可通过二进制方式稳定运行
   - Agent 可主动从平台领取任务
   - Agent 可向平台回传日志和结果
 - Jenkins：
@@ -775,7 +787,7 @@ V1 最低交付目标：
 
 - 远程 Agent：
   - 阶段 A、B、C 已完成
-  - Agent 可通过 `docker compose` 稳定运行
+  - Agent 可通过二进制方式稳定运行
   - Agent 可主动从平台领取任务
   - Agent 可向平台回传日志和结果
 - Kubernetes：

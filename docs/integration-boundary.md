@@ -50,13 +50,15 @@ Agent -> 平台：上报日志片段
 Agent -> 平台：上报最终结果
 ```
 
-开发期既保留平台侧 `mock-agent-worker`，也提供独立远程 Agent 的 mock executor。独立 Agent 在真实外部组件准备好之前只做模拟执行：通过出站请求领取任务，模拟镜像同步、kubectl、shell 和健康检查，再通过平台回调接口上报步骤、日志和最终结果。该模式用于先验证项目环境不可直连条件下的远程发版/部署链路。
+历史 mock Agent 链路只作为早期本地验证背景，不再作为 V1 当前阶段完成标准。Agent 管理与远程探测阶段必须使用真实 Agent 进程、真实注册、真实心跳、真实 token 校验和真实远程探测。如项目侧 Agent、网络或外部资源未准备好，应记录阻塞并提示用户需要配合的部署或配置项，不能用 mock 数据替代完成。
 
 V1 Agent 协议约束：
 
-- 研发阶段 Agent 优先以直接构建出的二进制在 Linux 主机上启动，便于远程调试和验证。
-- 正式部署阶段 Agent 以 `docker compose` 部署在项目环境侧 Linux 主机，不作为 Kubernetes 内 workload 前置。
-- Agent 当前只支持 `AGENT_MODE=mock`，真实 Jenkins、Harbor、Kubernetes executor 在环境准备后再接入。
+- 研发阶段 Agent 以直接构建出的二进制在 Linux 主机上启动，便于远程调试、改配置和快速重启。
+- 正式上线部署阶段再验证 `docker compose` 部署方式，不作为当前研发阶段门禁。
+- Agent 管理页面生成一次性注册密钥，并展示平台地址、密钥有效期和二进制启动配置示例。
+- Agent 首次注册成功后由平台签发长期 Agent token；心跳、任务租约、远程探测、执行回传必须校验长期 Agent token。
+- 平台支持 `在线 / 待认领` Agent。待认领 Agent 只能显示未归属探测摘要，不能进入正式产品/服务视图，也不能执行发布/部署任务。
 - Agent 当前只支持 `AGENT_MAX_TASKS=1`，平台同一时间只向同一 Agent 下发一个运行中租约任务。
 - 平台会回收过期租约并允许任务重新租约，避免 Agent 进程退出或网络中断后任务永久停留在运行态。
-- 远程 Agent mock 验证阶段需要 Agent 主机、到平台 API 的出站网络；正式部署验收再补 `Docker/Compose` 路径验证，不需要 Jenkins、Harbor、Kubernetes。
+- 如需用户在项目环境部署 Agent、修改配置、开放网络或准备 K8s/Harbor/Jenkins 访问，必须及时说明具体配置、执行命令和成功信号。
