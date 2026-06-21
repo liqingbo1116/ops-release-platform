@@ -1,6 +1,6 @@
 # Ops Release Platform TODO
 
-Last updated: 2026-06-09
+Last updated: 2026-06-21
 
 Always verify this file against `git status --short --branch`, `git log -1 --oneline`, and implementation docs before acting.
 
@@ -33,25 +33,22 @@ Latest pushed milestone:
 
 ## Current Local Work
 
-- Local uncommitted V1 environment management work:
-  - environment page now exposes local environment and remote environment instead of network mode
-  - local environment binds platform-managed K8s namespace, Harbor project, and optional Jenkins view
-  - remote environment does not bind platform-managed K8s/Harbor/Jenkins resources and waits for Agent reporting
-  - backend normalizes local environments to `DIRECT` and remote environments to `AGENT`
-  - backend rejects platform direct connection checks for remote environments
-  - newly created environments default to `UNKNOWN` until local checks or Agent reports update status
+- Local uncommitted environment page refinement:
+  - environment list separates resource readiness from remote Agent execution readiness
+  - remote Agent `UNBOUND` is displayed as Chinese `未绑定`
+  - resource scope problems stay in the environment/status summary
+  - Agent readiness is shown independently and documented in environment detail
 - Validation for current local work:
-  - `git diff --check` passed
   - `npm run test:unit -- EnvironmentPage` passed in `frontend`
-  - `go test ./internal/api ./internal/repository` passed in `backend`
-  - `npm run build` passed in `frontend`; Rolldown reported existing `@vueuse/core` pure annotation warnings only
 
 ## Current Step
 
-- V1 mainline is currently at remote Agent verification:
-  - steps 1-4 are locally implemented for mock-first pre-environment development
-  - next step is remote Agent binary verification against the platform API during development, before formal docker-compose deployment verification
-  - real Jenkins/Harbor/Kubernetes integration must wait for environment readiness
+- V1 mainline is currently ready to move from environment management to Agent management and remote probing.
+- Foundation status:
+  - 基础资源管理: functionally complete for V1; keep only bug fixes and integration follow-up.
+  - 环境管理: functionally complete for V1; environments can bind multiple K8s namespaces, Harbor projects, and Jenkins views for later service association.
+- Next default step:
+  - Agent 管理与远程探测: verify real Agent registration, heartbeat, environment binding, online status, task leasing, and remote resource probing through the platform API.
 - Completed and pushed mock-first status:
   - release/deploy detail closure
   - Agent protocol mock closure
@@ -71,24 +68,53 @@ Latest pushed milestone:
 
 This is the authoritative order for subsequent development. Each phase must use real data before it is considered complete. If a required external tool or runtime environment is not ready, stop at that phase and do not move on.
 
-1. Environment management.
-2. Agent management.
-3. Release creation.
-4. Baseline management.
-5. Deployment execution.
-6. Release/deployment detail.
-7. Auth and permissions.
-8. Final mock cleanup.
+1. 基础资源管理.
+2. 环境管理.
+3. Agent 管理与远程探测.
+4. 服务与版本来源.
+5. 发布单创建.
+6. 基线管理.
+7. 部署执行.
+8. 发布详情 / 部署详情.
+9. 登录与权限.
+10. 清理剩余 mock.
 
-Current step is step 1: Environment management. Do not move to Agent management until environment list/detail/create/update/status/dependency visibility use real backend data and the phase-1 mock/fallback boundary is removed or explicitly recorded as blocked by missing real integrations.
+Current step is step 3: Agent 管理与远程探测. Do not move to 服务与版本来源 until Agent registration, heartbeat, environment binding, status visibility, task leasing, and remote probing use real backend data and the mock/fallback boundary is removed or explicitly recorded as blocked by missing real runtime or infrastructure.
 
-Environment management must also handle multi-scope bindings before moving on:
+Environment management is considered ready for the next phase only because it supports multi-scope bindings:
 
 - An environment must not be modeled as only one Harbor project, one K8s namespace, and one Jenkins view/job.
 - Add or complete the environment resource binding model so one environment can bind multiple K8s namespaces, Harbor projects, and Jenkins views/jobs.
 - Multi-scope bindings are for later service-to-environment association: each service must be able to use the correct namespace, Harbor project, and Jenkins view/job inside an environment. Do not implement multi-binding as an isolated configuration feature with no service-level consumer.
 - The page may keep a minimal default-binding UI in V1, but backend models, APIs, and persistence must support the full binding list.
 - Release/deploy task creation must snapshot the actual namespace/project/view/job used by that task, so historical tasks are not affected when environment bindings change later.
+
+## V1 Ordered TODO
+
+1. 基础资源管理. Done for V1.
+   - User-visible outcome: users can maintain K8s, Harbor, and Jenkins resources, test connectivity, refresh probes, and distinguish K8s resources by API Server.
+   - Remaining scope: bug fixes only unless later phases expose integration gaps.
+2. 环境管理. Done for V1.
+   - User-visible outcome: users can create local and remote environments, bind multiple K8s namespaces, Harbor projects, and Jenkins views, and see resource readiness separately from Agent execution readiness.
+   - Remaining scope: follow-up adjustments only when service association consumes these bindings.
+3. Agent 管理与远程探测. Next.
+   - User-visible outcome: users can see real Agent registration, heartbeat, environment binding, online/offline/unbound status, and remote resource probe results.
+   - Required before next phase: real Agent binary or docker-compose runtime, outbound connectivity to platform API, and remote resource access from Agent.
+4. 服务与版本来源.
+   - User-visible outcome: users can create services and select actual namespace, Harbor project, Jenkins view/job, repository, branch, image name, and version source inside the target environment.
+   - Dependency: environment bindings from step 2 must be consumed here, not duplicated.
+5. 发布单创建.
+   - User-visible outcome: users can select services, target environment, and version source to create a release order with environment, resource, and Agent readiness checks.
+6. 基线管理.
+   - User-visible outcome: users can view environment baselines, record service version snapshots, and compare target release versions with the current baseline.
+7. 部署执行.
+   - User-visible outcome: users can execute deployments; local environments run through platform-direct K8s access, remote environments run through Agent.
+8. 发布详情 / 部署详情.
+   - User-visible outcome: users can inspect execution progress, step status, logs, failure reason, retry/rollback entry, and Agent-reported results.
+9. 登录与权限.
+   - User-visible outcome: users log in with real identity, and key operations are controlled by role/environment/service permissions.
+10. 清理剩余 mock.
+   - User-visible outcome: the V1 mainline no longer depends on page fallback data, mock repositories, or mock-only API behavior.
 
 ## V1 Mainline Goal
 

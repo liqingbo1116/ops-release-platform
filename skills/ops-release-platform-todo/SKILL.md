@@ -48,29 +48,33 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - Agent must be independently deployable before V1 remote release/deploy can be accepted
   - Agent leases/pulls release/deploy task payloads from the platform and reports heartbeat, service list, image versions, status, logs, and final result back to the platform
 - Treat the following path as the mainline unless the user explicitly reprioritizes:
-  - environment management
-  - Agent management
-  - release creation
-  - baseline management
-  - deployment execution
-  - release/deployment detail
-  - auth and permissions
-  - final mock cleanup
+  - 基础资源管理
+  - 环境管理
+  - Agent 管理与远程探测
+  - 服务与版本来源
+  - 发布单创建
+  - 基线管理
+  - 部署执行
+  - 发布详情 / 部署详情
+  - 登录与权限
+  - 清理剩余 mock
 - Performance tuning, bundle optimization, warning cleanup, refactor-only cleanup, and UI polish should be scheduled after the mainline unless they block build, test, or feature delivery.
 - When the user says `继续` or `继续开发`, select the next unfinished item on this mainline before taking optimization work.
 - Each phase must use real data before it is considered complete. If Jenkins, Harbor/Registry, Kubernetes, PostgreSQL, Redis, Agent runtime, or another required tool is needed to replace mock and is not ready, stop at that phase and record the blocker.
 
 ## V1 Ordered Path
 
-1. Environment management: real backend/database data for list, detail, create, update, status, and dependency visibility.
-2. Agent management: real registration, heartbeat, environment binding, online status, and task lease data.
-3. Release creation: real environments, agents, service sources, and version sources.
-4. Baseline management: real baseline list, detail, source metadata, and service snapshot source.
-5. Deployment execution: real Agent execution against the target infrastructure.
-6. Release/deployment detail: persisted real task status, steps, logs, and results.
-7. Auth and permissions: real login, users, roles, permissions, and environment-level authorization.
-8. Final mock cleanup: remove remaining runtime mock handlers, mock repositories, page fallbacks, and mock-only mainline dependencies.
-9. Non-functional optimization work after V1 functional closure.
+1. 基础资源管理: real K8s, Harbor, and Jenkins resource data, connectivity checks, probe refresh, and cached namespaces/projects/views.
+2. 环境管理: real local/remote environments, multi-scope resource bindings, status visibility, and Agent readiness separation.
+3. Agent 管理与远程探测: real registration, heartbeat, environment binding, online status, task lease data, and remote probing.
+4. 服务与版本来源: real services consuming environment-bound namespace/project/view/job ranges and real version source configuration.
+5. 发布单创建: real environments, agents, services, version sources, and readiness checks.
+6. 基线管理: real baseline list, detail, source metadata, and service snapshot source.
+7. 部署执行: real platform-direct or Agent execution against the target infrastructure.
+8. 发布详情 / 部署详情: persisted real task status, steps, logs, and results.
+9. 登录与权限: real login, users, roles, permissions, and environment-level authorization.
+10. 清理剩余 mock: remove remaining runtime mock handlers, mock repositories, page fallbacks, and mock-only mainline dependencies.
+11. Non-functional optimization work after V1 functional closure.
 
 ## User-View Acceptance Path
 

@@ -15,6 +15,7 @@ const statusMap: Record<string, { label: string; type: 'success' | 'warning' | '
   UNKNOWN: { label: '未知', type: 'info' },
   ONLINE: { label: '在线', type: 'success' },
   OFFLINE: { label: '离线', type: 'danger' },
+  UNBOUND: { label: '未绑定', type: 'warning' },
   NOT_REQUIRED: { label: '不需要', type: 'info' },
   LOCKED: { label: '已锁定', type: 'success' },
   DRAFT: { label: '草稿', type: 'warning' },

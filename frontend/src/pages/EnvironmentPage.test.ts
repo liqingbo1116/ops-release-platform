@@ -463,6 +463,74 @@ describe('EnvironmentPage', () => {
     expect(wrapper.text()).toContain('请到基础资源刷新 Jenkins 探测')
   })
 
+  it('keeps remote agent readiness separate from resource readiness', async () => {
+    listHarborRegistries.mockResolvedValue([
+      { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listJenkinsInstances.mockResolvedValue([
+      { id: 'jenkins-local', name: '本地 Jenkins', status: 'HEALTHY', views: ['project-x'] },
+    ])
+    listEnvironments.mockResolvedValue([
+      {
+        id: 'env-remote-unbound',
+        name: '远程未绑定环境',
+        code: 'remote-unbound',
+        type: 'PROJECT',
+        networkMode: 'AGENT',
+        registryId: 'harbor-local',
+        registryProject: 'project-x',
+        jenkinsId: 'jenkins-local',
+        jenkinsView: 'project-x',
+        status: 'HEALTHY',
+        agentStatus: 'UNBOUND',
+        lastCheckAt: '2026-06-21T21:52:59+08:00',
+        bindings: [
+          {
+            resourceType: 'HARBOR',
+            resourceId: 'harbor-local',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'JENKINS',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+        ],
+      },
+    ])
+    const wrapper = mount(EnvironmentPage, {
+      global: {
+        stubs: {
+          EnvironmentConfigDrawer: {
+            template: '<aside v-if="visible">{{ diagnostics.map((item) => item.message).join(" ") }}</aside>',
+            props: ['visible', 'environment', 'resourceName', 'checking', 'diagnostics', 'checkHelpText'],
+          },
+          StatusTag: { template: '<span>{{ status }}</span>', props: ['status'] },
+        },
+        directives: {
+          loading: () => undefined,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('当前未发现问题')
+    expect(wrapper.text()).toContain('影响远程执行')
+    expect(wrapper.text()).not.toContain('远程 Agent 未绑定，会影响远程发布/部署执行')
+
+    ;(wrapper.vm as unknown as { openDrawer: (row: unknown) => void; environments: unknown[] }).openDrawer(
+      (wrapper.vm as unknown as { environments: unknown[] }).environments[0],
+    )
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('远程 Agent 未绑定，会影响远程发布/部署执行')
+  })
+
   it('passes local connection test explanation to the detail drawer', async () => {
     listKubernetesClusters.mockResolvedValue([
       { id: 'k8s-local', name: '本地 k3s', status: 'HEALTHY', namespaces: ['default'] },

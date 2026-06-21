@@ -6,7 +6,7 @@
         <p>本地环境由平台直连基础资源；远程环境由 Agent 上报状态并执行任务。</p>
       </div>
       <div class="head-actions">
-        <el-button :loading="loading" @click="loadAll">刷新</el-button>
+        <el-button :loading="loading" title="重新加载环境与基础资源探测结果，不执行连接测试" @click="loadAll">刷新</el-button>
         <el-button type="primary" @click="openCreateDialog">新增环境</el-button>
       </div>
     </div>
@@ -95,7 +95,10 @@
         <el-table-column label="Agent" width="110">
           <template #default="{ row }">
             <span v-if="row.type === 'LOCAL'">无需 Agent</span>
-            <StatusTag v-else :status="row.agentStatus" />
+            <div v-else class="agent-cell">
+              <StatusTag :status="row.agentStatus" />
+              <span v-if="row.agentStatus !== 'ONLINE'">影响远程执行</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" fixed="right" width="120">
@@ -376,7 +379,7 @@ function drawerResourceName(resourceType: EnvironmentResourceBinding['resourceTy
 }
 
 function problemDiagnostics(row: EnvironmentInfo) {
-  return environmentDiagnostics(row).filter((item) => item.status !== 'HEALTHY')
+  return resourceDiagnostics(row).filter((item) => item.status !== 'HEALTHY')
 }
 
 function problemSummary(row: EnvironmentInfo) {
@@ -389,7 +392,7 @@ function problemSummary(row: EnvironmentInfo) {
   }
   return {
     title: row.status === 'HEALTHY' ? '当前未发现问题' : '环境待验证，尚未发现明确缺失项',
-    nextStep: row.status === 'HEALTHY' ? '可用于后续服务关联、发布和部署' : '请执行连接测试或刷新基础资源探测结果',
+    nextStep: row.status === 'HEALTHY' ? '可用于后续服务关联、发布和部署' : '请在详情中执行连接测试；顶部刷新只重新加载环境与基础资源探测结果',
   }
 }
 
@@ -407,23 +410,38 @@ function compactNextStep(problems: EnvironmentDiagnostic[]) {
 function environmentDiagnostics(row: EnvironmentInfo): EnvironmentDiagnostic[] {
   const latestChecks = checkResultsByEnvironmentId.value[row.id]
   if (latestChecks) return latestChecks
+  return [...agentDiagnostics(row), ...resourceDiagnostics(row)]
+}
+
+function agentDiagnostics(row: EnvironmentInfo): EnvironmentDiagnostic[] {
   const diagnostics: EnvironmentDiagnostic[] = []
   if (row.type === 'PROJECT') {
     diagnostics.push({
       component: 'Agent',
       status: row.agentStatus === 'ONLINE' ? 'HEALTHY' : 'DEGRADED',
-      message: row.agentStatus === 'ONLINE' ? '远程 Agent 在线' : `远程 Agent 当前状态为 ${row.agentStatus || '未知'}`,
+      message: row.agentStatus === 'ONLINE' ? '远程 Agent 在线' : `远程 Agent ${agentStatusText(row.agentStatus)}，会影响远程发布/部署执行`,
       nextStep: row.agentStatus === 'ONLINE'
         ? '可继续校验 Harbor/Jenkins 资源范围'
         : '请启动并注册该环境 Agent，确认 Agent 配置的环境 ID 与详情中的 Agent 环境 ID 一致',
     })
   }
-  if (row.type === 'LOCAL') {
-    appendScopeDiagnostics(diagnostics, row, 'K8S')
-  }
+  return diagnostics
+}
+
+function resourceDiagnostics(row: EnvironmentInfo): EnvironmentDiagnostic[] {
+  const diagnostics: EnvironmentDiagnostic[] = []
+  if (row.type === 'LOCAL') appendScopeDiagnostics(diagnostics, row, 'K8S')
   appendScopeDiagnostics(diagnostics, row, 'HARBOR')
   appendScopeDiagnostics(diagnostics, row, 'JENKINS')
   return diagnostics
+}
+
+function agentStatusText(status = '') {
+  if (status === 'ONLINE') return '在线'
+  if (status === 'OFFLINE') return '离线'
+  if (status === 'UNBOUND') return '未绑定'
+  if (status === 'NOT_REQUIRED') return '不需要'
+  return status || '未知'
 }
 
 function appendScopeDiagnostics(
@@ -928,6 +946,19 @@ onMounted(loadAll)
   font-size: 12px;
   font-weight: 500;
   overflow-wrap: anywhere;
+}
+
+.agent-cell {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-cell span:last-child {
+  color: #7a8294;
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .form-tip {

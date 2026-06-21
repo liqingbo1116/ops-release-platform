@@ -7,6 +7,7 @@
       <template v-if="!isLocalEnvironment">
         <div class="kv"><span>Agent</span><StatusTag :status="environment.agentStatus" /></div>
         <div class="kv"><span>Agent 环境 ID</span><strong>{{ environment.id }}</strong></div>
+        <div v-if="agentProblemText" class="check-help">{{ agentProblemText }}</div>
       </template>
       <div class="kv"><span>{{ isLocalEnvironment ? '最近测试' : '最近上报' }}</span><span>{{ checkTimeText }}</span></div>
       <div class="check-help">{{ checkHelpText }}</div>
@@ -71,6 +72,10 @@ const props = defineProps<{
 const isLocalEnvironment = computed(() => props.environment?.type === 'LOCAL')
 const checkTimeText = computed(() => (props.environment?.lastCheckAt ? formatDateTime(props.environment.lastCheckAt) : '-'))
 const problemDiagnostics = computed(() => props.diagnostics.filter((item) => item.status !== 'HEALTHY'))
+const agentProblemText = computed(() => {
+  if (!props.environment || isLocalEnvironment.value || props.environment.agentStatus === 'ONLINE') return ''
+  return 'Agent 未在线会影响远程发布/部署执行；资源范围验证通过时，Jenkins/Harbor 仍可作为后续服务关联范围使用。'
+})
 </script>
 
 <style scoped>
