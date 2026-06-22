@@ -1,6 +1,6 @@
 # Ops Release Platform TODO
 
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 Always verify this file against `git status --short --branch`, `git log -1 --oneline`, and implementation docs before acting.
 
@@ -103,8 +103,8 @@ Project/product model decision for V1:
 Environment management is considered ready for the next phase only because it supports multi-scope bindings:
 
 - An environment must not be modeled as only one Harbor project, one K8s namespace, and one Jenkins view/job.
-- Add or complete the environment resource binding model so one environment can bind multiple K8s namespaces, Harbor projects, and Jenkins views/jobs.
-- Multi-scope bindings are for later service-to-environment association: each service must be able to use the correct namespace, Harbor project, and Jenkins view/job inside an environment. Do not implement multi-binding as an isolated configuration feature with no service-level consumer.
+- Add or complete the environment resource binding model so one local environment can bind multiple K8s namespaces, Harbor projects, and Jenkins views/jobs; one project environment binds project K8s namespaces and project Harbor projects.
+- Multi-scope bindings are for later service-to-environment association: each service must be able to use the correct namespace and Harbor project inside an environment; local build/version-source flows may also use Jenkins view/job. Do not implement multi-binding as an isolated configuration feature with no service-level consumer.
 - The page may keep a minimal default-binding UI in V1, but backend models, APIs, and persistence must support the full binding list.
 - Release/deploy task creation must snapshot the actual namespace/project/view/job used by that task, so historical tasks are not affected when environment bindings change later.
 
@@ -114,7 +114,7 @@ Environment management is considered ready for the next phase only because it su
    - User-visible outcome: users can maintain K8s, Harbor, and Jenkins resources, test connectivity, refresh probes, and distinguish K8s resources by API Server.
    - Remaining scope: bug fixes only unless later phases expose integration gaps.
 2. 环境管理. Done for V1.
-   - User-visible outcome: users can create local and remote environments, bind multiple K8s namespaces, Harbor projects, and Jenkins views, and see resource readiness separately from Agent execution readiness.
+   - User-visible outcome: users can create local and project environments. Local environments can bind multiple K8s namespaces, Harbor projects, and Jenkins views; project environments bind project K8s namespaces and Harbor projects and see resource readiness separately from Agent execution readiness.
    - Remaining scope: follow-up adjustments only when service association consumes these bindings.
 3. Agent 管理与远程探测. Next.
    - User-visible outcome: users can generate a registration token on the Agent page, copy platform URL/token into project-side Agent config, start the Agent binary, see `在线 / 待认领`, inspect unowned probe summaries, bind the Agent to project/product, and then see it as ready for official remote tasks.
@@ -160,14 +160,14 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
   - local environments are platform-direct by default and do not require Agent
   - project environments are not assumed reachable from the platform and require Agent
   - Agent only communicates outbound to the platform API; the platform must not call Agent endpoints or push tasks to Agent
-- V1 Agent deployment model:
+  - V1 Agent deployment model:
   - Linux host
   - direct binary startup is the required development-time path for debugging and integration
   - `docker compose` is the later formal production deployment path, not the current development gate
   - Agent is outside Kubernetes
   - Agent does not need to expose an endpoint reachable by the platform
   - Agent connects outbound to the platform API to lease/pull tasks and report heartbeat, service list, image versions, step status, logs, and final result
-  - Agent accesses remote Kubernetes, Jenkins, Harbor/Registry, and platform API
+  - Agent accesses project Kubernetes, project Harbor/Registry, and platform API. Agent does not access Jenkins; Jenkins is platform-side local infrastructure for build/version-source flows.
 - Do not treat “deploy Agent into Kubernetes” as a V1 prerequisite unless the docs are deliberately changed later.
 
 ## Recommended Development Path
@@ -231,7 +231,8 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
    - external readiness:
      - Jenkins test job or job namespace
      - Harbor/Registry test project and test images
-     - Agent connectivity to Jenkins and Harbor
+     - platform backend connectivity to local Jenkins and local Harbor
+     - project Agent connectivity to project Harbor, project Kubernetes, and platform API
      - one test service repository
      - `Dockerfile`
      - Jenkinsfile or build script
@@ -291,34 +292,77 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 
 ## Next Suggested Tasks
 
-1. Verify the standalone Agent deployable package:
+1. 收敛 Agent 页面交互:
+   - Agent 列表只保留“刷新”作为状态更新入口，不做平台主动探测按钮。
+   - 页面展示 Agent 上报的心跳、在线状态、绑定状态、最近上报摘要和最近任务状态。
+   - 保留 Agent 绑定/解绑产品入口；解绑是否开放要以安全规则为准：有运行中任务、已绑定正式产品且仍在线执行的 Agent 不允许直接解绑。
+   - 环境/产品页面也可以提供绑定/解绑 Agent 入口，但必须与 Agent 页面使用同一套后端规则，避免两个页面状态不一致。
+   - 待认领 Agent 可以显示未归属探测摘要，但不能进入正式产品/服务视图，也不能执行发布/部署任务。
+   - 页面不解释 Agent 内部工作细节，只呈现用户需要判断的结果：是否在线、是否待认领、是否已绑定、是否有上报数据、是否可执行任务。
+2. Verify the standalone Agent deployable package:
    - build `agent/cmd/agent` into a binary
    - copy `agent/.env.example` to an Agent config file on the host and fill non-secret identifiers
    - run the Agent with `-f <config-file>` for development-time verification
    - verify the formal `docker compose` deployment path only after development-time binary verification is complete and production deployment packaging is in scope
    - verify `/healthz`
    - verify registration token exchange, long-lived Agent token validation, and heartbeat reaches the platform
-2. Verify Agent outbound task lease/pull dispatch:
+3. Verify Agent outbound task lease/pull dispatch:
    - create a project-environment release/deploy task
    - verify `/api/agent-tasks/lease` returns the bound task only to the matching Agent/environment
    - verify task status changes to leased/running and logs appear through callback APIs
-3. Close release/deploy detail against remote Agent callbacks:
+4. Close release/deploy detail against remote Agent callbacks:
    - show lease state and callback-driven logs
    - show lease/execution failure reasons
    - keep retry/skip/manual-confirm/rollback state consistent with Agent task status
-4. Keep the current scope narrow:
+5. Keep the current scope narrow:
    - existing service release/update
    - target-missing service first deployment
    - remote project environment task tracking
-5. Before remote Agent verification, prepare:
+6. Before remote Agent verification, prepare:
   - one Linux host for Agent
   - Go toolchain or a prebuilt Agent binary for development-time direct startup
    - platform API connectivity from Agent host
    - one repeatable test project or service
-6. Before real Jenkins/Harbor/K8s integration, also prepare:
+7. Before real Jenkins/Harbor/K8s integration, also prepare:
    - Harbor test image and tag set
    - Jenkins pipeline and build script
    - deployable K8s manifests
+
+## Project Management TODO
+
+This section is the handoff checklist for the upcoming 项目管理 / 产品管理 work. It must preserve the V1 user hierarchy: 项目 -> 产品 -> 服务 -> 发布 / 部署.
+
+1. Rename the user-facing 环境管理 entry to 产品管理 for the main business view.
+   - User-visible outcome: users no longer need to understand a separate “environment” level; they see products such as 数据中台 and 物联中台.
+   - Implementation rule: reuse the completed environment/resource-binding capability as the product deployment scope instead of rebuilding K8s/Harbor/Jenkins binding logic.
+2. Add real project records and project list/detail pages.
+   - User-visible outcome: users can create and maintain projects such as 项目A and 项目B.
+   - Project fields should start small: name, code, description, status, created/updated metadata.
+3. Keep foundational resources as a global resource pool.
+   - K8s clusters, Harbor registries/projects, and Jenkins instances/views are maintained in 基础资源管理.
+   - Projects do not directly own or bind K8s/Harbor/Jenkins resources.
+   - Products reference the resource scopes they use; projects see resource usage indirectly through their bound products.
+4. Add product ownership binding to projects.
+   - User-visible outcome: one project can bind one or more products.
+   - Product can be unbound/pending assignment before it is attached to a project, so existing products can be migrated without blocking page entry.
+5. Add product binding status to support attach, detach, and move.
+   - Suggested statuses:
+     - `UNBOUND`: product exists but is not attached to any project.
+     - `BOUND`: product is attached to one project and can be used by service/release flows.
+     - `MOVING`: product is being moved to another project; block release/deploy creation during the move.
+     - `DISABLED`: product is retained but hidden from new release/deploy selection.
+   - User-visible outcome: users can tell whether a product is usable, waiting for project binding, being moved, or disabled.
+6. Define project-product binding rules.
+   - A product can belong to at most one project at a time in V1.
+   - A project can bind multiple products.
+   - Detach is allowed only when no running release/deploy task is using the product.
+   - Move to another project should be recorded as a binding change and should not modify historical release/deploy records.
+7. Make service creation consume product scope.
+   - User-visible outcome: when users create a service under a product, they choose from that product's namespace, Harbor project, and optional Jenkins view/job scope.
+   - This is the point where existing environment multi-bindings become meaningful to users.
+8. Make release/deploy/baseline pages consume project and product.
+   - User-visible outcome: users select project first, then product, then services.
+   - Historical records must snapshot project/product/service identifiers and names so later product moves do not rewrite history.
 
 ## User-View Test Order
 
