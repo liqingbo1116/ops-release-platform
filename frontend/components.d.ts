@@ -44,6 +44,7 @@ declare module 'vue' {
     ElTabPane: typeof import('element-plus/es')['ElTabPane']
     ElTabs: typeof import('element-plus/es')['ElTabs']
     ElTag: typeof import('element-plus/es')['ElTag']
+    ElTooltip: typeof import('element-plus/es')['ElTooltip']
     EnvironmentConfigDrawer: typeof import('./src/components/EnvironmentConfigDrawer.vue')['default']
     LogTerminal: typeof import('./src/components/LogTerminal.vue')['default']
     MetricCard: typeof import('./src/components/MetricCard.vue')['default']

@@ -58,10 +58,20 @@ type jenkinsInstanceRequest struct {
 	InsecureSkipTLSVerify bool   `json:"insecureSkipTLSVerify"`
 }
 
+type projectRequest struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+}
+
 type environmentUpdateRequest struct {
 	ID               *string                              `json:"id"`
 	Name             *string                              `json:"name"`
 	Code             *string                              `json:"code"`
+	ProjectID        *string                              `json:"projectId"`
+	ProductStatus    *string                              `json:"productStatus"`
 	Type             *string                              `json:"type"`
 	DeployTargetType *string                              `json:"deployTargetType"`
 	NetworkMode      *string                              `json:"networkMode"`
@@ -114,6 +124,63 @@ func (h *Handler) ListPermissions(c *gin.Context) {
 
 func (h *Handler) ListChangelog(c *gin.Context) {
 	OK(c, paginate(h.repo.ListChangelog(c.Query("keyword")), c))
+}
+
+func (h *Handler) ListProjects(c *gin.Context) {
+	OK(c, paginate(h.repo.ListProjects(c.Query("keyword")), c))
+}
+
+func (h *Handler) GetProject(c *gin.Context) {
+	project, ok := h.repo.GetProject(c.Param("id"))
+	if !ok {
+		NotFound(c, "project not found")
+		return
+	}
+	OK(c, project)
+}
+
+func (h *Handler) CreateProject(c *gin.Context) {
+	var request projectRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid project request")
+		return
+	}
+	project, err := h.repo.CreateProject(domain.Project{
+		ID:          request.ID,
+		Name:        request.Name,
+		Code:        request.Code,
+		Description: request.Description,
+		Status:      request.Status,
+	})
+	if err != nil {
+		BadRequest(c, "invalid project request")
+		return
+	}
+	Created(c, project)
+}
+
+func (h *Handler) UpdateProject(c *gin.Context) {
+	var request projectRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid project request")
+		return
+	}
+	project, ok, err := h.repo.UpdateProject(c.Param("id"), domain.Project{
+		ID:          request.ID,
+		Name:        request.Name,
+		Code:        request.Code,
+		Description: request.Description,
+		Status:      request.Status,
+	})
+	if err != nil {
+		BadRequest(c, "invalid project request")
+		return
+	}
+	if !ok {
+		NotFound(c, "project not found")
+		return
+	}
+	OK(c, project)
 }
 
 func (h *Handler) ListEnvironments(c *gin.Context) {
@@ -182,6 +249,12 @@ func mergeEnvironmentUpdate(existing domain.Environment, request environmentUpda
 	}
 	if request.Code != nil {
 		merged.Code = *request.Code
+	}
+	if request.ProjectID != nil {
+		merged.ProjectID = *request.ProjectID
+	}
+	if request.ProductStatus != nil {
+		merged.ProductStatus = *request.ProductStatus
 	}
 	if request.Type != nil {
 		merged.Type = *request.Type

@@ -2,12 +2,12 @@
   <section class="page">
     <div class="page-head">
       <div>
-        <h1>环境管理</h1>
-        <p>本地环境由平台直连基础资源；远程环境由 Agent 上报状态并执行任务。</p>
+        <h1>产品管理</h1>
+        <p>产品对应一个可部署范围，可绑定到项目，并关联后续服务、发布和部署。</p>
       </div>
       <div class="head-actions">
-        <el-button :loading="loading" title="重新加载环境与基础资源探测结果，不执行连接测试" @click="loadAll">刷新</el-button>
-        <el-button type="primary" @click="openCreateDialog">新增环境</el-button>
+        <el-button :loading="loading" title="重新加载产品与基础资源探测结果，不执行连接测试" @click="loadAll">刷新</el-button>
+        <el-button type="primary" @click="openCreateDialog">新增产品</el-button>
       </div>
     </div>
 
@@ -15,34 +15,34 @@
       <el-alert
         type="info"
         :closable="false"
-        title="V1 主线：本地环境关联 K8s 命名空间、Harbor 镜像项目、Jenkins 流水线视图；项目环境关联远程 K8s 命名空间和 Harbor 镜像项目，由 Agent 执行探测和后续部署。"
+        title="V1 主线：产品关联 K8s 命名空间、Harbor 镜像项目和本地 Jenkins 流水线视图；远程产品由 Agent 执行探测和后续部署。"
       />
       <el-alert
         type="info"
         :closable="false"
-        title="这些资源范围用于后续服务关联：服务会在环境内选择实际使用的命名空间、镜像项目和流水线视图，发布/部署时据此确定构建来源、镜像范围和部署目标。"
+        title="这些资源范围用于后续服务关联：服务会在产品内选择实际使用的命名空间、镜像项目和流水线视图，发布/部署时据此确定构建来源、镜像范围和部署目标。"
       />
       <el-alert
         v-if="blockedProjectEnvironmentCount > 0"
         type="warning"
         :closable="false"
-        :title="`${blockedProjectEnvironmentCount} 个远程环境 Agent 未就绪，远程发布/部署提交前会被阻断。`"
+        :title="`${blockedProjectEnvironmentCount} 个远程产品 Agent 未就绪，远程发布/部署提交前会被阻断。`"
       />
     </div>
 
     <el-card shadow="never">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-input v-model="keyword" placeholder="搜索环境、标识" clearable />
-          <el-select v-model="environmentType" placeholder="全部环境类型" clearable>
-            <el-option label="本地环境" value="LOCAL" />
-            <el-option label="远程环境" value="PROJECT" />
+          <el-input v-model="keyword" placeholder="搜索产品、项目、标识" clearable />
+          <el-select v-model="environmentType" placeholder="全部产品类型" clearable>
+            <el-option label="本地产品" value="LOCAL" />
+            <el-option label="远程产品" value="PROJECT" />
           </el-select>
         </div>
       </div>
       <el-alert v-if="errorMessage" class="environment-alert" type="warning" :closable="false" :title="errorMessage" />
       <el-table v-loading="loading" :data="filteredRows" class="environment-table">
-        <el-table-column label="环境与状态" min-width="300">
+        <el-table-column label="产品与状态" min-width="320">
           <template #default="{ row }">
             <div class="environment-cell">
               <div class="environment-title">
@@ -51,6 +51,10 @@
               </div>
               <div class="environment-meta">
                 <span>{{ row.code }}</span>
+                <span>{{ row.projectName || '未绑定项目' }}</span>
+                <el-tag size="small" :type="productStatusTagType(row.productStatus)" effect="light">
+                  {{ productStatusLabel(row.productStatus) }}
+                </el-tag>
                 <span>{{ environmentTypeLabel(row.type) }}</span>
                 <span>{{ deployTargetTypeLabel(row.deployTargetType) }}</span>
               </div>
@@ -120,14 +124,20 @@
       @check="handleCheckEnvironment"
     />
 
-    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增环境' : '编辑环境'" width="580px" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增产品' : '编辑产品'" width="580px" destroy-on-close>
       <el-form :model="form" label-width="120px">
-        <el-form-item label="环境名称" required><el-input v-model="form.name" placeholder="项目 X 生产" /></el-form-item>
-        <el-form-item v-if="dialogMode === 'edit'" label="环境标识">
-          <el-input v-model="form.code" placeholder="保存时自动生成" disabled />
-          <div class="form-tip">由系统自动生成，用于远程 Agent 配置；保存后系统生成环境 ID：env-环境标识</div>
+        <el-form-item label="产品名称" required><el-input v-model="form.name" placeholder="数据中台生产" /></el-form-item>
+        <el-form-item label="所属项目">
+          <el-select v-model="form.projectId" placeholder="可选择一个项目，也可暂不绑定" clearable filterable>
+            <el-option v-for="item in activeProjects" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+          <div class="form-tip">未绑定项目的产品仍可维护资源范围，后续可在这里绑定到项目。</div>
         </el-form-item>
-        <el-form-item label="环境类型" required><el-segmented v-model="form.type" :options="typeOptions" /></el-form-item>
+        <el-form-item v-if="dialogMode === 'edit'" label="产品标识">
+          <el-input v-model="form.code" placeholder="保存时自动生成" disabled />
+          <div class="form-tip">由系统自动生成，用于远程 Agent 配置；保存后系统生成产品 ID：env-产品标识</div>
+        </el-form-item>
+        <el-form-item label="产品类型" required><el-segmented v-model="form.type" :options="typeOptions" /></el-form-item>
         <el-form-item v-if="dialogMode === 'edit'" label="部署目标">
           <el-input :value="deployTargetTypeLabel(form.deployTargetType)" disabled />
           <div class="form-tip">V1 当前支持 Kubernetes；docker-compose 仅预留模型，不进入当前主线实现。</div>
@@ -149,7 +159,7 @@
             >
               <el-option v-for="item in selectedNamespaces" :key="item" :label="item" :value="item" />
             </el-select>
-            <div class="form-tip">可绑定多个命名空间，首个命名空间作为默认部署目标；手工输入未探测到的值后，环境会进入需验证状态。</div>
+            <div class="form-tip">可绑定多个命名空间，首个命名空间作为默认部署目标；手工输入未探测到的值后，产品会进入需验证状态。</div>
           </el-form-item>
           <el-form-item label="Harbor 仓库" required>
             <el-select v-model="form.registryId" placeholder="先在基础资源维护 Harbor 仓库" filterable>
@@ -167,7 +177,7 @@
             >
               <el-option v-for="item in selectedProjects" :key="item" :label="item" :value="item" />
             </el-select>
-            <div class="form-tip">可绑定多个镜像项目，首个镜像项目作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
+            <div class="form-tip">可绑定多个镜像项目，首个镜像项目作为默认值；手工输入未探测到的值后，产品会进入需验证状态。</div>
           </el-form-item>
         </template>
         <template v-else>
@@ -187,7 +197,7 @@
             >
               <el-option v-for="item in selectedProjects" :key="item" :label="item" :value="item" />
             </el-select>
-            <div class="form-tip">远程环境可绑定多个本地镜像项目，首个镜像项目作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
+            <div class="form-tip">远程产品可绑定多个本地镜像项目，首个镜像项目作为默认值；手工输入未探测到的值后，产品会进入需验证状态。</div>
           </el-form-item>
         </template>
         <template v-if="form.type === 'LOCAL'">
@@ -207,7 +217,7 @@
             >
               <el-option v-for="item in selectedViews" :key="item" :label="item" :value="item" />
             </el-select>
-            <div class="form-tip">可绑定多个流水线视图，首个流水线视图作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
+            <div class="form-tip">可绑定多个流水线视图，首个流水线视图作为默认值；手工输入未探测到的值后，产品会进入需验证状态。</div>
           </el-form-item>
         </template>
       </el-form>
@@ -234,6 +244,7 @@ import {
   type EnvironmentPayload,
   type EnvironmentResourceBinding,
 } from '@/api/environments'
+import { listProjects, type ProjectInfo } from '@/api/projects'
 import {
   listHarborRegistries,
   listJenkinsInstances,
@@ -254,6 +265,7 @@ const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const activeEnvironment = ref<EnvironmentInfo | null>(null)
 const environments = ref<EnvironmentInfo[]>([])
+const projects = ref<ProjectInfo[]>([])
 const kubernetesClusters = ref<KubernetesCluster[]>([])
 const harborRegistries = ref<HarborRegistry[]>([])
 const jenkinsInstances = ref<JenkinsInstance[]>([])
@@ -280,8 +292,8 @@ const checkResultsByEnvironmentId = ref<Record<string, EnvironmentDiagnostic[]>>
 const form = ref<EnvironmentForm>(emptyEnvironmentForm())
 
 const typeOptions = [
-  { label: '远程环境', value: 'PROJECT' },
-  { label: '本地环境', value: 'LOCAL' },
+  { label: '远程产品', value: 'PROJECT' },
+  { label: '本地产品', value: 'LOCAL' },
 ]
 
 const blockedProjectEnvironmentCount = computed(
@@ -291,12 +303,13 @@ const blockedProjectEnvironmentCount = computed(
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   return environments.value.filter((item) => {
-    const keywordMatched = !q || `${item.name} ${item.code}`.toLowerCase().includes(q)
+    const keywordMatched = !q || `${item.name} ${item.code} ${item.projectName}`.toLowerCase().includes(q)
     const typeMatched = !environmentType.value || item.type === environmentType.value
     return keywordMatched && typeMatched
   })
 })
 
+const activeProjects = computed(() => projects.value.filter((item) => item.status !== 'DISABLED'))
 const selectedNamespaces = computed(() => kubernetesClusters.value.find((item) => item.id === form.value.clusterId)?.namespaces ?? [])
 const selectedProjects = computed(() => harborRegistries.value.find((item) => item.id === form.value.registryId)?.projects ?? [])
 const selectedViews = computed(() => jenkinsInstances.value.find((item) => item.id === form.value.jenkinsId)?.views ?? [])
@@ -326,6 +339,8 @@ function emptyEnvironmentForm(): EnvironmentForm {
     registryProject: '',
     jenkinsId: '',
     jenkinsView: '',
+    projectId: '',
+    productStatus: 'UNBOUND',
     bindings: [],
     namespaces: [],
     registryProjects: [],
@@ -339,11 +354,23 @@ function resourceName(items: IntegrationResource[], id: string) {
 }
 
 function environmentTypeLabel(type: string) {
-  return type === 'LOCAL' ? '本地环境' : '远程环境'
+  return type === 'LOCAL' ? '本地产品' : '远程产品'
 }
 
 function deployTargetTypeLabel(type: string) {
   return type === 'DOCKER_COMPOSE' ? 'docker-compose' : 'Kubernetes'
+}
+
+function productStatusLabel(status: string) {
+  if (status === 'BOUND') return '已绑定项目'
+  if (status === 'DISABLED') return '项目不可用'
+  return '未绑定项目'
+}
+
+function productStatusTagType(status: string): '' | 'success' | 'info' | 'warning' | 'danger' | 'primary' {
+  if (status === 'BOUND') return 'success'
+  if (status === 'DISABLED') return 'info'
+  return 'warning'
 }
 
 function scopedResourceText(row: EnvironmentInfo, resourceType: 'k8s' | 'harbor' | 'jenkins') {
@@ -393,19 +420,19 @@ function problemSummary(row: EnvironmentInfo) {
     }
   }
   return {
-    title: row.status === 'HEALTHY' ? '当前未发现问题' : '环境待验证，尚未发现明确缺失项',
-    nextStep: row.status === 'HEALTHY' ? '可用于后续服务关联、发布和部署' : '请在详情中执行连接测试；顶部刷新只重新加载环境与基础资源探测结果',
+    title: row.status === 'HEALTHY' ? '当前未发现问题' : '产品待验证，尚未发现明确缺失项',
+    nextStep: row.status === 'HEALTHY' ? '可用于后续服务关联、发布和部署' : '请在详情中执行连接测试；顶部刷新只重新加载产品与基础资源探测结果',
   }
 }
 
 function compactNextStep(problems: EnvironmentDiagnostic[]) {
   const steps = Array.from(new Set(problems.map((item) => item.nextStep).filter(Boolean)))
-  if (steps.length === 0) return '请检查环境绑定和基础资源探测结果'
+  if (steps.length === 0) return '请检查产品绑定和基础资源探测结果'
   if (steps.length === 1) return steps[0]
   const hasAgentProblem = problems.some((item) => item.component === 'Agent')
   const hasResourceProblem = problems.some((item) => item.resourceType && item.resourceId)
   if (hasAgentProblem && hasResourceProblem) return '请先启动或注册 Agent，并刷新相关基础资源探测'
-  if (hasResourceProblem) return '请刷新相关基础资源探测；若仍不存在，请创建资源范围或修改环境绑定'
+  if (hasResourceProblem) return '请刷新相关基础资源探测；若仍不存在，请创建资源范围或修改产品绑定'
   return steps.join('；')
 }
 
@@ -423,8 +450,8 @@ function agentDiagnostics(row: EnvironmentInfo): EnvironmentDiagnostic[] {
       status: row.agentStatus === 'ONLINE' ? 'HEALTHY' : 'DEGRADED',
       message: row.agentStatus === 'ONLINE' ? '远程 Agent 在线' : `远程 Agent ${agentStatusText(row.agentStatus)}，会影响远程发布/部署执行`,
       nextStep: row.agentStatus === 'ONLINE'
-        ? '可继续校验项目环境 K8s 命名空间和 Harbor 镜像项目'
-        : '请启动并注册该环境 Agent，确认 Agent 配置的环境 ID 与详情中的 Agent 环境 ID 一致',
+        ? '可继续校验远程产品 K8s 命名空间和 Harbor 镜像项目'
+        : '请启动并注册该产品 Agent，确认 Agent 配置的环境 ID 与详情中的 Agent 环境 ID 一致',
     })
   }
   return diagnostics
@@ -509,9 +536,9 @@ function scopeLabel(resourceType: EnvironmentResourceBinding['resourceType']) {
 }
 
 function missingScopeNextStep(resourceType: EnvironmentResourceBinding['resourceType']) {
-  if (resourceType === 'K8S') return '请到基础资源刷新 K8s 探测；若仍不存在，请在集群中创建命名空间或修改环境绑定'
-  if (resourceType === 'HARBOR') return '请到基础资源刷新 Harbor 探测；若仍不存在，请在 Harbor 创建镜像项目或修改环境绑定'
-  return '请到基础资源刷新 Jenkins 探测；若仍不存在，请在 Jenkins 创建流水线视图或修改环境绑定'
+  if (resourceType === 'K8S') return '请到基础资源刷新 K8s 探测；若仍不存在，请在集群中创建命名空间或修改产品绑定'
+  if (resourceType === 'HARBOR') return '请到基础资源刷新 Harbor 探测；若仍不存在，请在 Harbor 创建镜像项目或修改产品绑定'
+  return '请到基础资源刷新 Jenkins 探测；若仍不存在，请在 Jenkins 创建流水线视图或修改产品绑定'
 }
 
 function applyEnvironmentTypeDefaults(type: EnvironmentPayload['type']) {
@@ -536,13 +563,15 @@ async function loadAll() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [environmentItems, clusterItems, registryItems, jenkinsItems] = await Promise.all([
+    const [environmentItems, projectItems, clusterItems, registryItems, jenkinsItems] = await Promise.all([
       listEnvironments(),
+      listProjects(),
       listKubernetesClusters(),
       listHarborRegistries(),
       listJenkinsInstances(),
     ])
     environments.value = environmentItems
+    projects.value = projectItems
     kubernetesClusters.value = clusterItems
     harborRegistries.value = registryItems
     jenkinsInstances.value = jenkinsItems
@@ -550,7 +579,7 @@ async function loadAll() {
       applyEnvironmentTypeDefaults(form.value.type)
     }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '环境管理数据加载失败'
+    errorMessage.value = error instanceof Error ? error.message : '产品管理数据加载失败'
   } finally {
     loading.value = false
   }
@@ -576,7 +605,7 @@ function openEditDialog(row: EnvironmentInfo) {
 
 async function submitEnvironment() {
   if (!form.value.name.trim()) {
-    ElMessage.warning('请填写环境名称')
+    ElMessage.warning('请填写产品名称')
     return
   }
   if (form.value.type === 'LOCAL' && (!form.value.clusterId || normalizeScopes(form.value.namespaces, form.value.namespace).length === 0)) {
@@ -593,7 +622,7 @@ async function submitEnvironment() {
     const payload = trimEnvironmentPayload(form.value)
     const missingScopes = missingScopesBeforeSave()
     if (missingScopes.length > 0) {
-      ElMessage.warning(`存在未在最近探测结果中发现的资源范围：${missingScopes.join('、')}，环境将保存为需验证状态`)
+      ElMessage.warning(`存在未在最近探测结果中发现的资源范围：${missingScopes.join('、')}，产品将保存为需验证状态`)
     }
     let savedEnvironment: EnvironmentInfo
     if (dialogMode.value === 'create') {
@@ -602,14 +631,14 @@ async function submitEnvironment() {
       savedEnvironment = await updateEnvironment(form.value.id, { ...payload, status: form.value.status })
     }
     if (savedEnvironment.status === 'DEGRADED' || missingScopes.length > 0) {
-      ElMessage.warning('环境已保存，但存在未验证的资源范围，请刷新探测或执行连接测试后再用于发布/部署')
+      ElMessage.warning('产品已保存，但存在未验证的资源范围，请刷新探测或执行连接测试后再用于发布/部署')
     } else {
-      ElMessage.success(dialogMode.value === 'create' ? '环境已创建' : '环境已更新')
+      ElMessage.success(dialogMode.value === 'create' ? '产品已创建' : '产品已更新')
     }
     dialogVisible.value = false
     await loadAll()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '环境保存失败')
+    ElMessage.error(error instanceof Error ? error.message : '产品保存失败')
   } finally {
     submitting.value = false
   }
@@ -654,6 +683,8 @@ function trimEnvironmentPayload(payload: EnvironmentForm): EnvironmentPayload {
     type,
     deployTargetType: payload.deployTargetType === 'DOCKER_COMPOSE' ? 'DOCKER_COMPOSE' : 'KUBERNETES',
     networkMode,
+    projectId: payload.projectId.trim(),
+    productStatus: payload.projectId.trim() ? 'BOUND' : 'UNBOUND',
     ...resourcePayload,
     bindings: buildBindings(type, resourcePayload, {
       namespaces,
@@ -797,7 +828,7 @@ function nextStepForCheckMessage(message = '') {
   if (message.includes('K8s') || message.includes('命名空间')) return missingScopeNextStep('K8S')
   if (message.includes('Harbor') || message.includes('镜像项目')) return missingScopeNextStep('HARBOR')
   if (message.includes('Jenkins') || message.includes('流水线视图')) return missingScopeNextStep('JENKINS')
-  if (message.includes('Agent')) return '请启动并注册该环境 Agent，确认 Agent 配置的环境 ID 与详情中的 Agent 环境 ID 一致'
+  if (message.includes('Agent')) return '请启动并注册该产品 Agent，确认 Agent 配置的环境 ID 与详情中的 Agent 环境 ID 一致'
   return '请根据失败信息检查基础资源配置，修正后重新执行连接测试'
 }
 

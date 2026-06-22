@@ -14,10 +14,11 @@
 const groups = [
   { title: '工作台', items: [{ label: '首页工作台', path: '/dashboard' }] },
   {
-    title: '环境与接入',
+    title: '项目与产品',
     items: [
+      { label: '项目管理', path: '/projects' },
+      { label: '产品管理', path: '/environments' },
       { label: '基础资源', path: '/integration-resources' },
-      { label: '环境管理', path: '/environments' },
       { label: 'Agent 管理', path: '/agents' },
     ],
   },

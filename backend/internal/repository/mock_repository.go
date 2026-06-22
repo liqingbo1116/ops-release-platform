@@ -17,6 +17,7 @@ import (
 var mockFiles embed.FS
 
 type MockRepository struct {
+	projects        []domain.Project
 	environments    []domain.Environment
 	kubernetes      []domain.KubernetesCluster
 	harbor          []domain.HarborRegistry
@@ -77,6 +78,76 @@ func NewMockRepository() (*MockRepository, error) {
 	return repo, nil
 }
 
+func (r *MockRepository) ListProjects(query string) []domain.Project {
+	items := filter(r.projects, query, func(item domain.Project) string {
+		return item.ID + " " + item.Name + " " + item.Code + " " + item.Status
+	})
+	if len(items) == 0 && strings.TrimSpace(query) == "" {
+		return []domain.Project{}
+	}
+	counts := r.productCountByProjectID()
+	for index := range items {
+		items[index].Status = normalizeProjectStatus(items[index].Status)
+		items[index].ProductCount = counts[items[index].ID]
+	}
+	return items
+}
+
+func (r *MockRepository) GetProject(id string) (domain.Project, bool) {
+	for _, item := range r.projects {
+		if item.ID == id {
+			item.Status = normalizeProjectStatus(item.Status)
+			item.ProductCount = r.productCountByProjectID()[item.ID]
+			return item, true
+		}
+	}
+	return domain.Project{}, false
+}
+
+func (r *MockRepository) CreateProject(input domain.Project) (domain.Project, error) {
+	item := domain.Project{
+		ID:          strings.TrimSpace(input.ID),
+		Name:        strings.TrimSpace(input.Name),
+		Code:        normalizeEnvironmentCode(input.Code),
+		Description: strings.TrimSpace(input.Description),
+		Status:      normalizeProjectStatus(input.Status),
+		CreatedAt:   time.Now().Format(time.RFC3339),
+	}
+	if item.Code == "" {
+		item.Code = generateEnvironmentCode(item.Name, "PROJECT")
+	}
+	if item.ID == "" && item.Code != "" {
+		item.ID = "proj-" + item.Code
+	}
+	if item.ID == "" || item.Name == "" || item.Code == "" {
+		return domain.Project{}, fmt.Errorf("missing required fields")
+	}
+	if _, exists := r.GetProject(item.ID); exists {
+		return domain.Project{}, fmt.Errorf("project already exists")
+	}
+	r.projects = append(r.projects, item)
+	return item, nil
+}
+
+func (r *MockRepository) UpdateProject(id string, input domain.Project) (domain.Project, bool, error) {
+	for index := range r.projects {
+		if r.projects[index].ID != id {
+			continue
+		}
+		if value := strings.TrimSpace(input.Name); value != "" {
+			r.projects[index].Name = value
+		}
+		if value := normalizeEnvironmentCode(input.Code); value != "" {
+			r.projects[index].Code = value
+		}
+		r.projects[index].Description = strings.TrimSpace(input.Description)
+		r.projects[index].Status = normalizeProjectStatus(input.Status)
+		r.projects[index].ProductCount = r.productCountByProjectID()[r.projects[index].ID]
+		return r.projects[index], true, nil
+	}
+	return domain.Project{}, false, nil
+}
+
 func mockTokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
@@ -93,9 +164,9 @@ func loadJSON(path string, dest any) error {
 
 func (r *MockRepository) ListEnvironments(query string) []domain.Environment {
 	items := filter(r.environments, query, func(item domain.Environment) string {
-		return item.ID + " " + item.Name + " " + item.Code + " " + item.Type + " " + item.NetworkMode + " " + item.Status
+		return item.ID + " " + item.Name + " " + item.Code + " " + item.ProjectID + " " + item.ProjectName + " " + item.Type + " " + item.NetworkMode + " " + item.Status
 	})
-	return r.refreshEnvironmentStatuses(items)
+	return r.refreshEnvironmentStatuses(r.attachProjectInfo(items))
 }
 
 func (r *MockRepository) GetEnvironment(id string) (domain.Environment, bool) {
@@ -103,7 +174,7 @@ func (r *MockRepository) GetEnvironment(id string) (domain.Environment, bool) {
 	if !ok {
 		return domain.Environment{}, false
 	}
-	return r.refreshEnvironmentStatuses([]domain.Environment{item})[0], true
+	return r.refreshEnvironmentStatuses(r.attachProjectInfo([]domain.Environment{item}))[0], true
 }
 
 func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Environment, error) {
@@ -119,6 +190,9 @@ func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Env
 		ID:               id,
 		Name:             normalized.Name,
 		Code:             normalized.Code,
+		ProjectID:        normalized.ProjectID,
+		ProjectName:      r.projectInfo(normalized.ProjectID).Name,
+		ProductStatus:    normalizeProductStatusWithProject(normalized.ProductStatus, normalized.ProjectID, r.projectInfo(normalized.ProjectID)),
 		Type:             normalized.Type,
 		DeployTargetType: normalized.DeployTargetType,
 		NetworkMode:      normalized.NetworkMode,
@@ -154,6 +228,8 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 		if value := strings.TrimSpace(input.Code); value != "" {
 			r.environments[index].Code = value
 		}
+		r.environments[index].ProjectID = strings.TrimSpace(input.ProjectID)
+		r.environments[index].ProductStatus = normalizeProductStatus(input.ProductStatus, r.environments[index].ProjectID)
 		if value := strings.TrimSpace(input.Type); value != "" {
 			r.environments[index].Type = value
 		}
@@ -178,6 +254,10 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 			return domain.Environment{}, true, err
 		}
 		r.environments[index].Type = normalized.Type
+		r.environments[index].ProjectID = normalized.ProjectID
+		project := r.projectInfo(normalized.ProjectID)
+		r.environments[index].ProjectName = project.Name
+		r.environments[index].ProductStatus = normalizeProductStatusWithProject(normalized.ProductStatus, normalized.ProjectID, project)
 		r.environments[index].DeployTargetType = normalized.DeployTargetType
 		r.environments[index].NetworkMode = normalized.NetworkMode
 		r.environments[index].ClusterID = normalized.ClusterID
@@ -251,6 +331,37 @@ func (r *MockRepository) refreshEnvironmentStatuses(items []domain.Environment) 
 		items[index].Status = r.environmentStatusByScopeCache(items[index], items[index].Status)
 	}
 	return items
+}
+
+func (r *MockRepository) attachProjectInfo(items []domain.Environment) []domain.Environment {
+	for index := range items {
+		project := r.projectInfo(items[index].ProjectID)
+		items[index].ProjectName = project.Name
+		items[index].ProductStatus = normalizeProductStatusWithProject(items[index].ProductStatus, items[index].ProjectID, project)
+	}
+	return items
+}
+
+func (r *MockRepository) projectInfo(projectID string) projectLookupInfo {
+	if strings.TrimSpace(projectID) == "" {
+		return projectLookupInfo{}
+	}
+	for _, project := range r.projects {
+		if project.ID == projectID {
+			return projectLookupInfo{Name: project.Name, Status: normalizeProjectStatus(project.Status), Found: true}
+		}
+	}
+	return projectLookupInfo{}
+}
+
+func (r *MockRepository) productCountByProjectID() map[string]int {
+	counts := map[string]int{}
+	for _, environment := range r.environments {
+		if environment.ProjectID != "" {
+			counts[environment.ProjectID]++
+		}
+	}
+	return counts
 }
 
 func (r *MockRepository) ListKubernetesClusters(query string) []domain.KubernetesCluster {

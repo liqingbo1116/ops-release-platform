@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const LoginPage = () => import('@/pages/LoginPage.vue')
 const DashboardPage = () => import('@/pages/DashboardPage.vue')
+const ProjectPage = () => import('@/pages/ProjectPage.vue')
 const EnvironmentPage = () => import('@/pages/EnvironmentPage.vue')
 const IntegrationResourcePage = () => import('@/pages/IntegrationResourcePage.vue')
 const AgentPage = () => import('@/pages/AgentPage.vue')
@@ -24,7 +25,8 @@ const router = createRouter({
     { path: '/login', name: 'login', component: LoginPage, meta: { title: '登录', public: true, bare: true } },
     { path: '/', redirect: '/dashboard' },
     { path: '/dashboard', name: 'dashboard', component: DashboardPage, meta: { title: '首页工作台' } },
-    { path: '/environments', name: 'environments', component: EnvironmentPage, meta: { title: '环境管理' } },
+    { path: '/projects', name: 'projects', component: ProjectPage, meta: { title: '项目管理' } },
+    { path: '/environments', name: 'environments', component: EnvironmentPage, meta: { title: '产品管理' } },
     { path: '/integration-resources', name: 'integration-resources', component: IntegrationResourcePage, meta: { title: '基础资源' } },
     { path: '/agents', name: 'agents', component: AgentPage, meta: { title: 'Agent 管理' } },
     { path: '/baselines', name: 'baselines', component: BaselineListPage, meta: { title: '环境基线列表' } },

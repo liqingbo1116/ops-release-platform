@@ -4,6 +4,9 @@ export type EnvironmentInfo = {
   id: string
   name: string
   code: string
+  projectId: string
+  projectName: string
+  productStatus: 'UNBOUND' | 'BOUND' | 'DISABLED' | string
   type: 'LOCAL' | 'PROJECT'
   deployTargetType: 'KUBERNETES' | 'DOCKER_COMPOSE'
   networkMode: 'DIRECT' | 'AGENT'
@@ -34,6 +37,8 @@ export type EnvironmentPayload = Pick<
   | 'id'
   | 'name'
   | 'code'
+  | 'projectId'
+  | 'productStatus'
   | 'type'
   | 'deployTargetType'
   | 'networkMode'
@@ -72,6 +77,9 @@ function normalizeEnvironment(item: {
   id: string
   name: string
   code: string
+  projectId?: string
+  projectName?: string
+  productStatus?: string
   type: string
   deployTargetType?: string
   networkMode: string
@@ -89,6 +97,9 @@ function normalizeEnvironment(item: {
   return {
     ...item,
     type: item.type === 'LOCAL' ? 'LOCAL' : 'PROJECT',
+    projectId: item.projectId ?? '',
+    projectName: item.projectName ?? '',
+    productStatus: item.productStatus ?? 'UNBOUND',
     deployTargetType: item.deployTargetType === 'DOCKER_COMPOSE' ? 'DOCKER_COMPOSE' : 'KUBERNETES',
     networkMode: item.networkMode === 'DIRECT' ? 'DIRECT' : 'AGENT',
     clusterId: item.clusterId ?? '',

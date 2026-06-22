@@ -39,6 +39,10 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol agent.Protoco
 	api.GET("/permissions", handler.ListPermissions)
 	api.GET("/changelog", handler.ListChangelog)
 
+	api.GET("/projects", handler.ListProjects)
+	api.GET("/projects/:id", handler.GetProject)
+	api.POST("/projects", handler.CreateProject)
+	api.PUT("/projects/:id", handler.UpdateProject)
 	api.GET("/environments", handler.ListEnvironments)
 	api.GET("/environments/:id", handler.GetEnvironment)
 	api.POST("/environments", handler.CreateEnvironment)

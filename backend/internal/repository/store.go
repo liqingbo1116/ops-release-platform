@@ -7,6 +7,10 @@ import (
 )
 
 type Store interface {
+	ListProjects(query string) []domain.Project
+	GetProject(id string) (domain.Project, bool)
+	CreateProject(input domain.Project) (domain.Project, error)
+	UpdateProject(id string, input domain.Project) (domain.Project, bool, error)
 	ListEnvironments(query string) []domain.Environment
 	GetEnvironment(id string) (domain.Environment, bool)
 	CreateEnvironment(input domain.Environment) (domain.Environment, error)

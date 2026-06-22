@@ -19,8 +19,87 @@ type DatabaseStore struct {
 
 const agentHeartbeatTimeout = 60 * time.Second
 
+type projectLookupInfo struct {
+	Name   string
+	Status string
+	Found  bool
+}
+
 func NewDatabaseStore(db *gorm.DB, mock *MockRepository) *DatabaseStore {
 	return &DatabaseStore{db: db, mock: mock}
+}
+
+func (s *DatabaseStore) ListProjects(query string) []domain.Project {
+	var models []ProjectModel
+	db := s.db.Order("created_at asc")
+	if trimmed := strings.TrimSpace(query); trimmed != "" {
+		like := "%" + trimmed + "%"
+		db = db.Where("id ILIKE ? OR name ILIKE ? OR code ILIKE ? OR status ILIKE ?", like, like, like, like)
+	}
+	if err := db.Find(&models).Error; err != nil {
+		return []domain.Project{}
+	}
+	counts := s.productCountByProjectID()
+	items := make([]domain.Project, 0, len(models))
+	for _, model := range models {
+		items = append(items, toDomainProject(model, counts[model.ID]))
+	}
+	return items
+}
+
+func (s *DatabaseStore) GetProject(id string) (domain.Project, bool) {
+	var model ProjectModel
+	if err := s.db.Where("id = ?", strings.TrimSpace(id)).Take(&model).Error; err != nil {
+		return domain.Project{}, false
+	}
+	counts := s.productCountByProjectID()
+	return toDomainProject(model, counts[model.ID]), true
+}
+
+func (s *DatabaseStore) CreateProject(input domain.Project) (domain.Project, error) {
+	model := ProjectModel{
+		ID:          strings.TrimSpace(input.ID),
+		Name:        strings.TrimSpace(input.Name),
+		Code:        normalizeEnvironmentCode(input.Code),
+		Description: strings.TrimSpace(input.Description),
+		Status:      normalizeProjectStatus(input.Status),
+	}
+	if model.Code == "" {
+		model.Code = generateEnvironmentCode(model.Name, "PROJECT")
+	}
+	if model.ID == "" && model.Code != "" {
+		model.ID = "proj-" + model.Code
+	}
+	if model.ID == "" || model.Name == "" || model.Code == "" {
+		return domain.Project{}, errors.New("missing required fields")
+	}
+	if err := s.db.Create(&model).Error; err != nil {
+		return domain.Project{}, err
+	}
+	return toDomainProject(model, 0), nil
+}
+
+func (s *DatabaseStore) UpdateProject(id string, input domain.Project) (domain.Project, bool, error) {
+	var model ProjectModel
+	if err := s.db.Where("id = ?", strings.TrimSpace(id)).Take(&model).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return domain.Project{}, false, nil
+		}
+		return domain.Project{}, false, err
+	}
+	if name := strings.TrimSpace(input.Name); name != "" {
+		model.Name = name
+	}
+	if code := normalizeEnvironmentCode(input.Code); code != "" {
+		model.Code = code
+	}
+	model.Description = strings.TrimSpace(input.Description)
+	model.Status = normalizeProjectStatus(input.Status)
+	if err := s.db.Save(&model).Error; err != nil {
+		return domain.Project{}, false, err
+	}
+	counts := s.productCountByProjectID()
+	return toDomainProject(model, counts[model.ID]), true, nil
 }
 
 func (s *DatabaseStore) ListEnvironments(query string) []domain.Environment {
@@ -28,15 +107,16 @@ func (s *DatabaseStore) ListEnvironments(query string) []domain.Environment {
 	db := s.db.Order("created_at asc")
 	if trimmed := strings.TrimSpace(query); trimmed != "" {
 		like := "%" + trimmed + "%"
-		db = db.Where("id ILIKE ? OR name ILIKE ? OR code ILIKE ? OR type ILIKE ? OR status ILIKE ?", like, like, like, like, like)
+		db = db.Where("id ILIKE ? OR name ILIKE ? OR code ILIKE ? OR type ILIKE ? OR status ILIKE ? OR project_id ILIKE ?", like, like, like, like, like, like)
 	}
 	if err := db.Find(&models).Error; err != nil {
 		return []domain.Environment{}
 	}
 	agentStatuses := s.agentStatusByIDMap()
+	projects := s.projectInfoByIDMap()
 	items := make([]domain.Environment, 0, len(models))
 	for _, model := range models {
-		items = append(items, toDomainEnvironment(model, agentStatuses[model.AgentID]))
+		items = append(items, toDomainEnvironment(model, agentStatuses[model.AgentID], projects[model.ProjectID]))
 	}
 	return s.refreshEnvironmentStatuses(s.attachEnvironmentBindings(items))
 }
@@ -46,7 +126,7 @@ func (s *DatabaseStore) GetEnvironment(id string) (domain.Environment, bool) {
 	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
 		return domain.Environment{}, false
 	}
-	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
+	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID), s.getProjectInfo(model.ProjectID))
 	items := s.attachEnvironmentBindings([]domain.Environment{item})
 	items = s.refreshEnvironmentStatuses(items)
 	return items[0], true
@@ -65,6 +145,8 @@ func (s *DatabaseStore) CreateEnvironment(input domain.Environment) (domain.Envi
 		ID:               id,
 		Name:             strings.TrimSpace(normalized.Name),
 		Code:             normalized.Code,
+		ProjectID:        normalized.ProjectID,
+		ProductStatus:    normalizeProductStatus(normalized.ProductStatus, normalized.ProjectID),
 		Type:             normalized.Type,
 		DeployTargetType: normalized.DeployTargetType,
 		NetworkMode:      normalized.NetworkMode,
@@ -88,7 +170,7 @@ func (s *DatabaseStore) CreateEnvironment(input domain.Environment) (domain.Envi
 	}); err != nil {
 		return domain.Environment{}, err
 	}
-	item := toDomainEnvironment(model, "")
+	item := toDomainEnvironment(model, "", s.getProjectInfo(model.ProjectID))
 	item.Bindings = withEnvironmentID(normalized.Bindings, model.ID)
 	return item, nil
 }
@@ -107,6 +189,8 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 	if code := normalizeEnvironmentCode(input.Code); code != "" {
 		model.Code = code
 	}
+	model.ProjectID = strings.TrimSpace(input.ProjectID)
+	model.ProductStatus = normalizeProductStatus(input.ProductStatus, model.ProjectID)
 	if envType := strings.TrimSpace(input.Type); envType != "" {
 		model.Type = envType
 	}
@@ -129,6 +213,8 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 		ID:               model.ID,
 		Name:             model.Name,
 		Code:             model.Code,
+		ProjectID:        model.ProjectID,
+		ProductStatus:    model.ProductStatus,
 		Type:             model.Type,
 		DeployTargetType: model.DeployTargetType,
 		NetworkMode:      model.NetworkMode,
@@ -145,6 +231,8 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 		return domain.Environment{}, false, err
 	}
 	model.Type = normalized.Type
+	model.ProjectID = normalized.ProjectID
+	model.ProductStatus = normalizeProductStatus(normalized.ProductStatus, normalized.ProjectID)
 	model.DeployTargetType = normalized.DeployTargetType
 	model.NetworkMode = normalized.NetworkMode
 	model.ClusterID = normalized.ClusterID
@@ -162,7 +250,7 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 	}); err != nil {
 		return domain.Environment{}, false, err
 	}
-	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
+	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID), s.getProjectInfo(model.ProjectID))
 	item.Bindings = withEnvironmentID(normalized.Bindings, model.ID)
 	return item, true, nil
 }
@@ -180,7 +268,7 @@ func (s *DatabaseStore) UpdateEnvironmentCheck(id string, status string, checked
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.Environment{}, false, err
 	}
-	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
+	item := toDomainEnvironment(model, s.getAgentStatus(model.AgentID), s.getProjectInfo(model.ProjectID))
 	items := s.attachEnvironmentBindings([]domain.Environment{item})
 	items = s.refreshEnvironmentStatuses(items)
 	return items[0], true, nil
@@ -916,7 +1004,23 @@ func (s *DatabaseStore) HasEnvironmentAction(environmentID string, action string
 	return s.mock.HasEnvironmentAction(environmentID, action)
 }
 
-func toDomainEnvironment(model EnvironmentModel, boundAgentStatus string) domain.Environment {
+func toDomainProject(model ProjectModel, productCount int) domain.Project {
+	createdAt := ""
+	if !model.CreatedAt.IsZero() {
+		createdAt = model.CreatedAt.Format(time.RFC3339)
+	}
+	return domain.Project{
+		ID:           model.ID,
+		Name:         model.Name,
+		Code:         model.Code,
+		Description:  model.Description,
+		Status:       normalizeProjectStatus(model.Status),
+		ProductCount: productCount,
+		CreatedAt:    createdAt,
+	}
+}
+
+func toDomainEnvironment(model EnvironmentModel, boundAgentStatus string, project projectLookupInfo) domain.Environment {
 	lastCheckAt := ""
 	if model.LastCheckAt != nil {
 		lastCheckAt = model.LastCheckAt.Format(time.RFC3339)
@@ -929,6 +1033,9 @@ func toDomainEnvironment(model EnvironmentModel, boundAgentStatus string) domain
 		ID:               model.ID,
 		Name:             model.Name,
 		Code:             model.Code,
+		ProjectID:        model.ProjectID,
+		ProjectName:      project.Name,
+		ProductStatus:    normalizeProductStatusWithProject(model.ProductStatus, model.ProjectID, project),
 		Type:             model.Type,
 		DeployTargetType: fallbackString(strings.TrimSpace(model.DeployTargetType), "KUBERNETES"),
 		NetworkMode:      model.NetworkMode,
@@ -1204,6 +1311,8 @@ func normalizeEnvironmentInput(input domain.Environment) (domain.Environment, er
 		ID:               strings.TrimSpace(input.ID),
 		Name:             strings.TrimSpace(input.Name),
 		Code:             code,
+		ProjectID:        strings.TrimSpace(input.ProjectID),
+		ProductStatus:    normalizeProductStatus(input.ProductStatus, input.ProjectID),
 		Type:             environmentType,
 		DeployTargetType: deployTargetType,
 		NetworkMode:      strings.ToUpper(strings.TrimSpace(input.NetworkMode)),
@@ -1239,11 +1348,42 @@ func normalizeEnvironmentInput(input domain.Environment) (domain.Environment, er
 	})
 	item.JenkinsID = ""
 	item.JenkinsView = ""
-	if item.ClusterID == "" || item.Namespace == "" || item.RegistryID == "" || item.RegistryProject == "" {
-		return domain.Environment{}, errors.New("project environment requires kubernetes and harbor scopes")
+	if item.RegistryID == "" || item.RegistryProject == "" {
+		return domain.Environment{}, errors.New("project environment requires harbor scopes")
 	}
 	item.Bindings = normalizeEnvironmentBindings(item.Bindings)
 	return item, nil
+}
+
+func normalizeProjectStatus(status string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "ACTIVE", "DISABLED":
+		return strings.ToUpper(strings.TrimSpace(status))
+	default:
+		return "ACTIVE"
+	}
+}
+
+func normalizeProductStatus(status string, projectID string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(status))
+	if normalized == "DISABLED" {
+		return normalized
+	}
+	if strings.TrimSpace(projectID) == "" {
+		return "UNBOUND"
+	}
+	return "BOUND"
+}
+
+func normalizeProductStatusWithProject(status string, projectID string, project projectLookupInfo) string {
+	normalized := normalizeProductStatus(status, projectID)
+	if normalized != "BOUND" {
+		return normalized
+	}
+	if !project.Found || normalizeProjectStatus(project.Status) == "DISABLED" {
+		return "DISABLED"
+	}
+	return "BOUND"
 }
 
 func defaultEnvironmentBindings(item domain.Environment) []domain.EnvironmentResourceBinding {
@@ -1498,6 +1638,49 @@ func (s *DatabaseStore) environmentNameMap() map[string]string {
 		items[environment.ID] = environment.Name
 	}
 	return items
+}
+
+func (s *DatabaseStore) productCountByProjectID() map[string]int {
+	type result struct {
+		ProjectID string
+		Count     int
+	}
+	var rows []result
+	if err := s.db.Model(&EnvironmentModel{}).
+		Select("project_id, count(*) as count").
+		Where("project_id <> ''").
+		Group("project_id").
+		Scan(&rows).Error; err != nil {
+		return map[string]int{}
+	}
+	items := make(map[string]int, len(rows))
+	for _, row := range rows {
+		items[row.ProjectID] = row.Count
+	}
+	return items
+}
+
+func (s *DatabaseStore) projectInfoByIDMap() map[string]projectLookupInfo {
+	var projects []ProjectModel
+	if err := s.db.Find(&projects).Error; err != nil {
+		return map[string]projectLookupInfo{}
+	}
+	items := make(map[string]projectLookupInfo, len(projects))
+	for _, project := range projects {
+		items[project.ID] = projectLookupInfo{Name: project.Name, Status: normalizeProjectStatus(project.Status), Found: true}
+	}
+	return items
+}
+
+func (s *DatabaseStore) getProjectInfo(projectID string) projectLookupInfo {
+	if strings.TrimSpace(projectID) == "" {
+		return projectLookupInfo{}
+	}
+	var project ProjectModel
+	if err := s.db.Where("id = ?", projectID).Take(&project).Error; err != nil {
+		return projectLookupInfo{}
+	}
+	return projectLookupInfo{Name: project.Name, Status: normalizeProjectStatus(project.Status), Found: true}
 }
 
 func (s *DatabaseStore) agentStatusByIDMap() map[string]string {

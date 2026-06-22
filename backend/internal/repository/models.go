@@ -2,6 +2,20 @@ package repository
 
 import "time"
 
+type ProjectModel struct {
+	ID          string    `gorm:"primaryKey;size:64"`
+	Name        string    `gorm:"size:128;not null"`
+	Code        string    `gorm:"size:128;uniqueIndex;not null"`
+	Description string    `gorm:"size:512"`
+	Status      string    `gorm:"size:32;index;not null"`
+	CreatedAt   time.Time `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time `gorm:"autoUpdateTime"`
+}
+
+func (ProjectModel) TableName() string {
+	return "projects"
+}
+
 type ProductModel struct {
 	ID          string    `gorm:"primaryKey;size:64"`
 	Name        string    `gorm:"size:128;not null"`
@@ -36,6 +50,8 @@ type EnvironmentModel struct {
 	ID               string     `gorm:"primaryKey;size:64"`
 	Name             string     `gorm:"size:128;not null"`
 	Code             string     `gorm:"size:128;uniqueIndex;not null"`
+	ProjectID        string     `gorm:"size:64;index"`
+	ProductStatus    string     `gorm:"size:32;index;not null;default:UNBOUND"`
 	Type             string     `gorm:"size:32;index;not null"`
 	DeployTargetType string     `gorm:"size:32;not null;default:KUBERNETES"`
 	NetworkMode      string     `gorm:"size:32;not null"`

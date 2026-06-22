@@ -7,10 +7,23 @@ type PageResult[T any] struct {
 	Total    int `json:"total"`
 }
 
+type Project struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Code         string `json:"code"`
+	Description  string `json:"description"`
+	Status       string `json:"status"`
+	ProductCount int    `json:"productCount"`
+	CreatedAt    string `json:"createdAt"`
+}
+
 type Environment struct {
 	ID               string                       `json:"id"`
 	Name             string                       `json:"name"`
 	Code             string                       `json:"code"`
+	ProjectID        string                       `json:"projectId"`
+	ProjectName      string                       `json:"projectName"`
+	ProductStatus    string                       `json:"productStatus"`
 	Type             string                       `json:"type"`
 	DeployTargetType string                       `json:"deployTargetType"`
 	NetworkMode      string                       `json:"networkMode"`
