@@ -10,12 +10,18 @@ import (
 
 const version = "v1-remote-probe"
 
-func Run(ctx context.Context, cfg config.Config, client *reporter.Client) {
+type RuntimeStatusCollector func(context.Context) reporter.RuntimeStatus
+
+func Run(ctx context.Context, cfg config.Config, client *reporter.Client, collectRuntimeStatus RuntimeStatusCollector) {
 	ticker := newTicker(cfg.HeartbeatInterval)
 	defer ticker.Stop()
 
 	for {
-		result, err := client.Heartbeat(ctx, version, cfg.Capabilities)
+		runtimeStatus := reporter.RuntimeStatus{}
+		if collectRuntimeStatus != nil {
+			runtimeStatus = collectRuntimeStatus(ctx)
+		}
+		result, err := client.Heartbeat(ctx, version, cfg.Capabilities, runtimeStatus)
 		if err != nil && ctx.Err() == nil {
 			log.Printf("heartbeat failed: %v", err)
 		} else if result.Agent.EnvironmentID != "" && result.Agent.EnvironmentID != client.EnvironmentID() {

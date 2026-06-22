@@ -82,7 +82,14 @@ Response data：
 
 ## 基础资源
 
-K8s、Harbor、Jenkins 是独立平台资源。本地环境关联资源 ID，并选择或填写环境级作用域：K8s namespace、Harbor project、Jenkins view。项目环境 V1 只通过 Agent 关联和验证项目 K8s namespace、项目 Harbor project，不绑定 Jenkins view。
+K8s、Harbor、Jenkins 是独立平台资源，由产品引用和使用。当前后端仍复用 `Environment` 模型承载产品部署范围，用户侧按“产品管理”理解。
+
+产品资源绑定分两类：
+
+- `BUILD_SOURCE`：平台侧构建和版本来源。本地产品绑定本地 K8s namespace、本地 Harbor project、本地 Jenkins view；远程产品绑定本地 Harbor project、本地 Jenkins view。
+- `RUNTIME_TARGET`：远程运行目标。远程 K8s namespace、远程 Harbor project 由项目环境 Agent 上报后，在平台产品配置中映射到产品；一个产品可映射多个 namespace 和多个 Harbor project。
+
+Agent 配置只保存平台地址、注册 token、远程 K8s/Harbor 连接信息，不保存 namespace/project 与产品的对应关系。
 
 资源接口原则：
 
@@ -90,8 +97,8 @@ K8s、Harbor、Jenkins 是独立平台资源。本地环境关联资源 ID，并
 - 响应不返回明文 kubeconfig、密码或 token，只返回非敏感元数据、状态、最近检查信息和缓存列表。
 - 资源状态由系统测试连接或刷新探测维护，用户不能手工更新。
 - 刷新探测成功时更新缓存；失败时保留旧缓存并记录失败原因。
-- 基础资源管理中的 K8s、Harbor、Jenkins 由平台后端探测，用于本地环境关联和后续本地构建来源。
-- 项目环境的 K8s/Harbor 状态由 Agent 后续上报；Jenkins 属于平台侧本地基础资源，Agent 不连接 Jenkins。
+- 基础资源管理中的 K8s、Harbor、Jenkins 由平台后端探测，用于本地产品资源范围和远程产品的本地构建/版本来源。
+- 远程产品的远程 K8s/Harbor 状态由 Agent 后续上报；Jenkins 属于平台侧本地基础资源，Agent 不连接 Jenkins。
 
 ### POST /api/kubernetes-clusters
 
@@ -251,7 +258,7 @@ Response data：
       "environmentName": "项目 X 生产",
       "version": "1.3.2",
       "status": "ONLINE",
-      "capabilities": ["image-sync", "kubectl", "shell", "http-check"],
+      "capabilities": ["remote-probe", "k8s-api", "http-check"],
       "lastHeartbeatAt": "2026-06-07T12:40:12+08:00",
       "currentTaskId": "REL-20260607-031"
     }
@@ -265,7 +272,7 @@ Response data：
 V1 页面依赖字段：
 
 - `status`：判断 Agent 是否在线；离线 Agent 会阻断其绑定项目环境的远程发布/部署。
-- `capabilities`：展示 Agent 是否具备镜像同步、kubectl、shell、健康检查等执行能力。
+- `capabilities`：展示 Agent 是否具备远程资源上报、Kubernetes API 访问、健康检查等执行能力。
 - `lastHeartbeatAt`：展示最近心跳，辅助判断真实联调前 Agent 是否可用。
 - `currentTaskId`：展示最近或当前执行任务，辅助用户从 Agent 管理页跳转排查。
 
@@ -286,11 +293,15 @@ Response data：
 
 ```json
 {
+  "agentId": "agent-project-x-prod",
   "token": "agtr_1781750628",
   "expiresAt": "2026-06-07T13:20:00+08:00",
-  "installCommand": "cat > agent.env <<'EOF'\nAGENT_ID=agent-project-x-prod\nPLATFORM_URL=http://platform.example.com:8080\nAGENT_REGISTER_TOKEN=agtr_1781750628\nAGENT_MODE=remote-probe\nAGENT_HEALTH_PORT=18080\nAGENT_POLL_INTERVAL_SECONDS=5\nAGENT_HEARTBEAT_INTERVAL_SECONDS=15\nAGENT_HTTP_TIMEOUT_SECONDS=10\nAGENT_MAX_TASKS=1\nAGENT_CAPABILITIES=remote-probe,kubectl,http-check\nAGENT_KUBECONFIG=\nAGENT_HARBOR_URL=\nAGENT_HARBOR_USERNAME=\nAGENT_HARBOR_PASSWORD=\nAGENT_HARBOR_INSECURE_SKIP_TLS_VERIFY=false\nEOF\n./ops-release-agent -f ./agent.env"
+  "configText": "# 平台侧登记的 Agent 唯一标识。首次注册建议直接使用平台页面生成的值。\nAGENT_ID=agent-project-x-prod\n\n# 首次注册时建议留空；在平台页面认领 Agent 后，Agent 会通过心跳同步绑定关系。\nAGENT_ENVIRONMENT_ID=\n\n# Agent 可出站访问的平台后端 API 地址。部署到项目环境前，请改成该机器可访问的平台地址。\nPLATFORM_URL=http://platform.example.com:8080\n\n# 首次注册可留空；使用 -f 配置文件启动时，注册成功后 Agent 会自动写回平台签发的运行令牌。\nAGENT_TOKEN=\n\n# 一次性注册密钥，使用一次后失效。\nAGENT_REGISTER_TOKEN=agtr_1781750628\n\nAGENT_MODE=remote-probe\nAGENT_HEALTH_PORT=18080\nAGENT_POLL_INTERVAL_SECONDS=5\nAGENT_HEARTBEAT_INTERVAL_SECONDS=15\nAGENT_HTTP_TIMEOUT_SECONDS=10\nAGENT_MAX_TASKS=1\nAGENT_CAPABILITIES=remote-probe,k8s-api,http-check\n\n# 远程 Kubernetes 连接配置。Agent 通过 Kubernetes API 上报资源，namespace 与产品的对应关系在平台维护。\nAGENT_KUBECONFIG=\n\n# 远程 Harbor 连接配置。Agent 只负责上报 project、镜像和 tag，project 与产品的对应关系在平台维护。\nAGENT_HARBOR_URL=\nAGENT_HARBOR_USERNAME=\nAGENT_HARBOR_PASSWORD=\nAGENT_HARBOR_INSECURE_SKIP_TLS_VERIFY=false",
+  "installCommand": "# same as configText, kept for old clients"
 }
 ```
+
+`configText` 是页面展示和复制的 Agent 配置文本；`installCommand` 仅为兼容旧前端保留，不应再放 shell 启动命令。
 
 ### POST /api/agents/{id}/heartbeat
 
@@ -301,7 +312,7 @@ Request：
 ```json
 {
   "version": "1.3.3",
-  "capabilities": ["image-sync", "kubectl", "http-check"]
+  "capabilities": ["remote-probe", "k8s-api", "http-check"]
 }
 ```
 

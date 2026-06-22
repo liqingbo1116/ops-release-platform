@@ -39,7 +39,7 @@ type Store interface {
 	ValidateAgentToken(id string, tokenHash string) bool
 	ClaimAgent(id string, environmentID string) (domain.Agent, bool)
 	UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool)
-	UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string) (domain.Agent, bool)
+	UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string, runtimeStatus domain.RuntimeStatus) (domain.Agent, bool)
 	AssignAgentTask(id string, taskID string) (domain.Agent, bool)
 	GetCurrentUser() domain.CurrentUser
 	ListUsers(query string) []domain.User

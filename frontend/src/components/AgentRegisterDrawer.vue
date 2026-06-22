@@ -2,34 +2,42 @@
   <el-drawer v-model="visible" title="注册 Agent" size="440px">
     <div class="drawer-stack">
       <el-form label-position="top">
-        <el-form-item label="Agent ID">
-          <el-input v-model="agentId" :disabled="loading" placeholder="agent-<project>-<env>" />
+        <el-form-item label="Agent 标识">
+          <el-input v-model="agentId" :disabled="loading" placeholder="可不填，平台会自动生成" />
         </el-form-item>
         <el-form-item label="平台地址">
           <el-input :model-value="platformUrl" readonly placeholder="生成后显示" />
         </el-form-item>
-        <el-form-item label="注册 Token">
-          <el-input :model-value="token" readonly placeholder="生成后显示一次性 Token" />
+        <el-form-item label="一次性注册密钥">
+          <el-input :model-value="token" readonly placeholder="生成后显示一次性注册密钥" />
         </el-form-item>
         <el-form-item label="过期时间">
           <el-input :model-value="expiresAtText" readonly placeholder="生成后显示" />
         </el-form-item>
-        <el-form-item label="安装指令">
+        <el-form-item label="Agent 配置">
           <el-input
-            :model-value="installCommand"
+            :model-value="configText"
             type="textarea"
-            :rows="4"
+            :rows="12"
             readonly
             placeholder="生成后显示"
           />
         </el-form-item>
       </el-form>
-      <el-button type="primary" :disabled="!installCommand" @click="copyInstallCommand">复制注册指令</el-button>
-      <el-button :loading="loading" @click="generateToken">生成 Token</el-button>
+      <el-alert
+        v-if="notice"
+        :type="noticeType"
+        :closable="false"
+        :title="notice"
+      />
+      <div class="drawer-actions">
+        <el-button :loading="loading" type="primary" @click="generateToken">生成注册密钥</el-button>
+        <el-button :disabled="!configText" @click="copyConfigText">复制配置</el-button>
+      </div>
       <el-alert
         type="info"
         :closable="false"
-        title="Agent 可以先注册为待认领；待认领 Agent 只展示在线状态，不能执行发布或部署任务。"
+        title="把生成的配置保存为项目环境机器上的 agent.conf。Agent 首次接入后会自动写回运行令牌，并显示为待认领。"
       />
     </div>
   </el-drawer>
@@ -47,38 +55,49 @@ const agentId = ref('')
 const token = ref('')
 const platformUrl = ref('')
 const expiresAt = ref('')
-const installCommand = ref('')
+const configText = ref('')
 const loading = ref(false)
+const notice = ref('')
+const noticeType = ref<'success' | 'warning' | 'error'>('warning')
 
 const expiresAtText = computed(() => (expiresAt.value ? formatDateTime(expiresAt.value) : ''))
 
 async function generateToken() {
-  if (!agentId.value.trim()) {
-    ElMessage.warning('请填写 Agent ID')
-    return
-  }
   loading.value = true
+  notice.value = ''
   try {
     const result = await createAgentRegisterToken(agentId.value.trim())
+    agentId.value = result.agentId
     platformUrl.value = result.platformUrl
     token.value = result.token
     expiresAt.value = result.expiresAt
-    installCommand.value = result.installCommand
-    ElMessage.success('注册 Token 已生成')
+    configText.value = result.configText || result.installCommand || ''
+    noticeType.value = 'success'
+    notice.value = '注册密钥已生成，请复制配置并保存为项目环境机器上的 agent.conf。'
+    ElMessage.success('注册密钥已生成')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '注册 Token 生成失败')
+    noticeType.value = 'error'
+    notice.value = error instanceof Error ? error.message : '注册密钥生成失败'
+    ElMessage.error(notice.value)
   } finally {
     loading.value = false
   }
 }
 
-async function copyInstallCommand() {
-  if (!installCommand.value) return
+async function copyConfigText() {
+  if (!configText.value) return
   try {
-    await navigator.clipboard.writeText(installCommand.value)
-    ElMessage.success('注册指令已复制')
+    await navigator.clipboard.writeText(configText.value)
+    ElMessage.success('配置已复制')
   } catch {
     ElMessage.warning('复制失败，请手动复制')
   }
 }
 </script>
+
+<style scoped>
+.drawer-actions {
+  display: flex;
+  gap: 8px;
+}
+</style>

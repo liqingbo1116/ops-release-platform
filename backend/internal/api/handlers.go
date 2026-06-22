@@ -408,10 +408,15 @@ func probePayloadFromEnvironment(environment domain.Environment) map[string]stri
 }
 
 func bindingsForProbe(environment domain.Environment) []domain.EnvironmentResourceBinding {
+	runtimeBindings := []domain.EnvironmentResourceBinding{}
 	if len(environment.Bindings) > 0 {
-		return environment.Bindings
+		for _, binding := range environment.Bindings {
+			if binding.BindingRole == "RUNTIME_TARGET" {
+				runtimeBindings = append(runtimeBindings, binding)
+			}
+		}
 	}
-	return defaultEnvironmentBindingsForCheck(environment)
+	return runtimeBindings
 }
 
 func appendPayloadCSV(payload map[string]string, key string, value string) {
@@ -473,6 +478,9 @@ func (h *Handler) cachedScopeChecks(environment domain.Environment) []integratio
 		bindings = defaultEnvironmentBindingsForCheck(environment)
 	}
 	for _, binding := range bindings {
+		if binding.BindingRole == "RUNTIME_TARGET" {
+			continue
+		}
 		switch binding.ResourceType {
 		case "K8S":
 			if environment.Type != "LOCAL" {
@@ -484,9 +492,6 @@ func (h *Handler) cachedScopeChecks(environment domain.Environment) []integratio
 			registry, exists := h.repo.GetHarborRegistry(binding.ResourceID)
 			checks = append(checks, cachedScopeCheck("Harbor 镜像项目", exists && containsTrimmedString(registry.Projects, binding.ScopeValue), binding.ScopeValue))
 		case "JENKINS":
-			if environment.Type != "LOCAL" {
-				continue
-			}
 			instance, exists := h.repo.GetJenkinsInstance(binding.ResourceID)
 			checks = append(checks, cachedScopeCheck("Jenkins 流水线视图", exists && containsTrimmedString(instance.Views, binding.ScopeValue), binding.ScopeValue))
 		}
@@ -502,6 +507,7 @@ func defaultEnvironmentBindingsForCheck(environment domain.Environment) []domain
 			ResourceID:   strings.TrimSpace(environment.ClusterID),
 			ScopeType:    "NAMESPACE",
 			ScopeValue:   strings.TrimSpace(environment.Namespace),
+			BindingRole:  "BUILD_SOURCE",
 			IsDefault:    true,
 		})
 	}
@@ -511,6 +517,7 @@ func defaultEnvironmentBindingsForCheck(environment domain.Environment) []domain
 			ResourceID:   strings.TrimSpace(environment.RegistryID),
 			ScopeType:    "PROJECT",
 			ScopeValue:   strings.TrimSpace(environment.RegistryProject),
+			BindingRole:  "BUILD_SOURCE",
 			IsDefault:    true,
 		})
 	}
@@ -520,6 +527,7 @@ func defaultEnvironmentBindingsForCheck(environment domain.Environment) []domain
 			ResourceID:   strings.TrimSpace(environment.JenkinsID),
 			ScopeType:    "VIEW",
 			ScopeValue:   strings.TrimSpace(environment.JenkinsView),
+			BindingRole:  "BUILD_SOURCE",
 			IsDefault:    true,
 		})
 	}
@@ -783,32 +791,48 @@ func (h *Handler) CreateAgentRegisterToken(c *gin.Context) {
 	}
 	baseURL := requestBaseURL(c)
 	lines := []string{
-		"cat > agent.env <<'EOF'",
+		"# 平台侧登记的 Agent 唯一标识。首次注册建议直接使用平台页面生成的值。",
 		"AGENT_ID=" + request.AgentID,
+		"",
+		"# 首次注册时建议留空；在平台页面认领 Agent 后，Agent 会通过心跳同步绑定关系。",
+		"AGENT_ENVIRONMENT_ID=",
+		"",
+		"# Agent 可出站访问的平台后端 API 地址。部署到项目环境前，请改成该机器可访问的平台地址。",
 		"PLATFORM_URL=" + baseURL,
+		"",
+		"# 首次注册可留空；使用 -f 配置文件启动时，注册成功后 Agent 会自动写回平台签发的运行令牌。",
+		"AGENT_TOKEN=",
+		"",
+		"# 一次性注册密钥，使用一次后失效。",
 		"AGENT_REGISTER_TOKEN=" + token,
 	}
 	lines = append(lines,
+		"",
 		"AGENT_MODE=remote-probe",
 		"AGENT_HEALTH_PORT=18080",
 		"AGENT_POLL_INTERVAL_SECONDS=5",
 		"AGENT_HEARTBEAT_INTERVAL_SECONDS=15",
 		"AGENT_HTTP_TIMEOUT_SECONDS=10",
 		"AGENT_MAX_TASKS=1",
-		"AGENT_CAPABILITIES=remote-probe,kubectl,http-check",
+		"AGENT_CAPABILITIES=remote-probe,k8s-api,http-check",
+		"",
+		"# 远程 Kubernetes 连接配置。Agent 通过 Kubernetes API 上报资源，namespace 与产品的对应关系在平台维护。",
 		"AGENT_KUBECONFIG=",
+		"",
+		"# 远程 Harbor 连接配置。Agent 只负责上报 project、镜像和 tag，project 与产品的对应关系在平台维护。",
 		"AGENT_HARBOR_URL=",
 		"AGENT_HARBOR_USERNAME=",
 		"AGENT_HARBOR_PASSWORD=",
 		"AGENT_HARBOR_INSECURE_SKIP_TLS_VERIFY=false",
-		"EOF",
-		"./ops-release-agent -f ./agent.env",
 	)
+	configText := strings.Join(lines, "\n")
 	Created(c, gin.H{
+		"agentId":        request.AgentID,
 		"platformUrl":    baseURL,
 		"token":          token,
 		"expiresAt":      expiresAt.Format(time.RFC3339),
-		"installCommand": strings.Join(lines, "\n"),
+		"configText":     configText,
+		"installCommand": configText,
 	})
 }
 
@@ -880,6 +904,15 @@ func (h *Handler) ClaimAgent(c *gin.Context) {
 		BadRequest(c, "environmentId is required")
 		return
 	}
+	environment, ok := h.repo.GetEnvironment(request.EnvironmentID)
+	if !ok {
+		BadRequest(c, "agent or environment not found")
+		return
+	}
+	if environment.Type != "PROJECT" {
+		BadRequest(c, "Agent 只能绑定远程产品，本地产品不需要绑定 Agent")
+		return
+	}
 	agentItem, ok := h.repo.ClaimAgent(c.Param("id"), request.EnvironmentID)
 	if !ok {
 		BadRequest(c, "agent or environment not found")
@@ -890,9 +923,10 @@ func (h *Handler) ClaimAgent(c *gin.Context) {
 
 func (h *Handler) AgentHeartbeat(c *gin.Context) {
 	var request struct {
-		EnvironmentID string   `json:"environmentId"`
-		Version       string   `json:"version"`
-		Capabilities  []string `json:"capabilities"`
+		EnvironmentID string               `json:"environmentId"`
+		Version       string               `json:"version"`
+		Capabilities  []string             `json:"capabilities"`
+		RuntimeStatus domain.RuntimeStatus `json:"runtimeStatus"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid heartbeat request")
@@ -918,7 +952,7 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 		BadRequest(c, "agent environment does not match claimed environment")
 		return
 	}
-	agentItem, ok := h.repo.UpdateAgentHeartbeat(agentID, request.EnvironmentID, request.Version, request.Capabilities)
+	agentItem, ok := h.repo.UpdateAgentHeartbeat(agentID, request.EnvironmentID, request.Version, request.Capabilities, request.RuntimeStatus)
 	if !ok {
 		NotFound(c, "agent not found")
 		return

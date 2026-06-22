@@ -9,15 +9,30 @@ export type AgentInfo = {
   status: 'ONLINE' | 'OFFLINE' | 'BUSY' | string
   claimStatus: 'PENDING_CLAIM' | 'CLAIMED' | string
   capabilities: string[]
+  runtimeStatus?: AgentRuntimeStatus
   lastHeartbeatAt: string
   currentTaskId: string | null
 }
 
+export type AgentRuntimeStatus = {
+  kubernetes?: AgentRuntimeComponentStatus
+  harbor?: AgentRuntimeComponentStatus
+}
+
+export type AgentRuntimeComponentStatus = {
+  status: 'HEALTHY' | 'UNHEALTHY' | 'UNKNOWN' | string
+  message: string
+  updatedAt: string
+  items: string[]
+}
+
 export type AgentRegisterToken = {
+  agentId: string
   platformUrl: string
   token: string
   expiresAt: string
-  installCommand: string
+  configText?: string
+  installCommand?: string
 }
 
 export async function listAgents(): Promise<AgentInfo[]> {

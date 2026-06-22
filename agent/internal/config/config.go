@@ -49,7 +49,7 @@ func Load(configFile string) (Config, error) {
 		HeartbeatInterval: secondsEnv("AGENT_HEARTBEAT_INTERVAL_SECONDS", 15),
 		HTTPTimeout:       secondsEnv("AGENT_HTTP_TIMEOUT_SECONDS", 10),
 		MaxTasks:          intEnv("AGENT_MAX_TASKS", 1),
-		Capabilities:      splitCSV(envWithDefault("AGENT_CAPABILITIES", "remote-probe,kubectl,http-check")),
+		Capabilities:      splitCSV(envWithDefault("AGENT_CAPABILITIES", "remote-probe,k8s-api,http-check")),
 		Kubeconfig:        strings.TrimSpace(os.Getenv("AGENT_KUBECONFIG")),
 		HarborURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("AGENT_HARBOR_URL")), "/"),
 		HarborUsername:    strings.TrimSpace(os.Getenv("AGENT_HARBOR_USERNAME")),
@@ -142,6 +142,81 @@ func loadEnvFile(path string) error {
 	}
 
 	return nil
+}
+
+func PersistRuntimeToken(configFile string, token string) error {
+	configFile = strings.TrimSpace(configFile)
+	token = strings.TrimSpace(token)
+	if configFile == "" {
+		return errors.New("config file path is required")
+	}
+	if token == "" {
+		return errors.New("agent token is required")
+	}
+
+	cleanPath := filepath.Clean(configFile)
+	content, err := os.ReadFile(cleanPath)
+	if err != nil {
+		return fmt.Errorf("read config file %s: %w", configFile, err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	hasTrailingNewline := strings.HasSuffix(string(content), "\n")
+	tokenUpdated := false
+	registerTokenUpdated := false
+	for index, line := range lines {
+		key, _, ok := parseEnvAssignment(line)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "AGENT_TOKEN":
+			lines[index] = "AGENT_TOKEN=" + token
+			tokenUpdated = true
+		case "AGENT_REGISTER_TOKEN":
+			lines[index] = "AGENT_REGISTER_TOKEN="
+			registerTokenUpdated = true
+		}
+	}
+
+	if !tokenUpdated {
+		lines = append(lines, "AGENT_TOKEN="+token)
+	}
+	if !registerTokenUpdated {
+		lines = append(lines, "AGENT_REGISTER_TOKEN=")
+	}
+
+	output := strings.Join(lines, "\n")
+	if hasTrailingNewline && !strings.HasSuffix(output, "\n") {
+		output += "\n"
+	}
+	info, err := os.Stat(cleanPath)
+	if err != nil {
+		return fmt.Errorf("stat config file %s: %w", configFile, err)
+	}
+	if err := os.WriteFile(cleanPath, []byte(output), info.Mode().Perm()); err != nil {
+		return fmt.Errorf("write config file %s: %w", configFile, err)
+	}
+	return nil
+}
+
+func parseEnvAssignment(line string) (string, string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return "", "", false
+	}
+	if strings.HasPrefix(trimmed, "export ") {
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "export "))
+	}
+	key, value, ok := strings.Cut(trimmed, "=")
+	if !ok {
+		return "", "", false
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", "", false
+	}
+	return key, strings.TrimSpace(value), true
 }
 
 func envWithDefault(key string, fallback string) string {

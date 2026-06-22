@@ -1,6 +1,10 @@
 package repository
 
-import "time"
+import (
+	"time"
+
+	"ops-release-platform/backend/internal/domain"
+)
 
 type ProjectModel struct {
 	ID          string    `gorm:"primaryKey;size:64"`
@@ -75,6 +79,7 @@ func (EnvironmentModel) TableName() string {
 type EnvironmentResourceBindingModel struct {
 	ID            string    `gorm:"primaryKey;size:128"`
 	EnvironmentID string    `gorm:"size:64;index;not null"`
+	BindingRole   string    `gorm:"size:32;index;not null;default:BUILD_SOURCE"`
 	ResourceType  string    `gorm:"size:32;index;not null"`
 	ResourceID    string    `gorm:"size:64;index;not null"`
 	ScopeType     string    `gorm:"size:32;not null"`
@@ -150,18 +155,19 @@ func (JenkinsInstanceModel) TableName() string {
 }
 
 type AgentModel struct {
-	ID              string     `gorm:"primaryKey;size:64"`
-	Name            string     `gorm:"size:128;not null"`
-	EnvironmentID   string     `gorm:"size:64;index"`
-	Version         string     `gorm:"size:64;not null"`
-	Status          string     `gorm:"size:32;index;not null"`
-	ClaimStatus     string     `gorm:"size:32;index;not null;default:PENDING_CLAIM"`
-	TokenHash       string     `gorm:"size:128;index"`
-	Capabilities    []string   `gorm:"serializer:json;type:jsonb;not null"`
-	LastHeartbeatAt *time.Time `gorm:"index"`
-	CurrentTaskID   string     `gorm:"size:64"`
-	CreatedAt       time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt       time.Time  `gorm:"autoUpdateTime"`
+	ID              string               `gorm:"primaryKey;size:64"`
+	Name            string               `gorm:"size:128;not null"`
+	EnvironmentID   string               `gorm:"size:64;index"`
+	Version         string               `gorm:"size:64;not null"`
+	Status          string               `gorm:"size:32;index;not null"`
+	ClaimStatus     string               `gorm:"size:32;index;not null;default:PENDING_CLAIM"`
+	TokenHash       string               `gorm:"size:128;index"`
+	Capabilities    []string             `gorm:"serializer:json;type:jsonb;not null"`
+	RuntimeStatus   domain.RuntimeStatus `gorm:"serializer:json;type:jsonb"`
+	LastHeartbeatAt *time.Time           `gorm:"index"`
+	CurrentTaskID   string               `gorm:"size:64"`
+	CreatedAt       time.Time            `gorm:"autoCreateTime"`
+	UpdatedAt       time.Time            `gorm:"autoUpdateTime"`
 }
 
 func (AgentModel) TableName() string {

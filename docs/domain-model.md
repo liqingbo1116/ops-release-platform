@@ -167,7 +167,7 @@ K8s、Harbor、Jenkins 是独立资源，不是环境的内嵌字段。资源新
 | environmentId | string | 是 | 绑定环境 |
 | version | string | 是 | Agent 版本 |
 | status | enum | 是 | ONLINE / HEARTBEAT_TIMEOUT / OFFLINE |
-| capabilities | string[] | 是 | image-sync / kubectl / shell / http-check |
+| capabilities | string[] | 是 | remote-probe / k8s-api / http-check |
 | lastHeartbeatAt | datetime | 否 | 最近心跳 |
 | currentTaskId | string | 否 | 当前任务 |
 

@@ -38,12 +38,12 @@ Latest pushed milestone:
 
 ## Current Step
 
-- V1 mainline is currently ready to move from environment management to Agent management and remote probing.
+- V1 mainline is currently ready to continue Agent management and remote resource reporting.
 - Foundation status:
   - 基础资源管理: functionally complete for V1; keep only bug fixes and integration follow-up.
-  - 环境管理: functionally complete for V1; environments can bind multiple K8s namespaces, Harbor projects, and Jenkins views for later service association.
+  - 产品管理: functionally complete for the current V1 transition; the backend still reuses environment records to carry product deployment scope and resource bindings.
 - Next default step:
-  - Agent 管理与远程探测: verify real registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, unbound/pending-claim status, project/product binding, online status, task leasing, and remote resource probing through the platform API.
+  - Agent 管理与远程资源上报: verify real registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, unbound/pending-claim status, product binding, online status, task leasing, and remote K8s/Harbor/service-image data reported by Agent through the platform API.
 - Completed and pushed mock-first status:
   - release/deploy detail closure
   - Agent protocol mock closure
@@ -57,15 +57,15 @@ Latest pushed milestone:
   - frontend unit tests passed on 2026-06-09: 10 files, 39 tests
   - frontend build passed on 2026-06-09 with existing dependency annotation warnings only
 - Next default step:
-  - build and run the Agent binary on a remote Linux host or local remote-like host with real platform registration, heartbeat, token validation, task lease, and remote probing. Do not use mock execution or mock data as completion evidence.
+  - build and run the Agent binary on a remote Linux host or local remote-like host with real platform registration, heartbeat, token validation, task lease, and remote resource reporting. Do not use mock execution or mock data as completion evidence.
 
 ## V1 Implementation Baseline
 
 This is the authoritative order for subsequent development. Each phase must use real data before it is considered complete. If a required external tool or runtime environment is not ready, stop at that phase and do not move on.
 
 1. 基础资源管理.
-2. 环境管理.
-3. Agent 管理与远程探测.
+2. 产品管理.
+3. Agent 管理与远程资源上报.
 4. 项目管理.
 5. 产品管理.
 6. 服务与版本来源.
@@ -76,17 +76,17 @@ This is the authoritative order for subsequent development. Each phase must use 
 11. 登录与权限.
 12. 清理剩余 mock.
 
-Current step is step 3: Agent 管理与远程探测. Do not move to 项目管理 until Agent registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, unbound/pending-claim status, project/product binding, status visibility, task leasing, and remote probing use real backend data and the mock/fallback boundary is removed or explicitly recorded as blocked by missing real runtime or infrastructure.
+Current step is step 3: Agent 管理与远程资源上报. Do not move to service/version development until Agent registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, unbound/pending-claim status, product binding, status visibility, task leasing, and remote K8s/Harbor/service-image reporting use real backend data and the mock/fallback boundary is removed or explicitly recorded as blocked by missing real runtime or infrastructure.
 
 Agent registration design for V1:
 
 - The Agent registration secret/token is generated from the Agent management page.
-- The page must show the platform URL, one-time registration token, expiration, and a binary startup/config example. Downloadable config may be added later, but copyable text is enough for V1.
-- The project-side operator copies the platform URL and registration token into the Agent config file, then starts the Agent binary with `-f <config-file>`.
+- The page must show the platform URL, one-time registration token, expiration, and copyable Agent config text. Do not show shell commands on the registration page.
+- The project-side operator copies the generated config text into the Agent config file, fills the remote K8s/Harbor connection values, then starts the Agent binary with `-f <config-file>`.
 - Agent should connect to the platform with platform URL and one-time registration token first.
-- After first registration, the platform issues a long-lived Agent token/secret. Heartbeat, task lease, probing, and callback APIs must use and validate this Agent token; the one-time registration token must not be reused for runtime calls.
+- After first registration, the platform issues a long-lived Agent token/secret. Heartbeat, task lease, resource reporting, and callback APIs must use and validate this Agent token; the one-time registration token must not be reused for runtime calls.
 - The platform must support unbound or pending-claim Agents so an Agent can appear before it is associated with a project/product.
-- Environment/product ID may be accepted as an optional startup convenience, but product binding must also be manageable from the platform.
+- Environment/product ID may be accepted as an optional startup convenience, but product binding and namespace/project-to-product mapping must be manageable from the platform.
 - Agent token validation is part of the Agent phase gate; generating tokens without validating them on heartbeat/task APIs is not acceptable for V1 closure.
 - If an Agent is online and can already report service versions or remote resource summaries but is still unbound, show it as `在线 / 待认领`. Its reported data may be displayed as unowned probe data for claim decisions, but it must not enter the official product/service view or execute release/deploy tasks until it is bound to a project/product.
 - Before requiring the user to deploy or change project-side Agent config, tell the user exactly which file/value/command must be changed and what success signal should appear on the platform page.
@@ -97,28 +97,30 @@ Project/product model decision for V1:
 - The user-facing hierarchy should be 项目 -> 产品 -> 服务 -> 发布 / 部署.
 - Examples: 项目A、项目B are projects; 数据中台、物联中台 are products; 服务A、服务B are services under a product.
 - The current environment concept corresponds to the product concept for V1. Treat environment records and resource bindings as the transition implementation of product deployment scope, not as an extra user-facing level under product.
-- Do not rebuild completed 基础资源管理 or 环境管理 solely for this hierarchy change.
+- Do not rebuild completed 基础资源管理 or current 产品管理 solely for this hierarchy change.
 - Add projects in step 4 and product ownership in step 5, then make service, release, deployment, baseline, and permission flows consume that ownership in later steps.
 
-Environment management is considered ready for the next phase only because it supports multi-scope bindings:
+Product management is considered ready for the next phase only because it supports multi-scope bindings:
 
-- An environment must not be modeled as only one Harbor project, one K8s namespace, and one Jenkins view/job.
-- Add or complete the environment resource binding model so one local environment can bind multiple K8s namespaces, Harbor projects, and Jenkins views/jobs; one project environment binds project K8s namespaces and project Harbor projects.
-- Multi-scope bindings are for later service-to-environment association: each service must be able to use the correct namespace and Harbor project inside an environment; local build/version-source flows may also use Jenkins view/job. Do not implement multi-binding as an isolated configuration feature with no service-level consumer.
+- A product must not be modeled as only one Harbor project, one K8s namespace, and one Jenkins view/job.
+- Local products bind local K8s namespaces, local Harbor projects, and local Jenkins views/jobs.
+- Remote products bind local Harbor projects and local Jenkins views/jobs as build/version sources. Remote runtime K8s namespaces and remote Harbor projects are reported by Agent and mapped to products on the platform side.
+- Agent config must not carry namespace/project-to-product mapping. One product may map multiple remote namespaces and multiple remote Harbor projects after Agent reports them.
+- Multi-scope bindings are for later service-to-product association: each service must be able to use the correct namespace and Harbor project inside a product; build/version-source flows may also use Jenkins view/job. Do not implement multi-binding as an isolated configuration feature with no service-level consumer.
 - The page may keep a minimal default-binding UI in V1, but backend models, APIs, and persistence must support the full binding list.
-- Release/deploy task creation must snapshot the actual namespace/project/view/job used by that task, so historical tasks are not affected when environment bindings change later.
+- Release/deploy task creation must snapshot the actual namespace/project/view/job used by that task, so historical tasks are not affected when product bindings change later.
 
 ## V1 Ordered TODO
 
 1. 基础资源管理. Done for V1.
    - User-visible outcome: users can maintain K8s, Harbor, and Jenkins resources, test connectivity, refresh probes, and distinguish K8s resources by API Server.
    - Remaining scope: bug fixes only unless later phases expose integration gaps.
-2. 环境管理. Done for V1.
-   - User-visible outcome: users can create local and project environments. Local environments can bind multiple K8s namespaces, Harbor projects, and Jenkins views; project environments bind project K8s namespaces and Harbor projects and see resource readiness separately from Agent execution readiness.
+2. 产品管理. Done for the current V1 transition.
+   - User-visible outcome: users can create local and remote products. Local products bind local K8s namespaces, local Harbor projects, and local Jenkins views. Remote products bind local Harbor projects and local Jenkins views as build/version sources, while their remote runtime K8s/Harbor scopes wait for Agent-reported data and platform-side mapping.
    - Remaining scope: follow-up adjustments only when service association consumes these bindings.
-3. Agent 管理与远程探测. Next.
-   - User-visible outcome: users can generate a registration token on the Agent page, copy platform URL/token into project-side Agent config, start the Agent binary, see `在线 / 待认领`, inspect unowned probe summaries, bind the Agent to project/product, and then see it as ready for official remote tasks.
-   - Required before next phase: real Agent binary runtime, outbound connectivity to platform API, real registration/token validation, and remote resource access from Agent. `docker compose` is not required for development closure and is deferred to formal production deployment verification.
+3. Agent 管理与远程资源上报. Next.
+   - User-visible outcome: users can generate a registration token on the Agent page, copy the generated config text into a project-side Agent config file, start the Agent binary, see `在线 / 待认领`, inspect unowned reported resource summaries, bind the Agent to a product, and then map Agent-reported remote namespaces/Harbor projects to that product.
+   - Required before next phase: real Agent binary runtime, outbound connectivity to platform API, real registration/token validation, remote K8s/Harbor access from Agent, and platform-side product mapping for reported scopes. `docker compose` is not required for development closure and is deferred to formal production deployment verification.
 4. 项目管理.
    - User-visible outcome: users can create and select top-level projects such as 项目A and 项目B as the business ownership boundary.
    - Dependency: completed environments/products must be attachable to projects without rewriting resource management.
@@ -126,14 +128,14 @@ Environment management is considered ready for the next phase only because it su
    - User-visible outcome: users can create products such as 数据中台 and 物联中台 under a project. The current environment model is reused as the V1 transition implementation for product deployment scope and resource bindings.
    - Dependency: completed environment bindings from step 2 must be consumed here as product resource scope, not duplicated.
 6. 服务与版本来源.
-   - User-visible outcome: users can create services under products and select actual namespace, Harbor project, Jenkins view/job, repository, branch, image name, and version source inside the target product scope.
+   - User-visible outcome: users can create services under products and select actual namespace, Harbor project, Jenkins view/job, repository, branch, image name, and version source inside the target product scope. Local Jenkins and local Harbor are the build/version source; remote Agent-reported K8s/Harbor scopes are runtime targets.
    - Dependency: project ownership from step 4, product deployment scope from step 5, and environment bindings from step 2 as the V1 transition implementation must be consumed here, not duplicated.
 7. 发布单创建.
    - User-visible outcome: users can select project, product, services, and version source to create a release order with product resource and Agent readiness checks.
 8. 基线管理.
    - User-visible outcome: users can view environment baselines, record service version snapshots, and compare target release versions with the current baseline.
 9. 部署执行.
-   - User-visible outcome: users can execute deployments; local environments run through platform-direct K8s access, remote environments run through Agent.
+   - User-visible outcome: users can execute deployments; local products run through platform-direct K8s access, remote products run through Agent-reported runtime resources and Agent task execution.
 10. 发布详情 / 部署详情.
    - User-visible outcome: users can inspect execution progress, step status, logs, failure reason, retry/rollback entry, and Agent-reported results.
 11. 登录与权限.
@@ -145,9 +147,9 @@ Environment management is considered ready for the next phase only because it su
 
 V1 must prioritize functional closure over optimization work. The minimum acceptable V1 outcome is:
 
-- the platform can manage project environments
+- the platform can manage products and their resource scopes
 - the platform can group products under projects before services, releases, and deployments are created
-- the platform can create and track project-environment deployment/release tasks
+- the platform can create and track product deployment/release tasks
 - Agent can be started directly by binary during development and later deployed by docker-compose in formal production use
 - remote Agent can lease/pull release/deploy task payloads and required execution data from the platform API
 - Agent-driven execution and status reporting are visible end to end
@@ -158,7 +160,7 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 
 - Environment access rule:
   - local environments are platform-direct by default and do not require Agent
-  - project environments are not assumed reachable from the platform and require Agent
+  - remote product runtime resources are not assumed reachable from the platform and require Agent reporting/execution
   - Agent only communicates outbound to the platform API; the platform must not call Agent endpoints or push tasks to Agent
   - V1 Agent deployment model:
   - Linux host
@@ -167,7 +169,7 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
   - Agent is outside Kubernetes
   - Agent does not need to expose an endpoint reachable by the platform
   - Agent connects outbound to the platform API to lease/pull tasks and report heartbeat, service list, image versions, step status, logs, and final result
-  - Agent accesses project Kubernetes, project Harbor/Registry, and platform API. Agent does not access Jenkins; Jenkins is platform-side local infrastructure for build/version-source flows.
+  - Agent accesses remote runtime Kubernetes, remote Harbor/Registry, and platform API. Agent does not access Jenkins; Jenkins is platform-side local infrastructure for build/version-source flows.
 - Do not treat “deploy Agent into Kubernetes” as a V1 prerequisite unless the docs are deliberately changed later.
 
 ## Recommended Development Path
@@ -224,15 +226,15 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 5. Complete real release integration closure.
    - Jenkins-triggered release path
    - Harbor image selection and sync path
-   - Agent execution for image sync and tag update
+   - Agent execution for remote image pull/sync verification and runtime tag update
    - user-visible outcomes:
-     - users can choose Jenkins Job or Harbor image tag at release creation
+     - users can choose local Jenkins job or local Harbor image tag at release creation
      - users no longer need manual Harbor lookup or manual tag change
    - external readiness:
-     - Jenkins test job or job namespace
-     - Harbor/Registry test project and test images
+     - local Jenkins test job or view
+     - local Harbor/Registry test project and test images
      - platform backend connectivity to local Jenkins and local Harbor
-     - project Agent connectivity to project Harbor, project Kubernetes, and platform API
+     - remote Agent connectivity to remote Harbor, remote Kubernetes, and platform API
      - one test service repository
      - `Dockerfile`
      - Jenkinsfile or build script
@@ -252,12 +254,12 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
      - deployable K8s manifests
      - one sample for existing-service tag update
      - one sample for missing-service first deployment
-7. Complete remote project-environment deploy/manage V1 bar.
-   - environment management visibility
+7. Complete remote product deploy/manage V1 bar.
+   - product management visibility
    - Agent status visibility
    - remote release/deploy from platform with end-to-end tracking
    - user-visible outcomes:
-     - users can manage remote project environments and drive remote release/deploy from the platform
+     - users can manage remote products and drive remote release/deploy from the platform
    - external readiness:
      - full integration environment
      - environment owner
@@ -295,9 +297,10 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
 1. 收敛 Agent 页面交互:
    - Agent 列表只保留“刷新”作为状态更新入口，不做平台主动探测按钮。
    - 页面展示 Agent 上报的心跳、在线状态、绑定状态、最近上报摘要和最近任务状态。
+   - 注册弹窗只展示可复制配置文本，不展示 shell 命令。配置里填写平台地址、注册 token、远程 K8s/Harbor 连接信息，不填写产品映射。
    - 保留 Agent 绑定/解绑产品入口；解绑是否开放要以安全规则为准：有运行中任务、已绑定正式产品且仍在线执行的 Agent 不允许直接解绑。
    - 环境/产品页面也可以提供绑定/解绑 Agent 入口，但必须与 Agent 页面使用同一套后端规则，避免两个页面状态不一致。
-   - 待认领 Agent 可以显示未归属探测摘要，但不能进入正式产品/服务视图，也不能执行发布/部署任务。
+   - 待认领 Agent 可以显示未归属上报摘要，但不能进入正式产品/服务视图，也不能执行发布/部署任务。
    - 页面不解释 Agent 内部工作细节，只呈现用户需要判断的结果：是否在线、是否待认领、是否已绑定、是否有上报数据、是否可执行任务。
 2. Verify the standalone Agent deployable package:
    - build `agent/cmd/agent` into a binary
@@ -305,25 +308,30 @@ Until this mainline is complete, performance tuning, warning cleanup, and refact
    - run the Agent with `-f <config-file>` for development-time verification
    - verify the formal `docker compose` deployment path only after development-time binary verification is complete and production deployment packaging is in scope
    - verify `/healthz`
-   - verify registration token exchange, long-lived Agent token validation, and heartbeat reaches the platform
-3. Verify Agent outbound task lease/pull dispatch:
+   - verify registration token exchange, long-lived Agent token validation, heartbeat, and remote K8s/Harbor resource reports reach the platform
+3. Add platform-side mapping for Agent-reported runtime scopes:
+   - display Agent-reported remote K8s namespaces and remote Harbor projects as unowned resource data before product binding
+   - after Agent is bound to a product, allow users to map one or more remote namespaces and one or more remote Harbor projects to that product
+   - keep local Jenkins/local Harbor build-source bindings separate from remote runtime mappings
+   - user-visible outcome: users can see which remote runtime scopes are ready for a product before service release/deploy uses them
+4. Verify Agent outbound task lease/pull dispatch:
    - create a project-environment release/deploy task
    - verify `/api/agent-tasks/lease` returns the bound task only to the matching Agent/environment
    - verify task status changes to leased/running and logs appear through callback APIs
-4. Close release/deploy detail against remote Agent callbacks:
+5. Close release/deploy detail against remote Agent callbacks:
    - show lease state and callback-driven logs
    - show lease/execution failure reasons
    - keep retry/skip/manual-confirm/rollback state consistent with Agent task status
-5. Keep the current scope narrow:
+6. Keep the current scope narrow:
    - existing service release/update
    - target-missing service first deployment
    - remote project environment task tracking
-6. Before remote Agent verification, prepare:
+7. Before remote Agent verification, prepare:
   - one Linux host for Agent
   - Go toolchain or a prebuilt Agent binary for development-time direct startup
    - platform API connectivity from Agent host
    - one repeatable test project or service
-7. Before real Jenkins/Harbor/K8s integration, also prepare:
+8. Before real Jenkins/Harbor/K8s integration, also prepare:
    - Harbor test image and tag set
    - Jenkins pipeline and build script
    - deployable K8s manifests

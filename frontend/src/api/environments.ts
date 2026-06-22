@@ -25,6 +25,7 @@ export type EnvironmentInfo = {
 export type EnvironmentResourceBinding = {
   id?: string
   environmentId?: string
+  bindingRole?: 'BUILD_SOURCE' | 'RUNTIME_TARGET'
   resourceType: 'K8S' | 'HARBOR' | 'JENKINS'
   resourceId: string
   scopeType: 'NAMESPACE' | 'PROJECT' | 'VIEW'

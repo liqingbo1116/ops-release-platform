@@ -307,16 +307,25 @@ func (r *MockRepository) environmentHasUnverifiedScopes(item domain.Environment)
 	for _, binding := range bindings {
 		switch binding.ResourceType {
 		case "K8S":
+			if item.Type != "LOCAL" || binding.BindingRole == "RUNTIME_TARGET" {
+				continue
+			}
 			cluster, exists := r.GetKubernetesCluster(binding.ResourceID)
 			if !exists || !stringListContains(cluster.Namespaces, binding.ScopeValue) {
 				return true
 			}
 		case "HARBOR":
+			if binding.BindingRole == "RUNTIME_TARGET" {
+				continue
+			}
 			registry, exists := r.GetHarborRegistry(binding.ResourceID)
 			if !exists || !stringListContains(registry.Projects, binding.ScopeValue) {
 				return true
 			}
 		case "JENKINS":
+			if binding.BindingRole == "RUNTIME_TARGET" {
+				continue
+			}
 			instance, exists := r.GetJenkinsInstance(binding.ResourceID)
 			if !exists || !stringListContains(instance.Views, binding.ScopeValue) {
 				return true
@@ -755,7 +764,7 @@ func (r *MockRepository) UpsertAgent(id string, environmentID string, version st
 	return agent, true
 }
 
-func (r *MockRepository) UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string) (domain.Agent, bool) {
+func (r *MockRepository) UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string, runtimeStatus domain.RuntimeStatus) (domain.Agent, bool) {
 	for index := range r.agents {
 		if r.agents[index].ID != id {
 			continue
@@ -772,6 +781,9 @@ func (r *MockRepository) UpdateAgentHeartbeat(id string, environmentID string, v
 		}
 		if len(capabilities) > 0 {
 			r.agents[index].Capabilities = capabilities
+		}
+		if runtimeStatusHasData(runtimeStatus) {
+			r.agents[index].RuntimeStatus = runtimeStatus
 		}
 		if r.agents[index].ClaimStatus == "" {
 			if r.agents[index].EnvironmentID != "" {

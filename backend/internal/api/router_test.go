@@ -389,7 +389,7 @@ func TestAgentTaskExpiredLeaseCanBeLeasedAgain(t *testing.T) {
 func TestEnvironmentCRUD(t *testing.T) {
 	router := newTestRouter()
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-new-prod","name":"新生产环境","code":"new-prod","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","status":"HEALTHY"}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-new-prod","name":"新生产环境","code":"new-prod","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -397,7 +397,7 @@ func TestEnvironmentCRUD(t *testing.T) {
 		t.Fatalf("expected create environment status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
 	}
 
-	autoCodeRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"name":"Auto Code Prod","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","status":"HEALTHY"}`))
+	autoCodeRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"name":"Auto Code Prod","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
 	autoCodeRequest.Header.Set("Content-Type", "application/json")
 	autoCodeRecorder := httptest.NewRecorder()
 	router.ServeHTTP(autoCodeRecorder, autoCodeRequest)
@@ -433,7 +433,7 @@ func TestEnvironmentCRUD(t *testing.T) {
 func TestEnvironmentWithUnverifiedScopesIsSavedAsDegraded(t *testing.T) {
 	router := newTestRouter()
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-unverified-scope","name":"未验证范围环境","code":"unverified-scope","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"namespace-not-probed","registryId":"harbor-local-prod","registryProject":"project-not-probed","status":"HEALTHY"}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-unverified-scope","name":"未验证范围环境","code":"unverified-scope","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"namespace-not-probed","registryId":"harbor-local-prod","registryProject":"project-not-probed","jenkinsId":"jenkins-local-prod","jenkinsView":"project-not-probed","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -455,7 +455,7 @@ func TestEnvironmentVerifiedScopesClearDegradedOnSave(t *testing.T) {
 	repo := newTestRepository()
 	router := newTestRouterWithRepository(repo)
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-verified-later","name":"后续验证环境","code":"verified-later","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"namespace-later","registryId":"harbor-local-prod","registryProject":"project-later","status":"HEALTHY"}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-verified-later","name":"后续验证环境","code":"verified-later","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"namespace-later","registryId":"harbor-local-prod","registryProject":"project-later","jenkinsId":"jenkins-local-prod","jenkinsView":"project-later","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -477,6 +477,9 @@ func TestEnvironmentVerifiedScopesClearDegradedOnSave(t *testing.T) {
 	}
 	if _, _, err := repo.UpdateKubernetesClusterProbe("k8s-local-prod", "HEALTHY", "", []string{"default", "project-x", "namespace-later"}, time.Now()); err != nil {
 		t.Fatalf("update kubernetes probe: %v", err)
+	}
+	if _, _, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z", "project-later"}, []string{"mock-release"}, time.Now()); err != nil {
+		t.Fatalf("update jenkins probe: %v", err)
 	}
 
 	updateRequest := httptest.NewRequest(http.MethodPut, "/api/environments/env-verified-later", strings.NewReader(`{"name":"后续验证环境-已更新"}`))
@@ -720,7 +723,7 @@ func TestAgentHeartbeatRejectsUnknownEnvironment(t *testing.T) {
 func TestAgentHeartbeatRejectsEnvironmentRebind(t *testing.T) {
 	router := newTestRouter()
 
-	createEnvironmentRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-remote-agent-rebind-test","name":"远程 Agent 绑定测试环境","code":"remote-agent-rebind-test","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","status":"HEALTHY"}`))
+	createEnvironmentRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-remote-agent-rebind-test","name":"远程 Agent 绑定测试环境","code":"remote-agent-rebind-test","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
 	createEnvironmentRequest.Header.Set("Content-Type", "application/json")
 	createEnvironmentRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createEnvironmentRecorder, createEnvironmentRequest)
@@ -778,8 +781,8 @@ func TestAgentRegisterClaimHeartbeatAndLeaseFlow(t *testing.T) {
 	}
 	var tokenPayload struct {
 		Data struct {
-			Token          string `json:"token"`
-			InstallCommand string `json:"installCommand"`
+			Token      string `json:"token"`
+			ConfigText string `json:"configText"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(createTokenRecorder.Body.Bytes(), &tokenPayload); err != nil {
@@ -788,8 +791,11 @@ func TestAgentRegisterClaimHeartbeatAndLeaseFlow(t *testing.T) {
 	if tokenPayload.Data.Token == "" {
 		t.Fatal("expected register token")
 	}
-	if strings.Contains(tokenPayload.Data.InstallCommand, "AGENT_ENVIRONMENT_ID=") {
-		t.Fatalf("install command must not prebind environment: %s", tokenPayload.Data.InstallCommand)
+	if tokenPayload.Data.ConfigText == "" {
+		t.Fatal("expected agent config text")
+	}
+	if strings.Contains(tokenPayload.Data.ConfigText, "AGENT_ENVIRONMENT_ID=env-") {
+		t.Fatalf("config text must not prebind environment: %s", tokenPayload.Data.ConfigText)
 	}
 
 	registerRequest := httptest.NewRequest(http.MethodPost, "/api/agents/register", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","registerToken":"`+tokenPayload.Data.Token+`","version":"v1-remote-probe","capabilities":["remote-probe","kubectl","http-check"]}`))
@@ -901,6 +907,20 @@ func TestAgentRegisterClaimHeartbeatAndLeaseFlow(t *testing.T) {
 	}
 }
 
+func TestClaimAgentRejectsLocalEnvironment(t *testing.T) {
+	router := newTestRouter()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/claim", strings.NewReader(`{"environmentId":"env-local-prod"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected local environment claim status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "Agent 只能绑定远程产品，本地产品不需要绑定 Agent")
+}
+
 func TestEnvironmentRemoteProbeRequiresClaimedOnlineAgent(t *testing.T) {
 	router := newTestRouter()
 	createProjectProbeEnvironment(t, router, "env-probe-no-agent", "probe-no-agent", "project-x")
@@ -965,7 +985,10 @@ func TestEnvironmentRemoteProbeEnqueuesTaskForClaimedOnlineAgent(t *testing.T) {
 	if lease.Data.Task.ID != probePayload.Data.TaskID || lease.Data.Task.Type != "probe" || lease.Data.Task.Action != "remote_resource_probe" {
 		t.Fatalf("unexpected probe task: %+v", lease.Data.Task)
 	}
-	if lease.Data.Task.Payload["harborProjects"] != "project-x" {
+	if lease.Data.Task.Payload["source"] != "platform" {
+		t.Fatalf("unexpected probe payload: %+v", lease.Data.Task.Payload)
+	}
+	if _, ok := lease.Data.Task.Payload["harborProjects"]; ok {
 		t.Fatalf("unexpected probe payload: %+v", lease.Data.Task.Payload)
 	}
 	if _, ok := lease.Data.Task.Payload["jenkinsViews"]; ok {
@@ -1162,7 +1185,7 @@ func TestEnvironmentCheckUsesCachedScopesWithMockIntegrations(t *testing.T) {
 	if payload.Data.Status != "HEALTHY" {
 		t.Fatalf("expected cached local check healthy, got %+v", payload.Data)
 	}
-	if len(payload.Data.Checks) != 2 {
+	if len(payload.Data.Checks) != 3 {
 		t.Fatalf("expected cached local checks for configured scopes, got %+v", payload.Data.Checks)
 	}
 }
@@ -1189,12 +1212,12 @@ func TestEnvironmentCheckUsesCachedScopesForRemoteEnvironment(t *testing.T) {
 	if payload.Data.Status != "HEALTHY" {
 		t.Fatalf("expected cached remote check healthy, got %+v", payload.Data)
 	}
-	if len(payload.Data.Checks) != 1 {
-		t.Fatalf("expected remote harbor cached check only, got %+v", payload.Data.Checks)
+	if len(payload.Data.Checks) != 2 {
+		t.Fatalf("expected remote harbor and jenkins cached checks, got %+v", payload.Data.Checks)
 	}
 }
 
-func TestEnvironmentCheckIgnoresRemoteJenkinsView(t *testing.T) {
+func TestEnvironmentCheckMarksMissingRemoteJenkinsViewDegraded(t *testing.T) {
 	router := newTestRouter()
 	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-missing-jenkins-view","name":"缺失 Jenkins 视图环境","code":"missing-jenkins-view","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"view-not-found","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
@@ -1219,8 +1242,8 @@ func TestEnvironmentCheckIgnoresRemoteJenkinsView(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode check response: %v", err)
 	}
-	if payload.Data.Status != "HEALTHY" {
-		t.Fatalf("expected remote jenkins view to be ignored by V1 project environment checks, got %+v", payload.Data)
+	if payload.Data.Status != "DEGRADED" {
+		t.Fatalf("expected missing remote jenkins view to degrade product checks, got %+v", payload.Data)
 	}
 }
 
@@ -1762,7 +1785,7 @@ func registerTestAgent(t *testing.T, router http.Handler, agentID string, enviro
 
 func createProjectProbeEnvironment(t *testing.T, router http.Handler, id string, code string, scope string) {
 	t.Helper()
-	body := `{"id":"` + id + `","name":"项目探测测试环境","code":"` + code + `","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"` + scope + `","registryId":"harbor-local-prod","registryProject":"` + scope + `","status":"HEALTHY"}`
+	body := `{"id":"` + id + `","name":"项目探测测试环境","code":"` + code + `","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"` + scope + `","registryId":"harbor-local-prod","registryProject":"` + scope + `","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -1843,7 +1866,7 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 	if _, ok, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x"}, time.Now()); err != nil || !ok {
 		panic("seed harbor probe failed")
 	}
-	if _, ok, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x"}, []string{"mock-release"}, time.Now()); err != nil || !ok {
+	if _, ok, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z"}, []string{"mock-release"}, time.Now()); err != nil || !ok {
 		panic("seed jenkins probe failed")
 	}
 	items := []domain.Environment{
@@ -1857,6 +1880,8 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 			Namespace:       "default",
 			RegistryID:      "harbor-local-prod",
 			RegistryProject: "project-x",
+			JenkinsID:       "jenkins-local-prod",
+			JenkinsView:     "project-x",
 			Status:          "HEALTHY",
 		},
 		{
@@ -1869,6 +1894,8 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 			Namespace:       "project-x",
 			RegistryID:      "harbor-local-prod",
 			RegistryProject: "project-x",
+			JenkinsID:       "jenkins-local-prod",
+			JenkinsView:     "project-x",
 			Status:          "HEALTHY",
 		},
 		{
@@ -1881,6 +1908,8 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 			Namespace:       "project-z",
 			RegistryID:      "harbor-local-prod",
 			RegistryProject: "project-z",
+			JenkinsID:       "jenkins-local-prod",
+			JenkinsView:     "project-z",
 			Status:          "UNKNOWN",
 		},
 	}

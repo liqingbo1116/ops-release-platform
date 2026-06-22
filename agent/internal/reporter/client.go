@@ -42,12 +42,25 @@ type HeartbeatResponse struct {
 }
 
 type AgentInfo struct {
-	ID              string   `json:"id"`
-	EnvironmentID   string   `json:"environmentId"`
-	ClaimStatus     string   `json:"claimStatus"`
-	Status          string   `json:"status"`
-	Capabilities    []string `json:"capabilities"`
-	LastHeartbeatAt string   `json:"lastHeartbeatAt"`
+	ID              string        `json:"id"`
+	EnvironmentID   string        `json:"environmentId"`
+	ClaimStatus     string        `json:"claimStatus"`
+	Status          string        `json:"status"`
+	Capabilities    []string      `json:"capabilities"`
+	RuntimeStatus   RuntimeStatus `json:"runtimeStatus"`
+	LastHeartbeatAt string        `json:"lastHeartbeatAt"`
+}
+
+type RuntimeStatus struct {
+	Kubernetes RuntimeComponentStatus `json:"kubernetes"`
+	Harbor     RuntimeComponentStatus `json:"harbor"`
+}
+
+type RuntimeComponentStatus struct {
+	Status    string   `json:"status"`
+	Message   string   `json:"message"`
+	UpdatedAt string   `json:"updatedAt"`
+	Items     []string `json:"items"`
 }
 
 type Task struct {
@@ -110,12 +123,13 @@ func (c *Client) Register(ctx context.Context, registerToken string, version str
 	return response.Data, nil
 }
 
-func (c *Client) Heartbeat(ctx context.Context, version string, capabilities []string) (HeartbeatResponse, error) {
+func (c *Client) Heartbeat(ctx context.Context, version string, capabilities []string, runtimeStatus RuntimeStatus) (HeartbeatResponse, error) {
 	var response apiResponse[HeartbeatResponse]
 	err := c.post(ctx, fmt.Sprintf("/api/agents/%s/heartbeat", c.agentID), map[string]any{
 		"environmentId": c.environmentID,
 		"version":       version,
 		"capabilities":  capabilities,
+		"runtimeStatus": runtimeStatus,
 	}, &response)
 	if err != nil {
 		return HeartbeatResponse{}, err

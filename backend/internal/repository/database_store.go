@@ -785,7 +785,7 @@ func (s *DatabaseStore) UpsertAgent(id string, environmentID string, version str
 	return s.GetAgent(id)
 }
 
-func (s *DatabaseStore) UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string) (domain.Agent, bool) {
+func (s *DatabaseStore) UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string, runtimeStatus domain.RuntimeStatus) (domain.Agent, bool) {
 	var model AgentModel
 	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
 		return domain.Agent{}, false
@@ -803,6 +803,9 @@ func (s *DatabaseStore) UpdateAgentHeartbeat(id string, environmentID string, ve
 	}
 	if len(capabilities) > 0 {
 		model.Capabilities = append([]string(nil), capabilities...)
+	}
+	if runtimeStatusHasData(runtimeStatus) {
+		model.RuntimeStatus = runtimeStatus
 	}
 	if model.ClaimStatus == "" {
 		model.ClaimStatus = "PENDING_CLAIM"
@@ -1187,9 +1190,21 @@ func toDomainAgent(model AgentModel, environmentName string) domain.Agent {
 		Status:          effectiveAgentStatus(model.Status, model.LastHeartbeatAt),
 		ClaimStatus:     fallbackString(model.ClaimStatus, "PENDING_CLAIM"),
 		Capabilities:    model.Capabilities,
+		RuntimeStatus:   model.RuntimeStatus,
 		LastHeartbeatAt: lastHeartbeatAt,
 		CurrentTaskID:   currentTaskID,
 	}
+}
+
+func runtimeStatusHasData(status domain.RuntimeStatus) bool {
+	return status.Kubernetes.Status != "" ||
+		status.Kubernetes.Message != "" ||
+		status.Kubernetes.UpdatedAt != "" ||
+		len(status.Kubernetes.Items) > 0 ||
+		status.Harbor.Status != "" ||
+		status.Harbor.Message != "" ||
+		status.Harbor.UpdatedAt != "" ||
+		len(status.Harbor.Items) > 0
 }
 
 func toDomainReleaseSourceService(model ServiceModel) domain.ReleaseSourceService {
@@ -1331,6 +1346,7 @@ func normalizeEnvironmentInput(input domain.Environment) (domain.Environment, er
 	if len(item.Bindings) == 0 {
 		item.Bindings = defaultEnvironmentBindings(item)
 	} else {
+		normalizeEnvironmentBindingRoles(&item)
 		applyDefaultBindingsToLegacyFields(&item)
 	}
 	if item.Type == "LOCAL" {
@@ -1343,13 +1359,19 @@ func normalizeEnvironmentInput(input domain.Environment) (domain.Environment, er
 	}
 	item.Type = "PROJECT"
 	item.NetworkMode = "AGENT"
+	item.ClusterID = ""
+	item.Namespace = ""
 	item.Bindings = filterEnvironmentBindings(item.Bindings, func(binding domain.EnvironmentResourceBinding) bool {
-		return binding.ResourceType == "K8S" || binding.ResourceType == "HARBOR"
+		if binding.BindingRole == "RUNTIME_TARGET" {
+			return binding.ResourceType == "K8S" || binding.ResourceType == "HARBOR"
+		}
+		return binding.BindingRole == "BUILD_SOURCE" && (binding.ResourceType == "HARBOR" || binding.ResourceType == "JENKINS")
 	})
-	item.JenkinsID = ""
-	item.JenkinsView = ""
 	if item.RegistryID == "" || item.RegistryProject == "" {
 		return domain.Environment{}, errors.New("project environment requires harbor scopes")
+	}
+	if item.JenkinsID == "" || item.JenkinsView == "" {
+		return domain.Environment{}, errors.New("project environment requires jenkins scopes")
 	}
 	item.Bindings = normalizeEnvironmentBindings(item.Bindings)
 	return item, nil
@@ -1391,6 +1413,7 @@ func defaultEnvironmentBindings(item domain.Environment) []domain.EnvironmentRes
 	if item.ClusterID != "" && item.Namespace != "" {
 		bindings = append(bindings, domain.EnvironmentResourceBinding{
 			ResourceType: "K8S",
+			BindingRole:  "BUILD_SOURCE",
 			ResourceID:   item.ClusterID,
 			ScopeType:    "NAMESPACE",
 			ScopeValue:   item.Namespace,
@@ -1400,6 +1423,7 @@ func defaultEnvironmentBindings(item domain.Environment) []domain.EnvironmentRes
 	if item.RegistryID != "" && item.RegistryProject != "" {
 		bindings = append(bindings, domain.EnvironmentResourceBinding{
 			ResourceType: "HARBOR",
+			BindingRole:  "BUILD_SOURCE",
 			ResourceID:   item.RegistryID,
 			ScopeType:    "PROJECT",
 			ScopeValue:   item.RegistryProject,
@@ -1409,6 +1433,7 @@ func defaultEnvironmentBindings(item domain.Environment) []domain.EnvironmentRes
 	if item.JenkinsID != "" && item.JenkinsView != "" {
 		bindings = append(bindings, domain.EnvironmentResourceBinding{
 			ResourceType: "JENKINS",
+			BindingRole:  "BUILD_SOURCE",
 			ResourceID:   item.JenkinsID,
 			ScopeType:    "VIEW",
 			ScopeValue:   item.JenkinsView,
@@ -1426,6 +1451,7 @@ func normalizeEnvironmentBindings(input []domain.EnvironmentResourceBinding) []d
 		item := domain.EnvironmentResourceBinding{
 			ID:            strings.TrimSpace(binding.ID),
 			EnvironmentID: strings.TrimSpace(binding.EnvironmentID),
+			BindingRole:   normalizeEnvironmentBindingRole(binding.BindingRole),
 			ResourceType:  strings.ToUpper(strings.TrimSpace(binding.ResourceType)),
 			ResourceID:    strings.TrimSpace(binding.ResourceID),
 			ScopeType:     strings.ToUpper(strings.TrimSpace(binding.ScopeType)),
@@ -1435,20 +1461,36 @@ func normalizeEnvironmentBindings(input []domain.EnvironmentResourceBinding) []d
 		if item.ResourceType == "" || item.ResourceID == "" || item.ScopeType == "" || item.ScopeValue == "" {
 			continue
 		}
-		key := item.ResourceType + "\x00" + item.ResourceID + "\x00" + item.ScopeType + "\x00" + item.ScopeValue
+		key := item.BindingRole + "\x00" + item.ResourceType + "\x00" + item.ResourceID + "\x00" + item.ScopeType + "\x00" + item.ScopeValue
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		if !defaultSeen[item.ResourceType] {
+		defaultKey := item.BindingRole + "\x00" + item.ResourceType
+		if !defaultSeen[defaultKey] {
 			item.IsDefault = true
-			defaultSeen[item.ResourceType] = true
+			defaultSeen[defaultKey] = true
 		} else {
 			item.IsDefault = false
 		}
 		items = append(items, item)
 	}
 	return items
+}
+
+func normalizeEnvironmentBindingRole(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "RUNTIME_TARGET":
+		return "RUNTIME_TARGET"
+	default:
+		return "BUILD_SOURCE"
+	}
+}
+
+func normalizeEnvironmentBindingRoles(item *domain.Environment) {
+	for index := range item.Bindings {
+		item.Bindings[index].BindingRole = normalizeEnvironmentBindingRole(item.Bindings[index].BindingRole)
+	}
 }
 
 func filterEnvironmentBindings(input []domain.EnvironmentResourceBinding, keep func(domain.EnvironmentResourceBinding) bool) []domain.EnvironmentResourceBinding {
@@ -1463,6 +1505,9 @@ func filterEnvironmentBindings(input []domain.EnvironmentResourceBinding, keep f
 
 func applyDefaultBindingsToLegacyFields(item *domain.Environment) {
 	for _, binding := range item.Bindings {
+		if binding.BindingRole != "" && binding.BindingRole != "BUILD_SOURCE" {
+			continue
+		}
 		if !binding.IsDefault {
 			continue
 		}
@@ -1495,7 +1540,7 @@ func (s *DatabaseStore) environmentHasUnverifiedScopes(item domain.Environment) 
 	for _, binding := range bindings {
 		switch binding.ResourceType {
 		case "K8S":
-			if item.Type != "LOCAL" {
+			if item.Type != "LOCAL" || binding.BindingRole == "RUNTIME_TARGET" {
 				continue
 			}
 			cluster, exists := s.GetKubernetesCluster(binding.ResourceID)
@@ -1503,11 +1548,17 @@ func (s *DatabaseStore) environmentHasUnverifiedScopes(item domain.Environment) 
 				return true
 			}
 		case "HARBOR":
+			if binding.BindingRole == "RUNTIME_TARGET" {
+				continue
+			}
 			registry, exists := s.GetHarborRegistry(binding.ResourceID)
 			if !exists || !stringListContains(registry.Projects, binding.ScopeValue) {
 				return true
 			}
 		case "JENKINS":
+			if binding.BindingRole == "RUNTIME_TARGET" {
+				continue
+			}
 			instance, exists := s.GetJenkinsInstance(binding.ResourceID)
 			if !exists || !stringListContains(instance.Views, binding.ScopeValue) {
 				return true
@@ -1537,6 +1588,7 @@ func withEnvironmentID(bindings []domain.EnvironmentResourceBinding, environment
 	for _, binding := range bindings {
 		item := binding
 		item.EnvironmentID = environmentID
+		item.BindingRole = normalizeEnvironmentBindingRole(item.BindingRole)
 		if item.ID == "" {
 			item.ID = environmentBindingID(item)
 		}
@@ -1548,6 +1600,7 @@ func withEnvironmentID(bindings []domain.EnvironmentResourceBinding, environment
 func environmentBindingID(item domain.EnvironmentResourceBinding) string {
 	raw := strings.Join([]string{
 		item.EnvironmentID,
+		strings.ToLower(normalizeEnvironmentBindingRole(item.BindingRole)),
 		strings.ToLower(item.ResourceType),
 		item.ResourceID,
 		strings.ToLower(item.ScopeType),
@@ -1566,6 +1619,7 @@ func replaceEnvironmentBindings(tx *gorm.DB, environmentID string, bindings []do
 		models = append(models, EnvironmentResourceBindingModel{
 			ID:            binding.ID,
 			EnvironmentID: binding.EnvironmentID,
+			BindingRole:   normalizeEnvironmentBindingRole(binding.BindingRole),
 			ResourceType:  binding.ResourceType,
 			ResourceID:    binding.ResourceID,
 			ScopeType:     binding.ScopeType,
@@ -1601,6 +1655,7 @@ func (s *DatabaseStore) attachEnvironmentBindings(items []domain.Environment) []
 		items[index].Bindings = append(items[index].Bindings, domain.EnvironmentResourceBinding{
 			ID:            model.ID,
 			EnvironmentID: model.EnvironmentID,
+			BindingRole:   normalizeEnvironmentBindingRole(model.BindingRole),
 			ResourceType:  model.ResourceType,
 			ResourceID:    model.ResourceID,
 			ScopeType:     model.ScopeType,
@@ -1612,6 +1667,7 @@ func (s *DatabaseStore) attachEnvironmentBindings(items []domain.Environment) []
 		if len(items[index].Bindings) == 0 {
 			items[index].Bindings = defaultEnvironmentBindings(items[index])
 		}
+		normalizeEnvironmentBindingRoles(&items[index])
 		applyDefaultBindingsToLegacyFields(&items[index])
 	}
 	return items

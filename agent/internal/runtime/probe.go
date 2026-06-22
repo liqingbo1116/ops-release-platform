@@ -5,9 +5,9 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -16,13 +16,14 @@ import (
 )
 
 type ProbeExecutor struct {
-	cfg        config.Config
-	client     *reporter.Client
-	httpClient *http.Client
+	cfg          config.Config
+	client       *reporter.Client
+	httpClient   *http.Client
+	statusLogger *runtimeStatusLogger
 }
 
 type probeResult struct {
-	Status  string       `json:"status"`
+	Status string       `json:"status"`
 	Checks []probeCheck `json:"checks"`
 }
 
@@ -55,15 +56,21 @@ func (e *ProbeExecutor) Execute(ctx context.Context, task reporter.Task) error {
 	if err := e.client.AppendLog(ctx, task.ID, "开始远程探测环境资源"); err != nil {
 		return err
 	}
+	log.Printf("remote probe started task=%s", task.ID)
 
 	result := probeResult{Checks: []probeCheck{}}
 	for _, namespace := range csvValues(task.Payload["k8sNamespaces"]) {
-		result.Checks = append(result.Checks, e.checkNamespace(ctx, namespace))
+		check := e.checkNamespace(ctx, namespace)
+		result.Checks = append(result.Checks, check)
+		log.Printf("remote probe check task=%s component=%s target=%s status=%s message=%s", task.ID, check.Component, namespace, check.Status, check.Message)
 	}
 	for _, project := range csvValues(task.Payload["harborProjects"]) {
-		result.Checks = append(result.Checks, e.checkHarborProject(ctx, project))
+		check := e.checkHarborProject(ctx, project)
+		result.Checks = append(result.Checks, check)
+		log.Printf("remote probe check task=%s component=%s target=%s status=%s message=%s", task.ID, check.Component, project, check.Status, check.Message)
 	}
 	result.Status = probeStatus(result.Checks)
+	log.Printf("remote probe completed task=%s status=%s checks=%d", task.ID, result.Status, len(result.Checks))
 
 	body, err := json.Marshal(result)
 	if err != nil {
@@ -83,14 +90,12 @@ func (e *ProbeExecutor) checkNamespace(ctx context.Context, namespace string) pr
 	if strings.TrimSpace(e.cfg.Kubeconfig) == "" {
 		return newProbeCheck("K8s 命名空间", "DEGRADED", "未配置 AGENT_KUBECONFIG，无法验证 "+namespace)
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", e.cfg.Kubeconfig, "get", "namespace", namespace)
-	output, err := cmd.CombinedOutput()
+	client, err := newKubernetesClient(e.cfg.Kubeconfig, e.cfg.HTTPTimeout, e.httpClient.Transport)
 	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		return newProbeCheck("K8s 命名空间", "UNHEALTHY", namespace+" 不存在或无法访问："+message)
+		return newProbeCheck("K8s 命名空间", "UNHEALTHY", "K8s 配置无效："+err.Error())
+	}
+	if err := client.namespaceExists(ctx, namespace); err != nil {
+		return newProbeCheck("K8s 命名空间", "UNHEALTHY", namespace+" 不存在或无法访问："+err.Error())
 	}
 	return newProbeCheck("K8s 命名空间", "HEALTHY", namespace+" 存在")
 }

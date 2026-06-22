@@ -49,6 +49,7 @@ type Environment struct {
 type EnvironmentResourceBinding struct {
 	ID            string `json:"id"`
 	EnvironmentID string `json:"environmentId"`
+	BindingRole   string `json:"bindingRole"`
 	ResourceType  string `json:"resourceType"`
 	ResourceID    string `json:"resourceId"`
 	ScopeType     string `json:"scopeType"`
@@ -103,16 +104,29 @@ type JenkinsInstance struct {
 }
 
 type Agent struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	EnvironmentID   string   `json:"environmentId"`
-	EnvironmentName string   `json:"environmentName"`
-	Version         string   `json:"version"`
-	Status          string   `json:"status"`
-	ClaimStatus     string   `json:"claimStatus"`
-	Capabilities    []string `json:"capabilities"`
-	LastHeartbeatAt string   `json:"lastHeartbeatAt"`
-	CurrentTaskID   *string  `json:"currentTaskId"`
+	ID              string        `json:"id"`
+	Name            string        `json:"name"`
+	EnvironmentID   string        `json:"environmentId"`
+	EnvironmentName string        `json:"environmentName"`
+	Version         string        `json:"version"`
+	Status          string        `json:"status"`
+	ClaimStatus     string        `json:"claimStatus"`
+	Capabilities    []string      `json:"capabilities"`
+	RuntimeStatus   RuntimeStatus `json:"runtimeStatus"`
+	LastHeartbeatAt string        `json:"lastHeartbeatAt"`
+	CurrentTaskID   *string       `json:"currentTaskId"`
+}
+
+type RuntimeStatus struct {
+	Kubernetes RuntimeComponentStatus `json:"kubernetes"`
+	Harbor     RuntimeComponentStatus `json:"harbor"`
+}
+
+type RuntimeComponentStatus struct {
+	Status    string   `json:"status"`
+	Message   string   `json:"message"`
+	UpdatedAt string   `json:"updatedAt"`
+	Items     []string `json:"items"`
 }
 
 type Baseline struct {

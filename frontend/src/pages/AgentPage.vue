@@ -14,7 +14,7 @@
     <div class="metric-grid six">
       <MetricCard label="注册 Agent" :value="agents.length" foot="平台已接入" />
       <MetricCard label="在线" :value="onlineCount" foot="心跳正常" tone="good" />
-      <MetricCard label="待绑定" :value="pendingClaimCount" foot="需绑定环境" tone="warn" />
+      <MetricCard label="待绑定" :value="pendingClaimCount" foot="需绑定远程产品" tone="warn" />
       <MetricCard label="执行中" :value="runningCount" foot="发布 / 部署" />
       <MetricCard label="离线" :value="offlineCount" foot="需排查" tone="bad" />
     </div>
@@ -51,11 +51,34 @@
         <el-table-column prop="lastHeartbeatAt" label="心跳" min-width="170">
           <template #default="{ row }">{{ formatDateTime(row.lastHeartbeatAt) }}</template>
         </el-table-column>
-        <el-table-column label="可执行能力" min-width="260">
+        <el-table-column label="可执行能力" min-width="220">
           <template #default="{ row }">{{ joinCapabilities(row.capabilities) }}</template>
         </el-table-column>
-        <el-table-column label="最近任务日志" min-width="180">
-          <template #default="{ row }">{{ row.currentTaskId ?? 'heartbeat ok' }}</template>
+        <el-table-column label="远程资源" min-width="280">
+          <template #default="{ row }">
+            <div class="runtime-resource">
+              <el-tooltip
+                effect="dark"
+                placement="top"
+                :content="runtimeTooltip(row, 'kubernetes')"
+              >
+                <div class="runtime-resource-row">
+                  <span class="runtime-resource-name">K8s</span>
+                  <StatusTag :status="runtimeComponent(row, 'kubernetes').status" />
+                </div>
+              </el-tooltip>
+              <el-tooltip
+                effect="dark"
+                placement="top"
+                :content="runtimeTooltip(row, 'harbor')"
+              >
+                <div class="runtime-resource-row">
+                  <span class="runtime-resource-name">Harbor</span>
+                  <StatusTag :status="runtimeComponent(row, 'harbor').status" />
+                </div>
+              </el-tooltip>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="状态" min-width="130">
           <template #default="{ row }">
@@ -67,7 +90,7 @@
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.claimStatus === 'PENDING_CLAIM'" link type="primary" @click="openClaim(row)">绑定环境</el-button>
+            <el-button v-if="row.claimStatus === 'PENDING_CLAIM'" link type="primary" @click="openClaim(row)">绑定产品</el-button>
             <span v-else class="muted-text">已绑定</span>
           </template>
         </el-table-column>
@@ -75,15 +98,16 @@
     </el-card>
 
     <AgentRegisterDrawer v-model:visible="drawerVisible" />
-    <el-dialog v-model="claimDialogVisible" title="绑定 Agent 环境" width="420px">
+    <el-dialog v-model="claimDialogVisible" title="绑定 Agent 远程产品" width="420px">
       <el-form label-position="top">
         <el-form-item label="Agent">
           <el-input :model-value="claimAgentName" readonly />
         </el-form-item>
-        <el-form-item label="绑定环境">
-          <el-select v-model="claimEnvironmentId" style="width: 100%" placeholder="选择环境">
-            <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id" />
+        <el-form-item label="远程产品">
+          <el-select v-model="claimEnvironmentId" style="width: 100%" placeholder="选择远程产品">
+            <el-option v-for="env in claimableEnvironments" :key="env.id" :label="env.name" :value="env.id" />
           </el-select>
+          <div v-if="claimableEnvironments.length === 0" class="form-tip">暂无可绑定的远程产品，本地产品不需要绑定 Agent。</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -120,6 +144,7 @@ const onlineCount = computed(() => agents.value.filter((item) => item.status ===
 const offlineCount = computed(() => agents.value.filter((item) => item.status === 'OFFLINE').length)
 const runningCount = computed(() => agents.value.filter((item) => item.currentTaskId).length)
 const pendingClaimCount = computed(() => agents.value.filter((item) => item.claimStatus === 'PENDING_CLAIM').length)
+const claimableEnvironments = computed(() => environments.value.filter((item) => item.type === 'PROJECT'))
 
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
@@ -156,16 +181,43 @@ function openClaim(row: AgentInfo) {
   claimDialogVisible.value = true
 }
 
+function runtimeComponent(row: AgentInfo, key: 'kubernetes' | 'harbor') {
+  const component = row.runtimeStatus?.[key]
+  if (!component?.status) {
+    return {
+      status: 'UNKNOWN',
+      message: row.claimStatus === 'PENDING_CLAIM' ? '绑定产品后查看上报状态' : '等待 Agent 上报',
+    }
+  }
+  const itemLabel = key === 'kubernetes' ? 'namespace' : 'project'
+  const itemCount = component.items?.length ?? 0
+  const suffix = component.status === 'HEALTHY' ? `，已上报 ${itemCount} 个 ${itemLabel}` : ''
+  return {
+    status: component.status,
+    message: `${component.message || runtimeStatusText(component.status)}${suffix}`,
+  }
+}
+
+function runtimeTooltip(row: AgentInfo, key: 'kubernetes' | 'harbor') {
+  return runtimeComponent(row, key).message
+}
+
+function runtimeStatusText(status: string) {
+  if (status === 'HEALTHY') return '连接正常'
+  if (status === 'UNHEALTHY') return '连接异常'
+  return '状态未知'
+}
+
 async function submitClaim() {
   if (!claimEnvironmentId.value || !claimAgentId.value) return
   claiming.value = true
   try {
     await claimAgent(claimAgentId.value, claimEnvironmentId.value)
-    ElMessage.success('Agent 已绑定环境')
+    ElMessage.success('Agent 已绑定远程产品')
     claimDialogVisible.value = false
     await loadData()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : 'Agent 绑定环境失败')
+    ElMessage.error(error instanceof Error ? error.message : 'Agent 绑定远程产品失败')
   } finally {
     claiming.value = false
   }
@@ -192,4 +244,30 @@ async function submitClaim() {
   color: var(--el-text-color-secondary);
   font-size: 13px;
 }
+
+.form-tip {
+  margin-top: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.runtime-resource {
+  display: grid;
+  gap: 6px;
+}
+
+.runtime-resource-row {
+  display: grid;
+  grid-template-columns: 48px 52px;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.runtime-resource-name {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+}
+
 </style>

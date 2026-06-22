@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,13 +41,20 @@ func main() {
 		cfg.AgentID = result.Agent.ID
 		cfg.EnvironmentID = result.Agent.EnvironmentID
 		cfg.Token = result.AgentToken
-		log.Printf("agent registered id=%s claimStatus=%s; persist AGENT_TOKEN for next restart", result.Agent.ID, result.Agent.ClaimStatus)
+		if *configFile == "" {
+			log.Printf("agent registered id=%s claimStatus=%s; no config file was provided, AGENT_TOKEN cannot be persisted automatically", result.Agent.ID, result.Agent.ClaimStatus)
+		} else if err := config.PersistRuntimeToken(*configFile, result.AgentToken); err != nil {
+			log.Fatalf("persist agent token: %v", err)
+		} else {
+			log.Printf("agent registered id=%s claimStatus=%s; runtime token persisted to config file", result.Agent.ID, result.Agent.ClaimStatus)
+		}
 	}
+	probeExecutor := runtime.NewProbeExecutor(cfg, client)
 	fallbackExecutor := runtime.Executor(runtime.NewUnsupportedExecutor(client))
 	if cfg.Mode == "mock" {
 		fallbackExecutor = runtime.NewMockExecutor(client)
 	}
-	executor := runtime.NewRouterExecutor(runtime.NewProbeExecutor(cfg, client), fallbackExecutor)
+	executor := runtime.NewRouterExecutor(probeExecutor, fallbackExecutor)
 	worker := task.NewWorker(cfg, client, executor)
 
 	server := &http.Server{
@@ -60,8 +68,9 @@ func main() {
 		}
 	}()
 
-	log.Printf("agent started id=%s environment=%s platform=%s", cfg.AgentID, cfg.EnvironmentID, cfg.PlatformURL)
-	go heartbeat.Run(ctx, cfg, client)
+	log.Printf("agent started id=%s environment=%s platform=%s mode=%s capabilities=%s", cfg.AgentID, cfg.EnvironmentID, cfg.PlatformURL, cfg.Mode, strings.Join(cfg.Capabilities, ","))
+	log.Printf("agent runtime config kubernetesConfigured=%t harborConfigured=%t harborURL=%s", cfg.Kubeconfig != "", cfg.HarborURL != "" && cfg.HarborUsername != "" && cfg.HarborPassword != "", cfg.HarborURL)
+	go heartbeat.Run(ctx, cfg, client, probeExecutor.RuntimeStatus)
 	worker.Run(ctx)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

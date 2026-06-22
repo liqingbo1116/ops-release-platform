@@ -1,11 +1,20 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { listEnvironments, createEnvironment, updateEnvironment, checkEnvironment } = vi.hoisted(() => ({
+const { listEnvironments, createEnvironment, updateEnvironment, checkEnvironment, probeEnvironment } = vi.hoisted(() => ({
   listEnvironments: vi.fn(),
   createEnvironment: vi.fn(),
   updateEnvironment: vi.fn(),
   checkEnvironment: vi.fn(),
+  probeEnvironment: vi.fn(),
+}))
+
+const { listAgents } = vi.hoisted(() => ({
+  listAgents: vi.fn(),
+}))
+
+const { listProjects } = vi.hoisted(() => ({
+  listProjects: vi.fn(),
 }))
 
 const {
@@ -29,6 +38,15 @@ vi.mock('@/api/environments', () => ({
   createEnvironment,
   updateEnvironment,
   checkEnvironment,
+  probeEnvironment,
+}))
+
+vi.mock('@/api/agents', () => ({
+  listAgents,
+}))
+
+vi.mock('@/api/projects', () => ({
+  listProjects,
 }))
 
 vi.mock('@/api/integrationResources', () => ({
@@ -61,6 +79,9 @@ describe('EnvironmentPage', () => {
     createEnvironment.mockReset()
     updateEnvironment.mockReset()
     checkEnvironment.mockReset()
+    probeEnvironment.mockReset()
+    listAgents.mockReset()
+    listProjects.mockReset()
     listKubernetesClusters.mockReset()
     listHarborRegistries.mockReset()
     listJenkinsInstances.mockReset()
@@ -73,22 +94,51 @@ describe('EnvironmentPage', () => {
     refreshKubernetesCluster.mockResolvedValue({})
     refreshHarborRegistry.mockResolvedValue({})
     refreshJenkinsInstance.mockResolvedValue({})
+    probeEnvironment.mockResolvedValue({})
+    listAgents.mockResolvedValue([
+      {
+        id: 'agent-project-x',
+        name: 'agent-project-x',
+        environmentId: 'env-project-x-prod',
+        environmentName: '项目 X 生产',
+        version: 'dev',
+        status: 'ONLINE',
+        claimStatus: 'CLAIMED',
+        capabilities: ['remote-probe'],
+        runtimeStatus: {
+          kubernetes: { status: 'HEALTHY', message: '远程 K8s 正常', updatedAt: '', items: ['project-x-ns'] },
+          harbor: { status: 'HEALTHY', message: '远程 Harbor 正常', updatedAt: '', items: ['project-x-runtime'] },
+        },
+        lastHeartbeatAt: '',
+        currentTaskId: null,
+      },
+    ])
+    listProjects.mockResolvedValue([])
     listEnvironments.mockResolvedValue([
       {
         id: 'env-local-prod',
         name: '本地生产环境',
         code: 'local-prod',
+        projectId: '',
+        projectName: '',
+        productStatus: 'UNBOUND',
         type: 'LOCAL',
+        deployTargetType: 'KUBERNETES',
         networkMode: 'DIRECT',
         status: 'HEALTHY',
         agentStatus: 'NOT_REQUIRED',
         lastCheckAt: '2026-06-07T12:40:00+08:00',
+        bindings: [],
       },
       {
         id: 'env-project-x-prod',
         name: '项目 X 生产',
         code: 'project-x-prod',
+        projectId: 'project-x',
+        projectName: '项目 X',
+        productStatus: 'BOUND',
         type: 'PROJECT',
+        deployTargetType: 'KUBERNETES',
         networkMode: 'AGENT',
         registryId: 'harbor-local',
         registryProject: 'project-x',
@@ -97,12 +147,50 @@ describe('EnvironmentPage', () => {
         status: 'HEALTHY',
         agentStatus: 'ONLINE',
         lastCheckAt: '2026-06-07T12:40:12+08:00',
+        bindings: [
+          {
+            resourceType: 'HARBOR',
+            bindingRole: 'BUILD_SOURCE',
+            resourceId: 'harbor-local',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'JENKINS',
+            bindingRole: 'BUILD_SOURCE',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'K8S',
+            bindingRole: 'RUNTIME_TARGET',
+            resourceId: 'agent-runtime-k8s',
+            scopeType: 'NAMESPACE',
+            scopeValue: 'project-x-ns',
+            isDefault: true,
+          },
+          {
+            resourceType: 'HARBOR',
+            bindingRole: 'RUNTIME_TARGET',
+            resourceId: 'agent-runtime-harbor',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-x-runtime',
+            isDefault: true,
+          },
+        ],
       },
       {
         id: 'env-project-z-prod',
         name: '项目 Z 生产',
         code: 'project-z-prod',
+        projectId: '',
+        projectName: '',
+        productStatus: 'UNBOUND',
         type: 'PROJECT',
+        deployTargetType: 'KUBERNETES',
         networkMode: 'AGENT',
         registryId: 'harbor-local',
         registryProject: 'project-z',
@@ -111,6 +199,7 @@ describe('EnvironmentPage', () => {
         status: 'UNKNOWN',
         agentStatus: 'OFFLINE',
         lastCheckAt: '2026-06-07T12:31:00+08:00',
+        bindings: [],
       },
     ])
   })
@@ -132,13 +221,13 @@ describe('EnvironmentPage', () => {
 
     expect(listEnvironments).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('项目 X 生产')
-    expect(wrapper.text()).toContain('本地环境由平台直连基础资源')
-    expect(wrapper.text()).toContain('远程环境')
+    expect(wrapper.text()).toContain('本地产品绑定本地 K8s、Harbor、Jenkins')
+    expect(wrapper.text()).toContain('远程产品绑定本地 Harbor、Jenkins')
     expect(wrapper.text()).toContain('无需 Agent')
     expect(wrapper.text()).toContain('ONLINE')
-    expect(wrapper.text()).toContain('本地环境关联 K8s 命名空间')
-    expect(wrapper.text()).toContain('项目环境关联远程 K8s 命名空间和 Harbor 镜像项目')
-    expect(wrapper.text()).toContain('1 个远程环境 Agent 未就绪')
+    expect(wrapper.text()).toContain('本地 Harbor')
+    expect(wrapper.text()).toContain('远程 Harbor')
+    expect(wrapper.text()).toContain('1 个远程产品 Agent 未就绪')
     expect(wrapper.text()).not.toContain('网络模式')
   })
 
@@ -167,7 +256,7 @@ describe('EnvironmentPage', () => {
     expect(wrapper.text()).not.toContain('项目 Z 生产')
   })
 
-  it('creates remote environments with harbor scopes only', async () => {
+  it('creates remote environments with local build sources and remote runtime scopes', async () => {
     listHarborRegistries.mockResolvedValue([
       { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
     ])
@@ -211,9 +300,10 @@ describe('EnvironmentPage', () => {
     vm.form.clusterId = 'cluster-should-clear'
     vm.form.namespace = 'namespace-should-clear'
     vm.form.registryProjects = ['project-x', 'project-y']
-    vm.form.jenkinsId = 'jenkins-should-clear'
-    vm.form.jenkinsView = 'view-should-clear'
+    vm.form.jenkinsId = 'jenkins-local'
     vm.form.jenkinsViews = ['project-x', 'project-y']
+    vm.form.runtimeNamespaces = ['project-x-ns']
+    vm.form.runtimeRegistryProjects = ['project-x-runtime']
     await vm.submitEnvironment()
 
     expect(createEnvironment).toHaveBeenCalledWith(
@@ -226,11 +316,12 @@ describe('EnvironmentPage', () => {
         namespace: '',
         registryId: 'harbor-local',
         registryProject: 'project-x',
-        jenkinsId: '',
-        jenkinsView: '',
+        jenkinsId: 'jenkins-local',
+        jenkinsView: 'project-x',
         bindings: [
           {
             resourceType: 'HARBOR',
+            bindingRole: 'BUILD_SOURCE',
             resourceId: 'harbor-local',
             scopeType: 'PROJECT',
             scopeValue: 'project-x',
@@ -238,10 +329,43 @@ describe('EnvironmentPage', () => {
           },
           {
             resourceType: 'HARBOR',
+            bindingRole: 'BUILD_SOURCE',
             resourceId: 'harbor-local',
             scopeType: 'PROJECT',
             scopeValue: 'project-y',
             isDefault: false,
+          },
+          {
+            resourceType: 'JENKINS',
+            bindingRole: 'BUILD_SOURCE',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'project-x',
+            isDefault: true,
+          },
+          {
+            resourceType: 'JENKINS',
+            bindingRole: 'BUILD_SOURCE',
+            resourceId: 'jenkins-local',
+            scopeType: 'VIEW',
+            scopeValue: 'project-y',
+            isDefault: false,
+          },
+          {
+            resourceType: 'K8S',
+            bindingRole: 'RUNTIME_TARGET',
+            resourceId: 'agent-runtime-k8s',
+            scopeType: 'NAMESPACE',
+            scopeValue: 'project-x-ns',
+            isDefault: true,
+          },
+          {
+            resourceType: 'HARBOR',
+            bindingRole: 'RUNTIME_TARGET',
+            resourceId: 'agent-runtime-harbor',
+            scopeType: 'PROJECT',
+            scopeValue: 'project-x-runtime',
+            isDefault: true,
           },
         ],
       }),
@@ -290,18 +414,19 @@ describe('EnvironmentPage', () => {
     vm.openCreateDialog()
     vm.form.name = 'remote manual scope'
     vm.form.registryProjects = ['project-not-probed']
-    vm.form.jenkinsId = 'jenkins-should-clear'
-    vm.form.jenkinsView = 'view-should-clear'
+    vm.form.jenkinsId = 'jenkins-local'
     vm.form.jenkinsViews = ['view-not-probed']
+    vm.form.runtimeNamespaces = ['runtime-ns-not-probed']
+    vm.form.runtimeRegistryProjects = ['runtime-project-not-probed']
     await vm.submitEnvironment()
 
     expect(createEnvironment).toHaveBeenCalledWith(expect.objectContaining({
       registryProject: 'project-not-probed',
-      jenkinsId: '',
-      jenkinsView: '',
+      jenkinsId: 'jenkins-local',
+      jenkinsView: 'view-not-probed',
     }))
     expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('未在最近探测结果中发现'))
-    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('环境已保存，但存在未验证的资源范围'))
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('产品已保存，但存在未验证的资源范围'))
   })
 
   it('shows all local environment missing scopes and allows refreshing related probes', async () => {
@@ -494,9 +619,10 @@ describe('EnvironmentPage', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('当前未发现问题')
+    expect(wrapper.text()).toContain('远程 Agent 未绑定，会影响远程发布/部署执行')
+    expect(wrapper.text()).toContain('远程 K8s 未绑定 Agent，无法获取远程资源清单')
+    expect(wrapper.text()).toContain('远程 Harbor 未绑定 Agent，无法获取远程资源清单')
     expect(wrapper.text()).toContain('影响远程执行')
-    expect(wrapper.text()).not.toContain('远程 Agent 未绑定，会影响远程发布/部署执行')
 
     ;(wrapper.vm as unknown as { openDrawer: (row: unknown) => void; environments: unknown[] }).openDrawer(
       (wrapper.vm as unknown as { environments: unknown[] }).environments[0],
@@ -623,6 +749,7 @@ describe('EnvironmentPage', () => {
         bindings: [
           {
             resourceType: 'K8S',
+            bindingRole: 'BUILD_SOURCE',
             resourceId: 'k8s-local',
             scopeType: 'NAMESPACE',
             scopeValue: 'project-x',
@@ -630,6 +757,7 @@ describe('EnvironmentPage', () => {
           },
           {
             resourceType: 'K8S',
+            bindingRole: 'BUILD_SOURCE',
             resourceId: 'k8s-local',
             scopeType: 'NAMESPACE',
             scopeValue: 'default',
@@ -637,6 +765,7 @@ describe('EnvironmentPage', () => {
           },
           {
             resourceType: 'HARBOR',
+            bindingRole: 'BUILD_SOURCE',
             resourceId: 'harbor-local',
             scopeType: 'PROJECT',
             scopeValue: 'project-x',
@@ -644,6 +773,7 @@ describe('EnvironmentPage', () => {
           },
           {
             resourceType: 'HARBOR',
+            bindingRole: 'BUILD_SOURCE',
             resourceId: 'harbor-local',
             scopeType: 'PROJECT',
             scopeValue: 'project-y',
@@ -651,6 +781,7 @@ describe('EnvironmentPage', () => {
           },
           {
             resourceType: 'JENKINS',
+            bindingRole: 'BUILD_SOURCE',
             resourceId: 'jenkins-local',
             scopeType: 'VIEW',
             scopeValue: 'project-x',
@@ -664,6 +795,9 @@ describe('EnvironmentPage', () => {
   it('generates environment identifiers from the environment name', async () => {
     listHarborRegistries.mockResolvedValue([
       { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
+    ])
+    listJenkinsInstances.mockResolvedValue([
+      { id: 'jenkins-local', name: '本地 Jenkins', status: 'HEALTHY', views: ['project-x'] },
     ])
     createEnvironment.mockResolvedValue({
       id: 'env-remote-prod',
@@ -698,7 +832,10 @@ describe('EnvironmentPage', () => {
     }
     vm.openCreateDialog()
     vm.form.name = 'remote prod'
-    vm.form.registryProject = 'project-x'
+    vm.form.registryProjects = ['project-x']
+    vm.form.jenkinsViews = ['project-x']
+    vm.form.runtimeNamespaces = ['project-x-ns']
+    vm.form.runtimeRegistryProjects = ['project-x-runtime']
     await wrapper.vm.$nextTick()
     expect(vm.form.code).toBe('remote-prod')
 
