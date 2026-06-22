@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +17,7 @@ type Config struct {
 	EnvironmentID     string
 	PlatformURL       string
 	Token             string
+	RegisterToken     string
 	Mode              string
 	HealthPort        string
 	PollInterval      time.Duration
@@ -23,6 +25,11 @@ type Config struct {
 	HTTPTimeout       time.Duration
 	MaxTasks          int
 	Capabilities      []string
+	Kubeconfig        string
+	HarborURL         string
+	HarborUsername    string
+	HarborPassword    string
+	HarborInsecureTLS bool
 }
 
 func Load(configFile string) (Config, error) {
@@ -35,30 +42,58 @@ func Load(configFile string) (Config, error) {
 		EnvironmentID:     strings.TrimSpace(os.Getenv("AGENT_ENVIRONMENT_ID")),
 		PlatformURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_URL")), "/"),
 		Token:             strings.TrimSpace(os.Getenv("AGENT_TOKEN")),
-		Mode:              envWithDefault("AGENT_MODE", "mock"),
+		RegisterToken:     strings.TrimSpace(os.Getenv("AGENT_REGISTER_TOKEN")),
+		Mode:              envWithDefault("AGENT_MODE", "remote-probe"),
 		HealthPort:        envWithDefault("AGENT_HEALTH_PORT", "18080"),
 		PollInterval:      secondsEnv("AGENT_POLL_INTERVAL_SECONDS", 5),
 		HeartbeatInterval: secondsEnv("AGENT_HEARTBEAT_INTERVAL_SECONDS", 15),
 		HTTPTimeout:       secondsEnv("AGENT_HTTP_TIMEOUT_SECONDS", 10),
 		MaxTasks:          intEnv("AGENT_MAX_TASKS", 1),
-		Capabilities:      splitCSV(envWithDefault("AGENT_CAPABILITIES", "mock-executor,image-sync,kubectl,http-check")),
+		Capabilities:      splitCSV(envWithDefault("AGENT_CAPABILITIES", "remote-probe,kubectl,http-check")),
+		Kubeconfig:        strings.TrimSpace(os.Getenv("AGENT_KUBECONFIG")),
+		HarborURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("AGENT_HARBOR_URL")), "/"),
+		HarborUsername:    strings.TrimSpace(os.Getenv("AGENT_HARBOR_USERNAME")),
+		HarborPassword:    strings.TrimSpace(os.Getenv("AGENT_HARBOR_PASSWORD")),
+		HarborInsecureTLS: boolEnv("AGENT_HARBOR_INSECURE_SKIP_TLS_VERIFY", false),
 	}
 	if cfg.AgentID == "" {
-		return Config{}, errors.New("AGENT_ID is required")
+		hostname, _ := os.Hostname()
+		cfg.AgentID = "agent-" + normalizeID(hostname)
 	}
-	if cfg.EnvironmentID == "" {
-		return Config{}, errors.New("AGENT_ENVIRONMENT_ID is required")
+	if cfg.AgentID == "agent-" {
+		return Config{}, errors.New("AGENT_ID is required when hostname cannot be resolved")
 	}
 	if cfg.PlatformURL == "" {
 		return Config{}, errors.New("PLATFORM_URL is required")
 	}
-	if cfg.Mode != "mock" {
-		return Config{}, errors.New("only AGENT_MODE=mock is supported before Jenkins/Harbor/K8s integration")
+	if cfg.Token == "" && cfg.RegisterToken == "" {
+		return Config{}, errors.New("AGENT_TOKEN or AGENT_REGISTER_TOKEN is required")
+	}
+	if cfg.Mode != "remote-probe" && cfg.Mode != "mock" {
+		return Config{}, errors.New("AGENT_MODE only supports remote-probe or mock")
 	}
 	if cfg.MaxTasks != 1 {
 		return Config{}, errors.New("only AGENT_MAX_TASKS=1 is supported in v1")
 	}
+	if cfg.HarborURL != "" {
+		if _, err := url.ParseRequestURI(cfg.HarborURL); err != nil {
+			return Config{}, fmt.Errorf("AGENT_HARBOR_URL is invalid: %w", err)
+		}
+	}
 	return cfg, nil
+}
+
+func normalizeID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	for _, ch := range value {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
+			builder.WriteRune(ch)
+			continue
+		}
+		builder.WriteByte('-')
+	}
+	return strings.Trim(builder.String(), "-")
 }
 
 func loadEnvFile(path string) error {
@@ -131,6 +166,14 @@ func intEnv(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func boolEnv(key string, fallback bool) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if raw == "" {
+		return fallback
+	}
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "y"
 }
 
 func splitCSV(raw string) []string {

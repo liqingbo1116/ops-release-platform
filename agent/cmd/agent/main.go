@@ -31,7 +31,22 @@ func main() {
 	defer stop()
 
 	client := reporter.NewClient(cfg.PlatformURL, cfg.AgentID, cfg.EnvironmentID, cfg.Token, cfg.HTTPTimeout)
-	executor := runtime.NewMockExecutor(client)
+	if cfg.Token == "" {
+		result, err := client.Register(ctx, cfg.RegisterToken, "v1-remote-probe", cfg.Capabilities)
+		if err != nil {
+			log.Fatalf("register agent: %v", err)
+		}
+		client.SetRuntimeIdentity(result.Agent.ID, result.Agent.EnvironmentID, result.AgentToken)
+		cfg.AgentID = result.Agent.ID
+		cfg.EnvironmentID = result.Agent.EnvironmentID
+		cfg.Token = result.AgentToken
+		log.Printf("agent registered id=%s claimStatus=%s; persist AGENT_TOKEN for next restart", result.Agent.ID, result.Agent.ClaimStatus)
+	}
+	fallbackExecutor := runtime.Executor(runtime.NewUnsupportedExecutor(client))
+	if cfg.Mode == "mock" {
+		fallbackExecutor = runtime.NewMockExecutor(client)
+	}
+	executor := runtime.NewRouterExecutor(runtime.NewProbeExecutor(cfg, client), fallbackExecutor)
 	worker := task.NewWorker(cfg, client, executor)
 
 	server := &http.Server{

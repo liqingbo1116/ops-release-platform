@@ -83,7 +83,7 @@ skills/
 4. 部署或本地运行拓扑变化后，更新 `ops-release-platform-deployment/references/deployment.md`。
 5. 不在任何 skill 或 docs 中记录真实服务器连接信息、密码、token、SSH 端口或数据库连接串。
 6. `.secrets/` 只保存研发阶段私有凭据和本地启动运行值，该目录不得提交；正式平台数据必须在基础资源管理中维护本地环境可直连的 K8s、Harbor、Jenkins。资源表单按用户视角填写 kubeconfig、URL、HTTP/HTTPS、账号密码或 token，`credentialRef` 只作为后端内部字段。本地环境只关联资源并填写 namespace、Harbor project、Jenkins view；远程环境不关联平台基础资源。
-7. K8s namespace、Harbor project、Jenkins view/job 必须来自真实探测缓存，并提供刷新/重新探测入口；本地环境由平台探测，远程环境由 Agent 上报状态和运行数据，平台不得直连远程环境资源。
+7. K8s namespace、Harbor project、Jenkins view/job 必须来自真实探测缓存，并提供刷新/重新探测入口；本地环境由平台探测，项目环境的 K8s/Harbor 由 Agent 上报状态和运行数据，平台不得直连项目环境资源。Jenkins 属于平台侧本地资源，不由项目 Agent 探测。
 
 ## 校验
 

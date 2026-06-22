@@ -33,7 +33,7 @@ Use this skill before making code, docs, deployment, or Git changes in this repo
 - Local development runtime: frontend and backend run locally, but PostgreSQL and Redis must come from the remote services recorded in `.secrets/`. Do not switch back to local container mock services during V1 mainline development.
 - K8s, Harbor, and Jenkins must be maintainable platform resources. Environments reference those resource IDs through resource bindings. One environment may bind multiple Kubernetes namespaces, Harbor projects, and Jenkins views; legacy default fields (`namespace`, `registryProject`, `jenkinsView`) are compatibility fields derived from the default binding.
 - Environment `type` means execution location: `LOCAL` is platform direct, `PROJECT` is remote Agent. Environment `deployTargetType` means runtime target: V1 implements `KUBERNETES` and only reserves `DOCKER_COMPOSE`.
-- Remote/project environments must not make the platform backend directly connect to remote K8s. They still bind platform-side local Harbor project and Jenkins view for local build/image source selection; remote K8s/runtime execution is handled by Agent tasks and later Agent reports.
+- Remote/project environments must not make the platform backend directly connect to project K8s. V1 project environments bind project K8s namespaces and project Harbor projects for Agent probing/execution. Jenkins is platform-side local infrastructure for later build/version-source flows; project Agents do not connect to Jenkins, trigger builds, or build images.
 - Resource create forms must be user-oriented: K8s uses kubeconfig/context, Harbor uses URL + HTTP/HTTPS + username/password, Jenkins uses URL + username/password or API token. Users must not enter `credentialRef` directly.
 - Resource status is system-owned. Keep connection test and refresh/probe actions; cache K8s namespaces, Harbor projects, and Jenkins views/jobs, and keep old cache when refresh fails.
 - Local/direct environments are probed by the platform backend. Remote/project environments are probed by Agent tasks, then Agent reports status and cache back to the platform.
@@ -80,7 +80,7 @@ Follow this order exactly. Do not skip forward. Do not reintroduce mock for a co
      - built agent binary for R&D direct startup
      - agent config file support via `-f`
      - remote Linux host that can reach platform API outbound
-     - Agent-side network and credentials for remote K8s/Harbor/Jenkins probing
+     - Agent-side network and credentials for project K8s/Harbor probing
    - Gate: if environment records, remote agent runtime, or Agent-reported remote probe status/cache are not ready, this phase is not complete.
 4. Service and version sources
    - Goal: service lists, Jenkins jobs, Harbor image tags, and runtime versions come from real sources.

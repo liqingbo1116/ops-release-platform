@@ -177,9 +177,6 @@ func (s *DatabaseStore) UpdateEnvironmentCheck(id string, status string, checked
 	}
 	model.Status = fallbackString(strings.TrimSpace(status), "UNKNOWN")
 	model.LastCheckAt = &checkedAt
-	itemForStatus := toDomainEnvironment(model, s.getAgentStatus(model.AgentID))
-	itemForStatus = s.attachEnvironmentBindings([]domain.Environment{itemForStatus})[0]
-	model.Status = s.environmentStatusByScopeCache(itemForStatus, model.Status)
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.Environment{}, false, err
 	}
@@ -535,10 +532,117 @@ func (s *DatabaseStore) GetAgent(id string) (domain.Agent, bool) {
 	return toDomainAgent(result.AgentModel, result.EnvironmentName), true
 }
 
-func (s *DatabaseStore) UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool) {
-	var environment EnvironmentModel
-	if err := s.db.Where("id = ?", environmentID).Take(&environment).Error; err != nil {
+func (s *DatabaseStore) CreateAgentRegisterToken(tokenHash string, agentID string, environmentID string, expiresAt time.Time) bool {
+	model := AgentRegisterTokenModel{
+		ID:            "agtok-" + shortHash(tokenHash+time.Now().String()),
+		TokenHash:     tokenHash,
+		AgentID:       strings.TrimSpace(agentID),
+		EnvironmentID: strings.TrimSpace(environmentID),
+		ExpiresAt:     expiresAt,
+	}
+	return s.db.Create(&model).Error == nil
+}
+
+func (s *DatabaseStore) ConsumeAgentRegisterToken(tokenHash string, now time.Time) (string, string, bool) {
+	var model AgentRegisterTokenModel
+	err := s.db.Where("token_hash = ? AND used_at IS NULL AND expires_at > ?", tokenHash, now).Take(&model).Error
+	if err != nil {
+		return "", "", false
+	}
+	usedAt := now
+	if err := s.db.Model(&model).Update("used_at", &usedAt).Error; err != nil {
+		return "", "", false
+	}
+	return model.AgentID, model.EnvironmentID, true
+}
+
+func (s *DatabaseStore) RegisterAgent(id string, environmentID string, version string, capabilities []string, tokenHash string) (domain.Agent, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" || tokenHash == "" {
 		return domain.Agent{}, false
+	}
+	now := time.Now()
+	var model AgentModel
+	err := s.db.Where("id = ?", id).Take(&model).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return domain.Agent{}, false
+	}
+	if err == gorm.ErrRecordNotFound {
+		model = AgentModel{
+			ID:              id,
+			Name:            id,
+			Version:         fallbackString(version, "dev"),
+			Status:          "ONLINE",
+			ClaimStatus:     "PENDING_CLAIM",
+			TokenHash:       tokenHash,
+			Capabilities:    append([]string(nil), capabilities...),
+			LastHeartbeatAt: &now,
+		}
+		if createErr := s.db.Create(&model).Error; createErr != nil {
+			return domain.Agent{}, false
+		}
+		return s.GetAgent(id)
+	}
+
+	model.Name = id
+	model.TokenHash = tokenHash
+	if model.ClaimStatus == "" {
+		model.ClaimStatus = "PENDING_CLAIM"
+	}
+	model.Status = "ONLINE"
+	model.LastHeartbeatAt = &now
+	if version != "" {
+		model.Version = version
+	}
+	if len(capabilities) > 0 {
+		model.Capabilities = append([]string(nil), capabilities...)
+	}
+	if saveErr := s.db.Save(&model).Error; saveErr != nil {
+		return domain.Agent{}, false
+	}
+	return s.GetAgent(id)
+}
+
+func (s *DatabaseStore) ValidateAgentToken(id string, tokenHash string) bool {
+	if id == "" || tokenHash == "" {
+		return false
+	}
+	var count int64
+	if err := s.db.Model(&AgentModel{}).Where("id = ? AND token_hash = ?", id, tokenHash).Count(&count).Error; err != nil {
+		return false
+	}
+	return count == 1
+}
+
+func (s *DatabaseStore) ClaimAgent(id string, environmentID string) (domain.Agent, bool) {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(environmentID) == "" {
+		return domain.Agent{}, false
+	}
+	if _, exists := s.GetEnvironment(environmentID); !exists {
+		return domain.Agent{}, false
+	}
+	var model AgentModel
+	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
+		return domain.Agent{}, false
+	}
+	previousEnvironmentID := model.EnvironmentID
+	model.EnvironmentID = environmentID
+	model.ClaimStatus = "CLAIMED"
+	if err := s.db.Save(&model).Error; err != nil {
+		return domain.Agent{}, false
+	}
+	if err := s.rebindEnvironmentAgent(previousEnvironmentID, environmentID, id); err != nil {
+		return domain.Agent{}, false
+	}
+	return s.GetAgent(id)
+}
+
+func (s *DatabaseStore) UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool) {
+	if environmentID != "" {
+		var environment EnvironmentModel
+		if err := s.db.Where("id = ?", environmentID).Take(&environment).Error; err != nil {
+			return domain.Agent{}, false
+		}
 	}
 
 	now := time.Now()
@@ -555,6 +659,7 @@ func (s *DatabaseStore) UpsertAgent(id string, environmentID string, version str
 			EnvironmentID:   environmentID,
 			Version:         fallbackString(version, "dev"),
 			Status:          fallbackString(status, "ONLINE"),
+			ClaimStatus:     "PENDING_CLAIM",
 			Capabilities:    append([]string(nil), capabilities...),
 			LastHeartbeatAt: &now,
 		}
@@ -579,6 +684,9 @@ func (s *DatabaseStore) UpsertAgent(id string, environmentID string, version str
 	if status != "" {
 		model.Status = status
 	}
+	if model.ClaimStatus == "" {
+		model.ClaimStatus = "PENDING_CLAIM"
+	}
 	model.LastHeartbeatAt = &now
 	if saveErr := s.db.Save(&model).Error; saveErr != nil {
 		return domain.Agent{}, false
@@ -595,11 +703,12 @@ func (s *DatabaseStore) UpdateAgentHeartbeat(id string, environmentID string, ve
 		return domain.Agent{}, false
 	}
 	now := time.Now()
-	previousEnvironmentID := model.EnvironmentID
 	model.Status = "ONLINE"
 	model.LastHeartbeatAt = &now
 	if environmentID != "" {
-		model.EnvironmentID = environmentID
+		if _, exists := s.GetEnvironment(environmentID); !exists {
+			return domain.Agent{}, false
+		}
 	}
 	if version != "" {
 		model.Version = version
@@ -607,13 +716,11 @@ func (s *DatabaseStore) UpdateAgentHeartbeat(id string, environmentID string, ve
 	if len(capabilities) > 0 {
 		model.Capabilities = append([]string(nil), capabilities...)
 	}
+	if model.ClaimStatus == "" {
+		model.ClaimStatus = "PENDING_CLAIM"
+	}
 	if err := s.db.Save(&model).Error; err != nil {
 		return domain.Agent{}, false
-	}
-	if model.EnvironmentID != "" {
-		if err := s.rebindEnvironmentAgent(previousEnvironmentID, model.EnvironmentID, id); err != nil {
-			return domain.Agent{}, false
-		}
 	}
 	return s.GetAgent(id)
 }
@@ -971,6 +1078,7 @@ func toDomainAgent(model AgentModel, environmentName string) domain.Agent {
 		EnvironmentName: environmentName,
 		Version:         model.Version,
 		Status:          effectiveAgentStatus(model.Status, model.LastHeartbeatAt),
+		ClaimStatus:     fallbackString(model.ClaimStatus, "PENDING_CLAIM"),
 		Capabilities:    model.Capabilities,
 		LastHeartbeatAt: lastHeartbeatAt,
 		CurrentTaskID:   currentTaskID,
@@ -1034,6 +1142,11 @@ func fallbackString(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func shortHash(value string) string {
+	sum := sha1.Sum([]byte(value))
+	return fmt.Sprintf("%x", sum)[:16]
 }
 
 func normalizeEnvironmentCode(value string) string {
@@ -1121,13 +1234,13 @@ func normalizeEnvironmentInput(input domain.Environment) (domain.Environment, er
 	}
 	item.Type = "PROJECT"
 	item.NetworkMode = "AGENT"
-	item.ClusterID = ""
-	item.Namespace = ""
 	item.Bindings = filterEnvironmentBindings(item.Bindings, func(binding domain.EnvironmentResourceBinding) bool {
-		return binding.ResourceType != "K8S"
+		return binding.ResourceType == "K8S" || binding.ResourceType == "HARBOR"
 	})
-	if item.RegistryID == "" || item.RegistryProject == "" {
-		return domain.Environment{}, errors.New("remote environment requires local harbor scope")
+	item.JenkinsID = ""
+	item.JenkinsView = ""
+	if item.ClusterID == "" || item.Namespace == "" || item.RegistryID == "" || item.RegistryProject == "" {
+		return domain.Environment{}, errors.New("project environment requires kubernetes and harbor scopes")
 	}
 	item.Bindings = normalizeEnvironmentBindings(item.Bindings)
 	return item, nil
@@ -1135,7 +1248,7 @@ func normalizeEnvironmentInput(input domain.Environment) (domain.Environment, er
 
 func defaultEnvironmentBindings(item domain.Environment) []domain.EnvironmentResourceBinding {
 	bindings := []domain.EnvironmentResourceBinding{}
-	if item.Type == "LOCAL" && item.ClusterID != "" && item.Namespace != "" {
+	if item.ClusterID != "" && item.Namespace != "" {
 		bindings = append(bindings, domain.EnvironmentResourceBinding{
 			ResourceType: "K8S",
 			ResourceID:   item.ClusterID,
@@ -1242,6 +1355,9 @@ func (s *DatabaseStore) environmentHasUnverifiedScopes(item domain.Environment) 
 	for _, binding := range bindings {
 		switch binding.ResourceType {
 		case "K8S":
+			if item.Type != "LOCAL" {
+				continue
+			}
 			cluster, exists := s.GetKubernetesCluster(binding.ResourceID)
 			if !exists || !stringListContains(cluster.Namespaces, binding.ScopeValue) {
 				return true

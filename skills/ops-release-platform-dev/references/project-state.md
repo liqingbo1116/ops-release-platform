@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-06-18
+Last updated: 2026-06-22
 
 Always verify with `git status --short --branch` and `git log -1 --oneline`; this file is an onboarding aid, not a substitute for checking the working tree.
 
@@ -22,7 +22,7 @@ Latest pushed commit at time of this note:
 
 ## Current Local Work
 
-V1 mainline has been reset around resource-first delivery. Current phase is phase 1: Resource management. Do not advance to environment completion, release creation, or baseline work until K8s/Harbor/Jenkins resources use user-oriented forms, system-owned status, real probe cache, refresh actions, and Agent-based remote probing.
+V1 mainline has been reset around resource-first delivery. Current phase is phase 3: Agent management and remote probing. Resource management and environment management are treated as V1-ready for the current path; continue with Agent registration, heartbeat, token validation, pending-claim status, project/product binding, task lease, and project K8s/Harbor probing before moving to project management or service/version source work.
 
 Existing foundation:
 
@@ -33,7 +33,7 @@ Existing foundation:
 - K8s clusters, Harbor registries, and Jenkins instances have an initial platform-maintained resource model.
 - Environment records carry `clusterId`, `registryId`, and `jenkinsId` as references to those reusable resources.
 - Environment records carry `deployTargetType` and resource bindings. V1 implements `KUBERNETES` and only reserves `DOCKER_COMPOSE`; default `namespace`, `registryProject`, and `jenkinsView` fields are compatibility fields derived from default bindings.
-- One environment may bind multiple K8s namespaces, Harbor projects, and Jenkins views. Remote/project environments still bind platform-side local Harbor project and Jenkins view, while remote K8s/runtime operations are handled by Agent tasks and reports.
+- One local environment may bind multiple K8s namespaces, Harbor projects, and Jenkins views. Project environments bind project K8s namespaces and project Harbor projects for Agent probing/execution. Jenkins is platform-side local infrastructure for build/version-source flows; project Agents do not connect to Jenkins, trigger builds, or build images.
 - Users only enter environment name and environment code. The backend generates the environment ID as `env-<code>` when the create request omits `id`.
 - Environment page has separate tabs for maintaining K8s, Harbor, and Jenkins resources. Environments associate those resource rows and their per-environment scopes.
 - `.secrets/` is development-only for private runtime values. Formal resource master data belongs in the platform database, and credentials must be hidden behind internal credential references.
@@ -50,10 +50,10 @@ Existing foundation:
 - Kubeconfig paths from `.secrets/` resolve from repo root, backend runtime, or package test working directories.
 - Real environment checks have previously passed through `POST /api/environments/:id/check` for local and project sample environments, but this is not the final acceptance standard for remote/project environments. Remote resource checks must be converted to Agent tasks that report status and probe cache.
 
-Phase 1 remaining work:
+Current remaining work:
 
-- Local/direct probes run in the platform backend; remote/project probes run through Agent tasks and report back to the platform.
-- Remote/project Agent-based resource probing remains the phase 1 gate that is not complete.
+- Complete the Agent management and remote probing phase with real Agent registration, long-lived token validation, heartbeat, pending-claim visibility, project/product binding, task leasing, and project K8s/Harbor probe reporting.
+- Do not use mock Agent data, mock probe data, or mock execution as completion evidence.
 
 Agent foundation already implemented but must be rechecked after phase 1 resource semantics:
 
@@ -75,9 +75,9 @@ Agent foundation evidence:
 
 Next phase gate:
 
-- Continue with phase 1 Resource management.
-- Do not mark phase 1 complete until resource forms, system-owned status, probe cache, refresh actions, and Agent-based remote probing are implemented with real data and mock fallback removed.
-- Do not start release creation until phases 1 through 4 in `docs/development-plan.md` are complete.
+- Continue with phase 3 Agent management and remote probing.
+- Do not start project management or service/version source work until the Agent phase is either complete with real runtime verification or explicitly blocked by missing project-side Agent/network/K8s/Harbor access.
+- Do not start release creation until phases 1 through 6 in `docs/development-plan.md` are complete.
 
 Validation for this local work:
 

@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -267,6 +270,104 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 	})
 }
 
+func (h *Handler) ProbeEnvironment(c *gin.Context) {
+	environmentID := c.Param("id")
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	agentItem, ok := h.findProbeAgent(environmentID)
+	if !ok {
+		BadRequest(c, "未找到已认领且在线的 Agent，请先在 Agent 管理中完成注册、启动和认领")
+		return
+	}
+	taskID := "PROBE-" + environmentID + "-" + time.Now().Format("20060102150405")
+	task := agent.Task{
+		ID:            taskID,
+		Type:          "probe",
+		Action:        "remote_resource_probe",
+		AgentID:       agentItem.ID,
+		EnvironmentID: environmentID,
+		Payload:       probePayloadFromEnvironment(environment),
+		CreatedAt:     time.Now(),
+	}
+	if h.protocol != nil {
+		h.protocol.Enqueue(task)
+	}
+	if h.queue != nil {
+		_ = h.queue.Enqueue(c.Request.Context(), task)
+	}
+	_, _, _ = h.repo.UpdateEnvironmentCheck(environmentID, "VERIFYING", time.Now())
+	OK(c, gin.H{
+		"taskId":        taskID,
+		"agentId":       agentItem.ID,
+		"environmentId": environmentID,
+		"status":        "PENDING",
+		"message":       "远程探测任务已下发，等待 Agent 回传结果",
+	})
+}
+
+func (h *Handler) findProbeAgent(environmentID string) (domain.Agent, bool) {
+	for _, item := range h.repo.ListAgents("") {
+		if item.EnvironmentID == environmentID && item.Status == "ONLINE" && item.ClaimStatus == "CLAIMED" {
+			return item, true
+		}
+	}
+	return domain.Agent{}, false
+}
+
+func probePayloadFromEnvironment(environment domain.Environment) map[string]string {
+	payload := map[string]string{
+		"source":        "platform",
+		"environmentId": environment.ID,
+		"environment":   environment.Name,
+	}
+	for _, binding := range bindingsForProbe(environment) {
+		switch binding.ResourceType {
+		case "K8S":
+			appendPayloadCSV(payload, "k8sNamespaces", binding.ScopeValue)
+		case "HARBOR":
+			appendPayloadCSV(payload, "harborProjects", binding.ScopeValue)
+		}
+	}
+	return payload
+}
+
+func bindingsForProbe(environment domain.Environment) []domain.EnvironmentResourceBinding {
+	if len(environment.Bindings) > 0 {
+		return environment.Bindings
+	}
+	return defaultEnvironmentBindingsForCheck(environment)
+}
+
+func appendPayloadCSV(payload map[string]string, key string, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	existing := splitCSVValues(payload[key])
+	for _, item := range existing {
+		if item == value {
+			return
+		}
+	}
+	existing = append(existing, value)
+	payload[key] = strings.Join(existing, ",")
+}
+
+func splitCSVValues(raw string) []string {
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
 func (h *Handler) checkEnvironmentByCachedScopes(c *gin.Context, environment domain.Environment) {
 	checkedAt := time.Now()
 	status := "UNKNOWN"
@@ -310,6 +411,9 @@ func (h *Handler) cachedScopeChecks(environment domain.Environment) []integratio
 			registry, exists := h.repo.GetHarborRegistry(binding.ResourceID)
 			checks = append(checks, cachedScopeCheck("Harbor 镜像项目", exists && containsTrimmedString(registry.Projects, binding.ScopeValue), binding.ScopeValue))
 		case "JENKINS":
+			if environment.Type != "LOCAL" {
+				continue
+			}
 			instance, exists := h.repo.GetJenkinsInstance(binding.ResourceID)
 			checks = append(checks, cachedScopeCheck("Jenkins 流水线视图", exists && containsTrimmedString(instance.Views, binding.ScopeValue), binding.ScopeValue))
 		}
@@ -580,51 +684,135 @@ func (h *Handler) ListAgents(c *gin.Context) {
 
 func (h *Handler) CreateAgentRegisterToken(c *gin.Context) {
 	var request struct {
-		AgentID       string `json:"agentId"`
-		EnvironmentID string `json:"environmentId"`
-		TTLMinutes    int    `json:"ttlMinutes"`
+		AgentID    string `json:"agentId"`
+		TTLMinutes int    `json:"ttlMinutes"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		BadRequest(c, "invalid register token request")
 		return
 	}
+	if request.TTLMinutes <= 0 {
+		request.TTLMinutes = 10
+	}
+	request.AgentID = strings.TrimSpace(request.AgentID)
+	if request.AgentID == "" {
+		request.AgentID = "agent-" + strconv.FormatInt(time.Now().Unix(), 10)
+	}
+	token, err := randomToken("agtr")
+	if err != nil {
+		BadRequest(c, "generate register token failed")
+		return
+	}
+	expiresAt := time.Now().Add(time.Duration(request.TTLMinutes) * time.Minute)
+	if !h.repo.CreateAgentRegisterToken(hashToken(token), request.AgentID, "", expiresAt) {
+		BadRequest(c, "create register token failed")
+		return
+	}
+	baseURL := requestBaseURL(c)
+	lines := []string{
+		"cat > agent.env <<'EOF'",
+		"AGENT_ID=" + request.AgentID,
+		"PLATFORM_URL=" + baseURL,
+		"AGENT_REGISTER_TOKEN=" + token,
+	}
+	lines = append(lines,
+		"AGENT_MODE=remote-probe",
+		"AGENT_HEALTH_PORT=18080",
+		"AGENT_POLL_INTERVAL_SECONDS=5",
+		"AGENT_HEARTBEAT_INTERVAL_SECONDS=15",
+		"AGENT_HTTP_TIMEOUT_SECONDS=10",
+		"AGENT_MAX_TASKS=1",
+		"AGENT_CAPABILITIES=remote-probe,kubectl,http-check",
+		"AGENT_KUBECONFIG=",
+		"AGENT_HARBOR_URL=",
+		"AGENT_HARBOR_USERNAME=",
+		"AGENT_HARBOR_PASSWORD=",
+		"AGENT_HARBOR_INSECURE_SKIP_TLS_VERIFY=false",
+		"EOF",
+		"./ops-release-agent -f ./agent.env",
+	)
+	Created(c, gin.H{
+		"platformUrl":    baseURL,
+		"token":          token,
+		"expiresAt":      expiresAt.Format(time.RFC3339),
+		"installCommand": strings.Join(lines, "\n"),
+	})
+}
+
+func (h *Handler) RegisterAgent(c *gin.Context) {
+	var request struct {
+		AgentID       string   `json:"agentId"`
+		EnvironmentID string   `json:"environmentId"`
+		RegisterToken string   `json:"registerToken"`
+		Version       string   `json:"version"`
+		Capabilities  []string `json:"capabilities"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid agent register request")
+		return
+	}
+	request.AgentID = strings.TrimSpace(request.AgentID)
+	request.EnvironmentID = strings.TrimSpace(request.EnvironmentID)
+	request.RegisterToken = strings.TrimSpace(request.RegisterToken)
+	if request.RegisterToken == "" {
+		BadRequest(c, "register token is required")
+		return
+	}
+	tokenAgentID, tokenEnvironmentID, ok := h.repo.ConsumeAgentRegisterToken(hashToken(request.RegisterToken), time.Now())
+	if !ok {
+		BadRequest(c, "register token is invalid, expired, or already used")
+		return
+	}
+	if request.AgentID == "" {
+		request.AgentID = tokenAgentID
+	}
+	if request.AgentID == "" {
+		BadRequest(c, "agentId is required")
+		return
+	}
+	if tokenAgentID != "" && request.AgentID != tokenAgentID {
+		BadRequest(c, "agentId does not match register token")
+		return
+	}
+	if tokenEnvironmentID != "" && request.EnvironmentID != "" && request.EnvironmentID != tokenEnvironmentID {
+		BadRequest(c, "environmentId does not match register token")
+		return
+	}
+	runtimeToken, err := randomToken("agt")
+	if err != nil {
+		BadRequest(c, "generate agent token failed")
+		return
+	}
+	agentItem, ok := h.repo.RegisterAgent(request.AgentID, "", request.Version, request.Capabilities, hashToken(runtimeToken))
+	if !ok {
+		BadRequest(c, "register agent failed")
+		return
+	}
+	Created(c, gin.H{
+		"agent":      agentItem,
+		"agentToken": runtimeToken,
+	})
+}
+
+func (h *Handler) ClaimAgent(c *gin.Context) {
+	var request struct {
+		EnvironmentID string `json:"environmentId"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		BadRequest(c, "invalid claim request")
+		return
+	}
+	request.EnvironmentID = strings.TrimSpace(request.EnvironmentID)
 	if request.EnvironmentID == "" {
 		BadRequest(c, "environmentId is required")
 		return
 	}
-	if request.TTLMinutes <= 0 {
-		request.TTLMinutes = 10
-	}
-	if _, exists := h.repo.GetEnvironment(request.EnvironmentID); !exists {
-		BadRequest(c, "environment not found")
+	agentItem, ok := h.repo.ClaimAgent(c.Param("id"), request.EnvironmentID)
+	if !ok {
+		BadRequest(c, "agent or environment not found")
 		return
 	}
-	request.AgentID = strings.TrimSpace(request.AgentID)
-	if request.AgentID == "" {
-		request.AgentID = "agent-" + strings.TrimPrefix(request.EnvironmentID, "env-")
-	}
-	token := "agt_" + request.EnvironmentID + "_" + strconv.FormatInt(time.Now().Unix(), 10)
-	baseURL := requestBaseURL(c)
-	Created(c, gin.H{
-		"token":     token,
-		"expiresAt": time.Now().Add(time.Duration(request.TTLMinutes) * time.Minute).Format(time.RFC3339),
-		"installCommand": strings.Join([]string{
-			"cat > agent.env <<'EOF'",
-			"AGENT_ID=" + request.AgentID,
-			"AGENT_ENVIRONMENT_ID=" + request.EnvironmentID,
-			"PLATFORM_URL=" + baseURL,
-			"AGENT_TOKEN=" + token,
-			"AGENT_MODE=mock",
-			"AGENT_HEALTH_PORT=18080",
-			"AGENT_POLL_INTERVAL_SECONDS=5",
-			"AGENT_HEARTBEAT_INTERVAL_SECONDS=15",
-			"AGENT_HTTP_TIMEOUT_SECONDS=10",
-			"AGENT_MAX_TASKS=1",
-			"AGENT_CAPABILITIES=mock-executor,image-sync,kubectl,http-check",
-			"EOF",
-			"./ops-release-agent -f ./agent.env",
-		}, "\n"),
-	})
+	OK(c, agentItem)
 }
 
 func (h *Handler) AgentHeartbeat(c *gin.Context) {
@@ -638,6 +826,9 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 		return
 	}
 	agentID := c.Param("id")
+	if !h.authorizeAgent(c, agentID) {
+		return
+	}
 	request.EnvironmentID = strings.TrimSpace(request.EnvironmentID)
 	if request.EnvironmentID != "" {
 		if _, exists := h.repo.GetEnvironment(request.EnvironmentID); !exists {
@@ -645,10 +836,16 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 			return
 		}
 	}
-	agentItem, ok := h.repo.UpdateAgentHeartbeat(agentID, request.EnvironmentID, request.Version, request.Capabilities)
-	if !ok && request.EnvironmentID != "" {
-		agentItem, ok = h.repo.UpsertAgent(agentID, request.EnvironmentID, request.Version, request.Capabilities, "ONLINE")
+	currentAgent, ok := h.repo.GetAgent(agentID)
+	if !ok {
+		NotFound(c, "agent not found")
+		return
 	}
+	if request.EnvironmentID != "" && currentAgent.EnvironmentID != "" && request.EnvironmentID != currentAgent.EnvironmentID {
+		BadRequest(c, "agent environment does not match claimed environment")
+		return
+	}
+	agentItem, ok := h.repo.UpdateAgentHeartbeat(agentID, request.EnvironmentID, request.Version, request.Capabilities)
 	if !ok {
 		NotFound(c, "agent not found")
 		return
@@ -661,6 +858,9 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 }
 
 func (h *Handler) PullAgentTask(c *gin.Context) {
+	if !h.authorizeAgent(c, c.Param("id")) {
+		return
+	}
 	agentItem, ok := h.repo.GetAgent(c.Param("id"))
 	if !ok {
 		NotFound(c, "agent not found")
@@ -668,6 +868,10 @@ func (h *Handler) PullAgentTask(c *gin.Context) {
 	}
 	if agentItem.Status != "ONLINE" {
 		BadRequest(c, "agent must be ONLINE")
+		return
+	}
+	if agentItem.ClaimStatus != "CLAIMED" || agentItem.EnvironmentID == "" {
+		BadRequest(c, "agent is online but not claimed by an environment")
 		return
 	}
 	task, ok := h.protocol.Pull(agentItem.ID)
@@ -698,6 +902,9 @@ func (h *Handler) LeaseAgentTask(c *gin.Context) {
 		BadRequest(c, "agentId is required")
 		return
 	}
+	if !h.authorizeAgent(c, request.AgentID) {
+		return
+	}
 	request.EnvironmentID = strings.TrimSpace(request.EnvironmentID)
 	agentItem, ok := h.repo.GetAgent(request.AgentID)
 	if !ok {
@@ -706,6 +913,10 @@ func (h *Handler) LeaseAgentTask(c *gin.Context) {
 	}
 	if agentItem.Status != "ONLINE" {
 		BadRequest(c, "agent must be ONLINE")
+		return
+	}
+	if agentItem.ClaimStatus != "CLAIMED" || agentItem.EnvironmentID == "" {
+		BadRequest(c, "agent is online but not claimed by an environment")
 		return
 	}
 	if request.EnvironmentID != "" && agentItem.EnvironmentID != request.EnvironmentID {
@@ -717,9 +928,13 @@ func (h *Handler) LeaseAgentTask(c *gin.Context) {
 		))
 		return
 	}
+	leaseEnvironmentID := request.EnvironmentID
+	if leaseEnvironmentID == "" {
+		leaseEnvironmentID = agentItem.EnvironmentID
+	}
 	result := h.protocol.Lease(agent.LeaseRequest{
 		AgentID:       agentItem.ID,
-		EnvironmentID: request.EnvironmentID,
+		EnvironmentID: leaseEnvironmentID,
 		MaxTasks:      request.MaxTasks,
 		LeaseSeconds:  request.LeaseSeconds,
 		CallbackBase:  requestBaseURL(c),
@@ -743,6 +958,9 @@ func (h *Handler) ReportAgentTaskStep(c *gin.Context) {
 		BadRequest(c, "step and status are required")
 		return
 	}
+	if !h.authorizeTaskAgent(c, c.Param("id")) {
+		return
+	}
 	task, ok := h.protocol.ReportStep(c.Param("id"), request.Step, request.Status)
 	if !ok {
 		NotFound(c, "agent task not found")
@@ -761,6 +979,9 @@ func (h *Handler) AppendAgentTaskLog(c *gin.Context) {
 	}
 	if request.Line == "" {
 		BadRequest(c, "line is required")
+		return
+	}
+	if !h.authorizeTaskAgent(c, c.Param("id")) {
 		return
 	}
 	task, ok := h.protocol.AppendLog(c.Param("id"), request.Line)
@@ -784,15 +1005,64 @@ func (h *Handler) ReportAgentTaskResult(c *gin.Context) {
 		BadRequest(c, "status is required")
 		return
 	}
+	if !h.authorizeTaskAgent(c, c.Param("id")) {
+		return
+	}
 	task, ok := h.protocol.ReportResult(c.Param("id"), request.Status, request.Message)
 	if !ok {
 		NotFound(c, "agent task not found")
 		return
 	}
+	h.handleRemoteProbeResult(task, request.Status, request.Message)
 	if task.AgentID != "" && (request.Status == "SUCCESS" || request.Status == "FAILED") {
 		h.repo.AssignAgentTask(task.AgentID, "")
 	}
 	OK(c, task)
+}
+
+type remoteProbeResult struct {
+	Status string                         `json:"status"`
+	Checks []integration.IntegrationCheck `json:"checks"`
+}
+
+func (h *Handler) handleRemoteProbeResult(task agent.ProtocolTask, taskStatus string, message string) {
+	if task.Type != "probe" || task.Action != "remote_resource_probe" || task.EnvironmentID == "" {
+		return
+	}
+	checkedAt := time.Now()
+	status := "UNHEALTHY"
+	if taskStatus == "SUCCESS" {
+		status = "HEALTHY"
+	}
+	var result remoteProbeResult
+	if err := json.Unmarshal([]byte(message), &result); err == nil {
+		if result.Status == "" {
+			status = statusFromProbeChecks(result.Checks)
+		} else {
+			status = result.Status
+		}
+	}
+	if taskStatus == "FAILED" && status == "HEALTHY" {
+		status = "UNHEALTHY"
+	}
+	_, _, _ = h.repo.UpdateEnvironmentCheck(task.EnvironmentID, status, checkedAt)
+}
+
+func statusFromProbeChecks(checks []integration.IntegrationCheck) string {
+	if len(checks) == 0 {
+		return "UNKNOWN"
+	}
+	for _, check := range checks {
+		if check.Status == "UNHEALTHY" {
+			return "UNHEALTHY"
+		}
+	}
+	for _, check := range checks {
+		if check.Status != "HEALTHY" {
+			return "DEGRADED"
+		}
+	}
+	return "HEALTHY"
 }
 
 func (h *Handler) CreateBaseline(c *gin.Context) {
@@ -1066,11 +1336,15 @@ func (h *Handler) GetAgentTaskStatus(c *gin.Context) {
 	if h.protocol != nil {
 		status, logs, ok := h.protocol.Status(c.Param("id"))
 		if ok {
-			OK(c, gin.H{
+			payload := gin.H{
 				"enabled": true,
 				"status":  status,
 				"logs":    logs,
-			})
+			}
+			if probe, ok := remoteProbeResultFromStatus(status, logs); ok {
+				payload["probe"] = probe
+			}
+			OK(c, payload)
 			return
 		}
 	}
@@ -1090,11 +1364,28 @@ func (h *Handler) GetAgentTaskStatus(c *gin.Context) {
 	if err != nil {
 		logs = []string{}
 	}
-	OK(c, gin.H{
+	payload := gin.H{
 		"enabled": true,
 		"status":  status,
 		"logs":    logs,
-	})
+	}
+	if probe, ok := remoteProbeResultFromStatus(status, logs); ok {
+		payload["probe"] = probe
+	}
+	OK(c, payload)
+}
+
+func remoteProbeResultFromStatus(status map[string]string, logs []string) (remoteProbeResult, bool) {
+	if status["type"] != "probe" || status["action"] != "remote_resource_probe" {
+		return remoteProbeResult{}, false
+	}
+	for i := len(logs) - 1; i >= 0; i-- {
+		var result remoteProbeResult
+		if err := json.Unmarshal([]byte(logs[i]), &result); err == nil && (result.Status != "" || len(result.Checks) > 0) {
+			return result, true
+		}
+	}
+	return remoteProbeResult{}, false
 }
 
 func (h *Handler) enqueue(ctx interface{ Request() *http.Request }, id string, taskType string, action string) {
@@ -1141,6 +1432,54 @@ func requestBaseURL(c *gin.Context) string {
 		host = c.Request.Host
 	}
 	return scheme + "://" + host
+}
+
+func (h *Handler) authorizeAgent(c *gin.Context, agentID string) bool {
+	token := bearerToken(c)
+	if token == "" || !h.repo.ValidateAgentToken(agentID, hashToken(token)) {
+		c.JSON(http.StatusUnauthorized, Response{
+			Code:      "UNAUTHORIZED",
+			Message:   "invalid agent token",
+			RequestID: requestID(),
+		})
+		return false
+	}
+	return true
+}
+
+func (h *Handler) authorizeTaskAgent(c *gin.Context, taskID string) bool {
+	status, _, ok := h.protocol.Status(taskID)
+	agentID := strings.TrimSpace(status["agentId"])
+	if !ok || agentID == "" {
+		NotFound(c, "agent task not found")
+		return false
+	}
+	return h.authorizeAgent(c, agentID)
+}
+
+func bearerToken(c *gin.Context) string {
+	raw := strings.TrimSpace(c.GetHeader("Authorization"))
+	if raw == "" {
+		return ""
+	}
+	prefix := "Bearer "
+	if !strings.HasPrefix(raw, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(raw, prefix))
+}
+
+func randomToken(prefix string) (string, error) {
+	var data [32]byte
+	if _, err := rand.Read(data[:]); err != nil {
+		return "", err
+	}
+	return prefix + "_" + hex.EncodeToString(data[:]), nil
+}
+
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func toReleaseImageTags(items []integration.ImageInfo) []domain.ReleaseImageTag {

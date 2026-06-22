@@ -44,6 +44,7 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol agent.Protoco
 	api.POST("/environments", handler.CreateEnvironment)
 	api.PUT("/environments/:id", handler.UpdateEnvironment)
 	api.POST("/environments/:id/check", handler.CheckEnvironment)
+	api.POST("/environments/:id/remote-probe", handler.ProbeEnvironment)
 	api.GET("/kubernetes-clusters", handler.ListKubernetesClusters)
 	api.POST("/kubernetes-clusters", handler.CreateKubernetesCluster)
 	api.PUT("/kubernetes-clusters/:id", handler.UpdateKubernetesCluster)
@@ -62,6 +63,8 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol agent.Protoco
 
 	api.GET("/agents", handler.ListAgents)
 	api.POST("/agents/register-token", handler.CreateAgentRegisterToken)
+	api.POST("/agents/register", handler.RegisterAgent)
+	api.POST("/agents/:id/claim", handler.ClaimAgent)
 	api.POST("/agents/:id/heartbeat", handler.AgentHeartbeat)
 	api.POST("/agents/:id/tasks/pull", handler.PullAgentTask)
 	api.POST("/agent-tasks/lease", handler.LeaseAgentTask)

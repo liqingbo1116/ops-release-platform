@@ -136,9 +136,11 @@ func (JenkinsInstanceModel) TableName() string {
 type AgentModel struct {
 	ID              string     `gorm:"primaryKey;size:64"`
 	Name            string     `gorm:"size:128;not null"`
-	EnvironmentID   string     `gorm:"size:64;index;not null"`
+	EnvironmentID   string     `gorm:"size:64;index"`
 	Version         string     `gorm:"size:64;not null"`
 	Status          string     `gorm:"size:32;index;not null"`
+	ClaimStatus     string     `gorm:"size:32;index;not null;default:PENDING_CLAIM"`
+	TokenHash       string     `gorm:"size:128;index"`
 	Capabilities    []string   `gorm:"serializer:json;type:jsonb;not null"`
 	LastHeartbeatAt *time.Time `gorm:"index"`
 	CurrentTaskID   string     `gorm:"size:64"`
@@ -148,6 +150,21 @@ type AgentModel struct {
 
 func (AgentModel) TableName() string {
 	return "agents"
+}
+
+type AgentRegisterTokenModel struct {
+	ID            string     `gorm:"primaryKey;size:64"`
+	TokenHash     string     `gorm:"size:128;uniqueIndex;not null"`
+	AgentID       string     `gorm:"size:64;index"`
+	EnvironmentID string     `gorm:"size:64;index"`
+	ExpiresAt     time.Time  `gorm:"index;not null"`
+	UsedAt        *time.Time `gorm:"index"`
+	CreatedAt     time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
+}
+
+func (AgentRegisterTokenModel) TableName() string {
+	return "agent_register_tokens"
 }
 
 type EnvironmentBaselineModel struct {

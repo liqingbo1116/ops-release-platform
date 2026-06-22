@@ -7,12 +7,14 @@ export type AgentInfo = {
   environmentName: string
   version: string
   status: 'ONLINE' | 'OFFLINE' | 'BUSY' | string
+  claimStatus: 'PENDING_CLAIM' | 'CLAIMED' | string
   capabilities: string[]
   lastHeartbeatAt: string
   currentTaskId: string | null
 }
 
 export type AgentRegisterToken = {
+  platformUrl: string
   token: string
   expiresAt: string
   installCommand: string
@@ -23,14 +25,13 @@ export async function listAgents(): Promise<AgentInfo[]> {
   return result.items
 }
 
-export async function createAgentRegisterToken(
-  environmentId: string,
-  agentId: string,
-  ttlMinutes = 60,
-): Promise<AgentRegisterToken> {
+export async function createAgentRegisterToken(agentId: string, ttlMinutes = 60): Promise<AgentRegisterToken> {
   return postData<AgentRegisterToken>('/api/agents/register-token', {
     agentId,
-    environmentId,
     ttlMinutes,
   })
+}
+
+export async function claimAgent(agentId: string, environmentId: string): Promise<AgentInfo> {
+  return postData<AgentInfo>(`/api/agents/${agentId}/claim`, { environmentId })
 }

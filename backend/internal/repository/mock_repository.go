@@ -2,7 +2,9 @@ package repository
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -20,6 +22,8 @@ type MockRepository struct {
 	harbor          []domain.HarborRegistry
 	jenkins         []domain.JenkinsInstance
 	agents          []domain.Agent
+	agentTokens     map[string]string
+	registerTokens  map[string]mockAgentRegisterToken
 	baselines       []domain.Baseline
 	baselineDetails map[string]domain.BaselineDetail
 	releases        []domain.ReleaseOrder
@@ -33,8 +37,18 @@ type MockRepository struct {
 	changelog       []domain.ChangelogEntry
 }
 
+type mockAgentRegisterToken struct {
+	AgentID       string
+	EnvironmentID string
+	ExpiresAt     time.Time
+	Used          bool
+}
+
 func NewMockRepository() (*MockRepository, error) {
-	repo := &MockRepository{}
+	repo := &MockRepository{
+		agentTokens:    map[string]string{},
+		registerTokens: map[string]mockAgentRegisterToken{},
+	}
 	var baselineDetail domain.BaselineDetail
 	loaders := []func() error{
 		func() error { return loadJSON("mockdata/environments.json", &repo.environments) },
@@ -57,7 +71,15 @@ func NewMockRepository() (*MockRepository, error) {
 		}
 	}
 	repo.bootstrapBaselineDetails(baselineDetail)
+	for _, item := range repo.agents {
+		repo.agentTokens[item.ID] = mockTokenHash(item.ID + "-test-token")
+	}
 	return repo, nil
+}
+
+func mockTokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func loadJSON(path string, dest any) error {
@@ -106,7 +128,7 @@ func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Env
 		RegistryProject:  normalized.RegistryProject,
 		JenkinsID:        normalized.JenkinsID,
 		JenkinsView:      normalized.JenkinsView,
-		Status:           r.environmentStatusByScopeCache(normalized, firstNonEmpty(normalized.Status, "UNKNOWN")),
+		Status:           r.environmentStatusAfterDefinitionSave(normalized, firstNonEmpty(normalized.Status, "UNKNOWN")),
 		AgentStatus:      "UNBOUND",
 		LastCheckAt:      "",
 		Bindings:         withEnvironmentID(normalized.Bindings, id),
@@ -164,7 +186,7 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 		r.environments[index].RegistryProject = normalized.RegistryProject
 		r.environments[index].JenkinsID = normalized.JenkinsID
 		r.environments[index].JenkinsView = normalized.JenkinsView
-		r.environments[index].Status = r.environmentStatusByScopeCache(normalized, r.environments[index].Status)
+		r.environments[index].Status = r.environmentStatusAfterDefinitionSave(normalized, r.environments[index].Status)
 		r.environments[index].Bindings = withEnvironmentID(normalized.Bindings, r.environments[index].ID)
 		return r.environments[index], true, nil
 	}
@@ -176,7 +198,7 @@ func (r *MockRepository) UpdateEnvironmentCheck(id string, status string, checke
 		if r.environments[index].ID != id {
 			continue
 		}
-		r.environments[index].Status = r.environmentStatusByScopeCache(r.environments[index], firstNonEmpty(strings.TrimSpace(status), "UNKNOWN"))
+		r.environments[index].Status = firstNonEmpty(strings.TrimSpace(status), "UNKNOWN")
 		r.environments[index].LastCheckAt = checkedAt.Format(time.RFC3339)
 		return r.environments[index], true, nil
 	}
@@ -184,6 +206,13 @@ func (r *MockRepository) UpdateEnvironmentCheck(id string, status string, checke
 }
 
 func (r *MockRepository) environmentStatusByScopeCache(item domain.Environment, currentStatus string) string {
+	if r.environmentHasUnverifiedScopes(item) {
+		return "DEGRADED"
+	}
+	return firstNonEmpty(strings.TrimSpace(currentStatus), "UNKNOWN")
+}
+
+func (r *MockRepository) environmentStatusAfterDefinitionSave(item domain.Environment, currentStatus string) string {
 	if r.environmentHasUnverifiedScopes(item) {
 		return "DEGRADED"
 	}
@@ -451,18 +480,124 @@ func (r *MockRepository) UpdateJenkinsInstanceProbe(id string, status string, me
 }
 
 func (r *MockRepository) ListAgents(query string) []domain.Agent {
-	return filter(r.agents, query, func(item domain.Agent) string {
+	items := filter(r.agents, query, func(item domain.Agent) string {
 		return item.ID + " " + item.Name + " " + item.EnvironmentName + " " + strings.Join(item.Capabilities, " ") + " " + item.Status
 	})
+	for index := range items {
+		if items[index].ClaimStatus == "" {
+			items[index].ClaimStatus = "CLAIMED"
+		}
+	}
+	return items
 }
 
 func (r *MockRepository) GetAgent(id string) (domain.Agent, bool) {
 	for _, agent := range r.agents {
 		if agent.ID == id {
+			if agent.ClaimStatus == "" {
+				agent.ClaimStatus = "CLAIMED"
+			}
 			return agent, true
 		}
 	}
 	return domain.Agent{}, false
+}
+
+func (r *MockRepository) CreateAgentRegisterToken(tokenHash string, agentID string, environmentID string, expiresAt time.Time) bool {
+	tokenHash = strings.TrimSpace(tokenHash)
+	if tokenHash == "" {
+		return false
+	}
+	if r.registerTokens == nil {
+		r.registerTokens = map[string]mockAgentRegisterToken{}
+	}
+	r.registerTokens[tokenHash] = mockAgentRegisterToken{
+		AgentID:       strings.TrimSpace(agentID),
+		EnvironmentID: strings.TrimSpace(environmentID),
+		ExpiresAt:     expiresAt,
+	}
+	return tokenHash != ""
+}
+
+func (r *MockRepository) ConsumeAgentRegisterToken(tokenHash string, now time.Time) (string, string, bool) {
+	tokenHash = strings.TrimSpace(tokenHash)
+	item, ok := r.registerTokens[tokenHash]
+	if !ok || item.Used || item.ExpiresAt.Before(now) {
+		return "", "", false
+	}
+	item.Used = true
+	r.registerTokens[tokenHash] = item
+	return item.AgentID, item.EnvironmentID, true
+}
+
+func (r *MockRepository) RegisterAgent(id string, environmentID string, version string, capabilities []string, tokenHash string) (domain.Agent, bool) {
+	id = strings.TrimSpace(id)
+	tokenHash = strings.TrimSpace(tokenHash)
+	if id == "" || tokenHash == "" {
+		return domain.Agent{}, false
+	}
+	if r.agentTokens == nil {
+		r.agentTokens = map[string]string{}
+	}
+	r.agentTokens[id] = tokenHash
+	for index := range r.agents {
+		if r.agents[index].ID != id {
+			continue
+		}
+		r.agents[index].Name = id
+		r.agents[index].Status = "ONLINE"
+		r.agents[index].LastHeartbeatAt = time.Now().Format(time.RFC3339)
+		if version != "" {
+			r.agents[index].Version = version
+		}
+		if len(capabilities) > 0 {
+			r.agents[index].Capabilities = capabilities
+		}
+		if r.agents[index].ClaimStatus == "" {
+			if r.agents[index].EnvironmentID != "" {
+				r.agents[index].ClaimStatus = "CLAIMED"
+			} else {
+				r.agents[index].ClaimStatus = "PENDING_CLAIM"
+			}
+		}
+		return r.agents[index], true
+	}
+	agent := domain.Agent{
+		ID:              id,
+		Name:            id,
+		Version:         firstNonEmpty(version, "dev"),
+		Status:          "ONLINE",
+		ClaimStatus:     "PENDING_CLAIM",
+		Capabilities:    append([]string(nil), capabilities...),
+		LastHeartbeatAt: time.Now().Format(time.RFC3339),
+	}
+	r.agents = append(r.agents, agent)
+	return agent, true
+}
+
+func (r *MockRepository) ValidateAgentToken(id string, tokenHash string) bool {
+	id = strings.TrimSpace(id)
+	tokenHash = strings.TrimSpace(tokenHash)
+	if id == "" || tokenHash == "" {
+		return false
+	}
+	stored, ok := r.agentTokens[id]
+	return ok && stored == tokenHash
+}
+
+func (r *MockRepository) ClaimAgent(id string, environmentID string) (domain.Agent, bool) {
+	agent, ok := r.UpsertAgent(id, environmentID, "", nil, "")
+	if !ok {
+		return domain.Agent{}, false
+	}
+	agent.ClaimStatus = "CLAIMED"
+	for index := range r.agents {
+		if r.agents[index].ID == id {
+			r.agents[index].ClaimStatus = "CLAIMED"
+			break
+		}
+	}
+	return agent, true
 }
 
 func (r *MockRepository) UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool) {
@@ -481,6 +616,15 @@ func (r *MockRepository) UpsertAgent(id string, environmentID string, version st
 		if status != "" {
 			r.agents[index].Status = status
 		}
+		if environmentID != "" {
+			r.agents[index].ClaimStatus = "CLAIMED"
+		} else if r.agents[index].ClaimStatus == "" {
+			if r.agents[index].EnvironmentID != "" {
+				r.agents[index].ClaimStatus = "CLAIMED"
+			} else {
+				r.agents[index].ClaimStatus = "PENDING_CLAIM"
+			}
+		}
 		now := time.Now().Format(time.RFC3339)
 		r.agents[index].LastHeartbeatAt = now
 		return r.agents[index], true
@@ -492,6 +636,7 @@ func (r *MockRepository) UpsertAgent(id string, environmentID string, version st
 		EnvironmentName: r.resolveEnvironmentName(environmentID),
 		Version:         firstNonEmpty(version, "dev"),
 		Status:          firstNonEmpty(status, "ONLINE"),
+		ClaimStatus:     firstNonEmpty(map[bool]string{true: "CLAIMED", false: "PENDING_CLAIM"}[environmentID != ""], "PENDING_CLAIM"),
 		Capabilities:    append([]string(nil), capabilities...),
 		LastHeartbeatAt: time.Now().Format(time.RFC3339),
 	}
@@ -507,14 +652,22 @@ func (r *MockRepository) UpdateAgentHeartbeat(id string, environmentID string, v
 		r.agents[index].Status = "ONLINE"
 		r.agents[index].LastHeartbeatAt = time.Now().Format(time.RFC3339)
 		if environmentID != "" {
-			r.agents[index].EnvironmentID = environmentID
-			r.agents[index].EnvironmentName = r.resolveEnvironmentName(environmentID)
+			if _, ok := r.getEnvironment(environmentID); !ok {
+				return domain.Agent{}, false
+			}
 		}
 		if version != "" {
 			r.agents[index].Version = version
 		}
 		if len(capabilities) > 0 {
 			r.agents[index].Capabilities = capabilities
+		}
+		if r.agents[index].ClaimStatus == "" {
+			if r.agents[index].EnvironmentID != "" {
+				r.agents[index].ClaimStatus = "CLAIMED"
+			} else {
+				r.agents[index].ClaimStatus = "PENDING_CLAIM"
+			}
 		}
 		return r.agents[index], true
 	}

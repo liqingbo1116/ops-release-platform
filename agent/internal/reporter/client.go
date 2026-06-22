@@ -30,6 +30,26 @@ type LeaseResponse struct {
 	Task    *Task  `json:"task"`
 }
 
+type RegisterResponse struct {
+	Agent      AgentInfo `json:"agent"`
+	AgentToken string    `json:"agentToken"`
+}
+
+type HeartbeatResponse struct {
+	Agent       AgentInfo `json:"agent"`
+	ServerTime  string    `json:"serverTime"`
+	NextPollSec int       `json:"nextPollSec"`
+}
+
+type AgentInfo struct {
+	ID              string   `json:"id"`
+	EnvironmentID   string   `json:"environmentId"`
+	ClaimStatus     string   `json:"claimStatus"`
+	Status          string   `json:"status"`
+	Capabilities    []string `json:"capabilities"`
+	LastHeartbeatAt string   `json:"lastHeartbeatAt"`
+}
+
 type Task struct {
 	ID            string            `json:"id"`
 	Type          string            `json:"type"`
@@ -52,12 +72,58 @@ func NewClient(baseURL string, agentID string, environmentID string, token strin
 	}
 }
 
-func (c *Client) Heartbeat(ctx context.Context, version string, capabilities []string) error {
-	return c.post(ctx, fmt.Sprintf("/api/agents/%s/heartbeat", c.agentID), map[string]any{
+func (c *Client) AgentID() string {
+	return c.agentID
+}
+
+func (c *Client) EnvironmentID() string {
+	return c.environmentID
+}
+
+func (c *Client) SetRuntimeIdentity(agentID string, environmentID string, token string) {
+	if agentID != "" {
+		c.agentID = agentID
+	}
+	c.environmentID = environmentID
+	c.token = token
+}
+
+func (c *Client) SetEnvironmentID(environmentID string) {
+	c.environmentID = environmentID
+}
+
+func (c *Client) Register(ctx context.Context, registerToken string, version string, capabilities []string) (RegisterResponse, error) {
+	var response apiResponse[RegisterResponse]
+	err := c.post(ctx, "/api/agents/register", map[string]any{
+		"agentId":       c.agentID,
+		"environmentId": c.environmentID,
+		"registerToken": registerToken,
+		"version":       version,
+		"capabilities":  capabilities,
+	}, &response)
+	if err != nil {
+		return RegisterResponse{}, err
+	}
+	if response.Code != "OK" {
+		return RegisterResponse{}, fmt.Errorf("register rejected: %s", response.Message)
+	}
+	return response.Data, nil
+}
+
+func (c *Client) Heartbeat(ctx context.Context, version string, capabilities []string) (HeartbeatResponse, error) {
+	var response apiResponse[HeartbeatResponse]
+	err := c.post(ctx, fmt.Sprintf("/api/agents/%s/heartbeat", c.agentID), map[string]any{
 		"environmentId": c.environmentID,
 		"version":       version,
 		"capabilities":  capabilities,
-	}, nil)
+	}, &response)
+	if err != nil {
+		return HeartbeatResponse{}, err
+	}
+	if response.Code != "OK" {
+		return HeartbeatResponse{}, fmt.Errorf("heartbeat rejected: %s", response.Message)
+	}
+	return response.Data, nil
 }
 
 func (c *Client) Lease(ctx context.Context, maxTasks int, leaseSeconds int) (LeaseResponse, error) {

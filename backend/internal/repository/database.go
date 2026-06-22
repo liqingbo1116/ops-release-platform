@@ -26,6 +26,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&HarborRegistryModel{},
 		&JenkinsInstanceModel{},
 		&AgentModel{},
+		&AgentRegisterTokenModel{},
 		&EnvironmentBaselineModel{},
 		&BaselineServiceItemModel{},
 		&ReleaseOrderModel{},

@@ -29,6 +29,11 @@ type Store interface {
 	UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, checkedAt time.Time) (domain.JenkinsInstance, bool, error)
 	ListAgents(query string) []domain.Agent
 	GetAgent(id string) (domain.Agent, bool)
+	CreateAgentRegisterToken(tokenHash string, agentID string, environmentID string, expiresAt time.Time) bool
+	ConsumeAgentRegisterToken(tokenHash string, now time.Time) (string, string, bool)
+	RegisterAgent(id string, environmentID string, version string, capabilities []string, tokenHash string) (domain.Agent, bool)
+	ValidateAgentToken(id string, tokenHash string) bool
+	ClaimAgent(id string, environmentID string) (domain.Agent, bool)
 	UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool)
 	UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string) (domain.Agent, bool)
 	AssignAgentTask(id string, taskID string) (domain.Agent, bool)

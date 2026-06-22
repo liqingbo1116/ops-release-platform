@@ -137,7 +137,7 @@ describe('EnvironmentPage', () => {
     expect(wrapper.text()).toContain('无需 Agent')
     expect(wrapper.text()).toContain('ONLINE')
     expect(wrapper.text()).toContain('本地环境关联 K8s 命名空间')
-    expect(wrapper.text()).toContain('远程环境关联本地 Harbor 镜像项目')
+    expect(wrapper.text()).toContain('项目环境关联远程 K8s 命名空间和 Harbor 镜像项目')
     expect(wrapper.text()).toContain('1 个远程环境 Agent 未就绪')
     expect(wrapper.text()).not.toContain('网络模式')
   })
@@ -167,7 +167,7 @@ describe('EnvironmentPage', () => {
     expect(wrapper.text()).not.toContain('项目 Z 生产')
   })
 
-  it('creates remote environments with local harbor and jenkins scopes', async () => {
+  it('creates remote environments with harbor scopes only', async () => {
     listHarborRegistries.mockResolvedValue([
       { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
     ])
@@ -182,8 +182,6 @@ describe('EnvironmentPage', () => {
       networkMode: 'AGENT',
       registryId: 'harbor-local',
       registryProject: 'project-x',
-      jenkinsId: 'jenkins-local',
-      jenkinsView: 'project-x',
       status: 'UNKNOWN',
       agentStatus: 'OFFLINE',
       lastCheckAt: '',
@@ -213,6 +211,8 @@ describe('EnvironmentPage', () => {
     vm.form.clusterId = 'cluster-should-clear'
     vm.form.namespace = 'namespace-should-clear'
     vm.form.registryProjects = ['project-x', 'project-y']
+    vm.form.jenkinsId = 'jenkins-should-clear'
+    vm.form.jenkinsView = 'view-should-clear'
     vm.form.jenkinsViews = ['project-x', 'project-y']
     await vm.submitEnvironment()
 
@@ -226,8 +226,8 @@ describe('EnvironmentPage', () => {
         namespace: '',
         registryId: 'harbor-local',
         registryProject: 'project-x',
-        jenkinsId: 'jenkins-local',
-        jenkinsView: 'project-x',
+        jenkinsId: '',
+        jenkinsView: '',
         bindings: [
           {
             resourceType: 'HARBOR',
@@ -240,20 +240,6 @@ describe('EnvironmentPage', () => {
             resourceType: 'HARBOR',
             resourceId: 'harbor-local',
             scopeType: 'PROJECT',
-            scopeValue: 'project-y',
-            isDefault: false,
-          },
-          {
-            resourceType: 'JENKINS',
-            resourceId: 'jenkins-local',
-            scopeType: 'VIEW',
-            scopeValue: 'project-x',
-            isDefault: true,
-          },
-          {
-            resourceType: 'JENKINS',
-            resourceId: 'jenkins-local',
-            scopeType: 'VIEW',
             scopeValue: 'project-y',
             isDefault: false,
           },
@@ -277,8 +263,6 @@ describe('EnvironmentPage', () => {
       networkMode: 'AGENT',
       registryId: 'harbor-local',
       registryProject: 'project-not-probed',
-      jenkinsId: 'jenkins-local',
-      jenkinsView: 'view-not-probed',
       status: 'DEGRADED',
       agentStatus: 'UNBOUND',
       lastCheckAt: '',
@@ -306,12 +290,15 @@ describe('EnvironmentPage', () => {
     vm.openCreateDialog()
     vm.form.name = 'remote manual scope'
     vm.form.registryProjects = ['project-not-probed']
+    vm.form.jenkinsId = 'jenkins-should-clear'
+    vm.form.jenkinsView = 'view-should-clear'
     vm.form.jenkinsViews = ['view-not-probed']
     await vm.submitEnvironment()
 
     expect(createEnvironment).toHaveBeenCalledWith(expect.objectContaining({
       registryProject: 'project-not-probed',
-      jenkinsView: 'view-not-probed',
+      jenkinsId: '',
+      jenkinsView: '',
     }))
     expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('未在最近探测结果中发现'))
     expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('环境已保存，但存在未验证的资源范围'))
@@ -396,12 +383,9 @@ describe('EnvironmentPage', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('相关基础资源探测已刷新')
   })
 
-  it('shows remote environment missing jenkins view reason in list and next step in detail', async () => {
+  it('shows remote environment missing harbor project reason in list and next step in detail', async () => {
     listHarborRegistries.mockResolvedValue([
       { id: 'harbor-local', name: '本地 Harbor', status: 'HEALTHY', projects: ['project-x'] },
-    ])
-    listJenkinsInstances.mockResolvedValue([
-      { id: 'jenkins-local', name: '本地 Jenkins', status: 'HEALTHY', views: ['project-x'] },
     ])
     listEnvironments.mockResolvedValue([
       {
@@ -411,9 +395,7 @@ describe('EnvironmentPage', () => {
         type: 'PROJECT',
         networkMode: 'AGENT',
         registryId: 'harbor-local',
-        registryProject: 'project-x',
-        jenkinsId: 'jenkins-local',
-        jenkinsView: 'missing-view',
+        registryProject: 'missing-project',
         status: 'UNKNOWN',
         agentStatus: 'ONLINE',
         lastCheckAt: '',
@@ -422,14 +404,7 @@ describe('EnvironmentPage', () => {
             resourceType: 'HARBOR',
             resourceId: 'harbor-local',
             scopeType: 'PROJECT',
-            scopeValue: 'project-x',
-            isDefault: true,
-          },
-          {
-            resourceType: 'JENKINS',
-            resourceId: 'jenkins-local',
-            scopeType: 'VIEW',
-            scopeValue: 'missing-view',
+            scopeValue: 'missing-project',
             isDefault: true,
           },
         ],
@@ -452,15 +427,15 @@ describe('EnvironmentPage', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Jenkins 流水线视图 missing-view 未在最近探测结果中发现')
-    expect(wrapper.text()).not.toContain('请到基础资源刷新 Jenkins 探测')
+    expect(wrapper.text()).toContain('Harbor 镜像项目 missing-project 未在最近探测结果中发现')
+    expect(wrapper.text()).not.toContain('请到基础资源刷新 Harbor 探测')
 
     ;(wrapper.vm as unknown as { openDrawer: (row: unknown) => void; environments: unknown[] }).openDrawer(
       (wrapper.vm as unknown as { environments: unknown[] }).environments[0],
     )
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('请到基础资源刷新 Jenkins 探测')
+    expect(wrapper.text()).toContain('请到基础资源刷新 Harbor 探测')
   })
 
   it('keeps remote agent readiness separate from resource readiness', async () => {

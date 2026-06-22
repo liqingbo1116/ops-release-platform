@@ -15,7 +15,7 @@
       <el-alert
         type="info"
         :closable="false"
-        title="V1 主线：本地环境关联 K8s 命名空间、Harbor 镜像项目、Jenkins 流水线视图；远程环境关联本地 Harbor 镜像项目与 Jenkins 流水线视图，远程 K8s 由 Agent 执行。"
+        title="V1 主线：本地环境关联 K8s 命名空间、Harbor 镜像项目、Jenkins 流水线视图；项目环境关联远程 K8s 命名空间和 Harbor 镜像项目，由 Agent 执行探测和后续部署。"
       />
       <el-alert
         type="info"
@@ -85,7 +85,7 @@
                 <span>Harbor</span>
                 <strong>{{ scopedResourceText(row, 'harbor') }}</strong>
               </div>
-              <div>
+              <div v-if="row.type === 'LOCAL'">
                 <span>Jenkins</span>
                 <strong>{{ scopedResourceText(row, 'jenkins') }}</strong>
               </div>
@@ -190,24 +190,26 @@
             <div class="form-tip">远程环境可绑定多个本地镜像项目，首个镜像项目作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
           </el-form-item>
         </template>
-        <el-form-item label="Jenkins">
-          <el-select v-model="form.jenkinsId" placeholder="选择 Jenkins 资源" clearable filterable>
-            <el-option v-for="item in jenkinsInstances" :key="item.id" :label="item.name" :value="item.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="form.jenkinsId" label="流水线视图">
-          <el-select
-            v-model="form.jenkinsViews"
-            placeholder="选择或输入一个或多个流水线视图"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-          >
-            <el-option v-for="item in selectedViews" :key="item" :label="item" :value="item" />
-          </el-select>
-          <div class="form-tip">可绑定多个流水线视图，首个流水线视图作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
-        </el-form-item>
+        <template v-if="form.type === 'LOCAL'">
+          <el-form-item label="Jenkins">
+            <el-select v-model="form.jenkinsId" placeholder="选择 Jenkins 资源" clearable filterable>
+              <el-option v-for="item in jenkinsInstances" :key="item.id" :label="item.name" :value="item.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="form.jenkinsId" label="流水线视图">
+            <el-select
+              v-model="form.jenkinsViews"
+              placeholder="选择或输入一个或多个流水线视图"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+            >
+              <el-option v-for="item in selectedViews" :key="item" :label="item" :value="item" />
+            </el-select>
+            <div class="form-tip">可绑定多个流水线视图，首个流水线视图作为默认值；手工输入未探测到的值后，环境会进入需验证状态。</div>
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -307,7 +309,7 @@ const activeCheckHelpText = computed(() => {
   if (activeEnvironment.value.type === 'LOCAL') {
     return '本地连接测试：平台后端直接校验已绑定的 K8s、Harbor、Jenkins 范围，不依赖 Agent。'
   }
-  return '远程连接测试：校验 Agent 在线状态，以及本地 Harbor/Jenkins 范围是否可用。'
+  return '远程连接测试：校验 Agent 在线状态，并由 Agent 探测项目环境 K8s 命名空间和 Harbor 镜像项目；Jenkins 由平台后端直连本地资源。'
 })
 
 function emptyEnvironmentForm(): EnvironmentForm {
@@ -421,7 +423,7 @@ function agentDiagnostics(row: EnvironmentInfo): EnvironmentDiagnostic[] {
       status: row.agentStatus === 'ONLINE' ? 'HEALTHY' : 'DEGRADED',
       message: row.agentStatus === 'ONLINE' ? '远程 Agent 在线' : `远程 Agent ${agentStatusText(row.agentStatus)}，会影响远程发布/部署执行`,
       nextStep: row.agentStatus === 'ONLINE'
-        ? '可继续校验 Harbor/Jenkins 资源范围'
+        ? '可继续校验项目环境 K8s 命名空间和 Harbor 镜像项目'
         : '请启动并注册该环境 Agent，确认 Agent 配置的环境 ID 与详情中的 Agent 环境 ID 一致',
     })
   }
@@ -432,7 +434,7 @@ function resourceDiagnostics(row: EnvironmentInfo): EnvironmentDiagnostic[] {
   const diagnostics: EnvironmentDiagnostic[] = []
   if (row.type === 'LOCAL') appendScopeDiagnostics(diagnostics, row, 'K8S')
   appendScopeDiagnostics(diagnostics, row, 'HARBOR')
-  appendScopeDiagnostics(diagnostics, row, 'JENKINS')
+  if (row.type === 'LOCAL') appendScopeDiagnostics(diagnostics, row, 'JENKINS')
   return diagnostics
 }
 
@@ -519,7 +521,9 @@ function applyEnvironmentTypeDefaults(type: EnvironmentPayload['type']) {
     form.value.namespace = ''
     form.value.namespaces = []
     form.value.registryId ||= harborRegistries.value[0]?.id || ''
-    form.value.jenkinsId ||= jenkinsInstances.value[0]?.id || ''
+    form.value.jenkinsId = ''
+    form.value.jenkinsView = ''
+    form.value.jenkinsViews = []
     return
   }
   form.value.networkMode = 'DIRECT'
@@ -634,13 +638,13 @@ function trimEnvironmentPayload(payload: EnvironmentForm): EnvironmentPayload {
   const networkMode = type === 'LOCAL' ? 'DIRECT' : 'AGENT'
   const namespaces = type === 'LOCAL' ? normalizeScopes(payload.namespaces, payload.namespace) : []
   const registryProjects = normalizeScopes(payload.registryProjects, payload.registryProject)
-  const jenkinsViews = normalizeScopes(payload.jenkinsViews, payload.jenkinsView)
+  const jenkinsViews = type === 'LOCAL' ? normalizeScopes(payload.jenkinsViews, payload.jenkinsView) : []
   const resourcePayload = {
     clusterId: type === 'LOCAL' ? payload.clusterId.trim() : '',
     namespace: namespaces[0] ?? '',
     registryId: payload.registryId.trim(),
     registryProject: registryProjects[0] ?? '',
-    jenkinsId: payload.jenkinsId.trim(),
+    jenkinsId: type === 'LOCAL' ? payload.jenkinsId.trim() : '',
     jenkinsView: jenkinsViews[0] ?? '',
   }
   return {
@@ -683,7 +687,7 @@ function buildBindings(
       isDefault: index === 0,
     }))
   }
-  if (payload.jenkinsId) {
+  if (type === 'LOCAL' && payload.jenkinsId) {
     scopes.jenkinsViews.forEach((view, index) => bindings.push({
       resourceType: 'JENKINS',
       resourceId: payload.jenkinsId,
@@ -710,7 +714,7 @@ function missingScopesBeforeSave() {
     appendMissingScopes(missingScopes, 'K8s 命名空间', normalizeScopes(form.value.namespaces, form.value.namespace), selectedNamespaces.value)
   }
   appendMissingScopes(missingScopes, 'Harbor 镜像项目', normalizeScopes(form.value.registryProjects, form.value.registryProject), selectedProjects.value)
-  if (form.value.jenkinsId) {
+  if (form.value.type === 'LOCAL' && form.value.jenkinsId) {
     appendMissingScopes(missingScopes, 'Jenkins 流水线视图', normalizeScopes(form.value.jenkinsViews, form.value.jenkinsView), selectedViews.value)
   }
   return missingScopes

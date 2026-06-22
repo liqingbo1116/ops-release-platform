@@ -60,6 +60,14 @@ export type EnvironmentCheckResult = {
   }>
 }
 
+export type EnvironmentProbeResult = {
+  taskId: string
+  agentId: string
+  environmentId: string
+  status: string
+  message: string
+}
+
 function normalizeEnvironment(item: {
   id: string
   name: string
@@ -108,4 +116,8 @@ export async function updateEnvironment(id: string, payload: Partial<Environment
 
 export async function checkEnvironment(id: string): Promise<EnvironmentCheckResult> {
   return postData<EnvironmentCheckResult>(`/api/environments/${id}/check`)
+}
+
+export async function probeEnvironment(id: string): Promise<EnvironmentProbeResult> {
+  return postData<EnvironmentProbeResult>(`/api/environments/${id}/remote-probe`)
 }

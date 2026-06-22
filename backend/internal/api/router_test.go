@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"ops-release-platform/backend/internal/integration"
 	"ops-release-platform/backend/internal/repository"
 )
+
+var testAgentTokens sync.Map
 
 func TestCoreMockAPIs(t *testing.T) {
 	router := newTestRouter()
@@ -147,8 +150,10 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 		t.Fatal("expected agent task id")
 	}
 
+	agentToken := registerTestAgent(t, router, "agent-project-x", "env-project-x-prod")
 	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"version":"1.3.3","capabilities":["image-sync","kubectl","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	heartbeatRecorder := httptest.NewRecorder()
 	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
 	if heartbeatRecorder.Code != http.StatusOK {
@@ -157,6 +162,7 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 
 	pullRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/tasks/pull", strings.NewReader(`{}`))
 	pullRequest.Header.Set("Content-Type", "application/json")
+	pullRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	pullRecorder := httptest.NewRecorder()
 	router.ServeHTTP(pullRecorder, pullRequest)
 	if pullRecorder.Code != http.StatusOK {
@@ -180,6 +186,7 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 
 	stepRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/steps", strings.NewReader(`{"step":"sync-image","status":"RUNNING"}`))
 	stepRequest.Header.Set("Content-Type", "application/json")
+	stepRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	stepRecorder := httptest.NewRecorder()
 	router.ServeHTTP(stepRecorder, stepRequest)
 	if stepRecorder.Code != http.StatusOK {
@@ -188,6 +195,7 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 
 	logRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/logs", strings.NewReader(`{"line":"sync image mock log"}`))
 	logRequest.Header.Set("Content-Type", "application/json")
+	logRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	logRecorder := httptest.NewRecorder()
 	router.ServeHTTP(logRecorder, logRequest)
 	if logRecorder.Code != http.StatusOK {
@@ -196,6 +204,7 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 
 	resultRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/result", strings.NewReader(`{"status":"SUCCESS","message":"release mock flow finished"}`))
 	resultRequest.Header.Set("Content-Type", "application/json")
+	resultRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	resultRecorder := httptest.NewRecorder()
 	router.ServeHTTP(resultRecorder, resultRequest)
 	if resultRecorder.Code != http.StatusOK {
@@ -247,8 +256,10 @@ func TestAgentTaskLeaseFlow(t *testing.T) {
 		t.Fatal("expected agent task id")
 	}
 
+	agentToken := registerTestAgent(t, router, "agent-project-x", "env-project-x-prod")
 	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"version":"v1-mock","capabilities":["mock-executor","image-sync","kubectl","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	heartbeatRecorder := httptest.NewRecorder()
 	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
 	if heartbeatRecorder.Code != http.StatusOK {
@@ -257,6 +268,7 @@ func TestAgentTaskLeaseFlow(t *testing.T) {
 
 	leaseRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"env-project-x-prod","maxTasks":1,"leaseSeconds":300}`))
 	leaseRequest.Header.Set("Content-Type", "application/json")
+	leaseRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	leaseRequest.Header.Set("X-Forwarded-Proto", "https")
 	leaseRequest.Header.Set("X-Forwarded-Host", "platform.example.com")
 	leaseRecorder := httptest.NewRecorder()
@@ -324,9 +336,12 @@ func TestAgentTaskLeaseReturnsEmptyWhenAgentAlreadyRunningTask(t *testing.T) {
 func TestAgentTaskLeaseRejectsInvalidAgentState(t *testing.T) {
 	router := newTestRouter()
 	_ = createReleaseAgentTask(t, router)
+	projectXToken := registerTestAgent(t, router, "agent-project-x", "env-project-x-prod")
+	projectZToken := "agent-project-z-test-token"
 
 	offlineRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-z","environmentId":"env-project-z-prod","maxTasks":1,"leaseSeconds":300}`))
 	offlineRequest.Header.Set("Content-Type", "application/json")
+	offlineRequest.Header.Set("Authorization", "Bearer "+projectZToken)
 	offlineRecorder := httptest.NewRecorder()
 	router.ServeHTTP(offlineRecorder, offlineRequest)
 	if offlineRecorder.Code != http.StatusBadRequest {
@@ -335,6 +350,7 @@ func TestAgentTaskLeaseRejectsInvalidAgentState(t *testing.T) {
 
 	mismatchRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"env-project-z-prod","maxTasks":1,"leaseSeconds":300}`))
 	mismatchRequest.Header.Set("Content-Type", "application/json")
+	mismatchRequest.Header.Set("Authorization", "Bearer "+projectXToken)
 	mismatchRecorder := httptest.NewRecorder()
 	router.ServeHTTP(mismatchRecorder, mismatchRequest)
 	if mismatchRecorder.Code != http.StatusBadRequest {
@@ -343,6 +359,7 @@ func TestAgentTaskLeaseRejectsInvalidAgentState(t *testing.T) {
 
 	trimmedRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"  env-project-x-prod  ","maxTasks":1,"leaseSeconds":300}`))
 	trimmedRequest.Header.Set("Content-Type", "application/json")
+	trimmedRequest.Header.Set("Authorization", "Bearer "+projectXToken)
 	trimmedRecorder := httptest.NewRecorder()
 	router.ServeHTTP(trimmedRecorder, trimmedRequest)
 	if trimmedRecorder.Code != http.StatusOK {
@@ -372,7 +389,7 @@ func TestAgentTaskExpiredLeaseCanBeLeasedAgain(t *testing.T) {
 func TestEnvironmentCRUD(t *testing.T) {
 	router := newTestRouter()
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-new-prod","name":"新生产环境","code":"new-prod","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-new-prod","name":"新生产环境","code":"new-prod","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -380,7 +397,7 @@ func TestEnvironmentCRUD(t *testing.T) {
 		t.Fatalf("expected create environment status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
 	}
 
-	autoCodeRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"name":"Auto Code Prod","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
+	autoCodeRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"name":"Auto Code Prod","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","status":"HEALTHY"}`))
 	autoCodeRequest.Header.Set("Content-Type", "application/json")
 	autoCodeRecorder := httptest.NewRecorder()
 	router.ServeHTTP(autoCodeRecorder, autoCodeRequest)
@@ -416,7 +433,7 @@ func TestEnvironmentCRUD(t *testing.T) {
 func TestEnvironmentWithUnverifiedScopesIsSavedAsDegraded(t *testing.T) {
 	router := newTestRouter()
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-unverified-scope","name":"未验证范围环境","code":"unverified-scope","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-not-probed","jenkinsId":"jenkins-local-prod","jenkinsView":"view-not-probed","status":"HEALTHY"}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-unverified-scope","name":"未验证范围环境","code":"unverified-scope","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"namespace-not-probed","registryId":"harbor-local-prod","registryProject":"project-not-probed","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -438,7 +455,7 @@ func TestEnvironmentVerifiedScopesClearDegradedOnSave(t *testing.T) {
 	repo := newTestRepository()
 	router := newTestRouterWithRepository(repo)
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-verified-later","name":"后续验证环境","code":"verified-later","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-later","jenkinsId":"jenkins-local-prod","jenkinsView":"view-later","status":"HEALTHY"}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-verified-later","name":"后续验证环境","code":"verified-later","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"namespace-later","registryId":"harbor-local-prod","registryProject":"project-later","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -458,8 +475,8 @@ func TestEnvironmentVerifiedScopesClearDegradedOnSave(t *testing.T) {
 	if _, _, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x", "project-later"}, time.Now()); err != nil {
 		t.Fatalf("update harbor probe: %v", err)
 	}
-	if _, _, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "view-later"}, []string{"mock-release"}, time.Now()); err != nil {
-		t.Fatalf("update jenkins probe: %v", err)
+	if _, _, err := repo.UpdateKubernetesClusterProbe("k8s-local-prod", "HEALTHY", "", []string{"default", "project-x", "namespace-later"}, time.Now()); err != nil {
+		t.Fatalf("update kubernetes probe: %v", err)
 	}
 
 	updateRequest := httptest.NewRequest(http.MethodPut, "/api/environments/env-verified-later", strings.NewReader(`{"name":"后续验证环境-已更新"}`))
@@ -688,8 +705,10 @@ func TestResourceRefreshFailureKeepsPreviousCache(t *testing.T) {
 
 func TestAgentHeartbeatRejectsUnknownEnvironment(t *testing.T) {
 	router := newTestRouter()
+	agentToken := registerTestAgent(t, router, "agent-new", "")
 	request := httptest.NewRequest(http.MethodPost, "/api/agents/agent-new/heartbeat", strings.NewReader(`{"environmentId":"env-missing","version":"v1-mock","capabilities":["mock-executor"]}`))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+agentToken)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadRequest {
@@ -698,10 +717,10 @@ func TestAgentHeartbeatRejectsUnknownEnvironment(t *testing.T) {
 	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "environment not found")
 }
 
-func TestAgentHeartbeatRebindsExistingAgentEnvironment(t *testing.T) {
+func TestAgentHeartbeatRejectsEnvironmentRebind(t *testing.T) {
 	router := newTestRouter()
 
-	createEnvironmentRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-remote-agent-rebind-test","name":"远程 Agent 绑定测试环境","code":"remote-agent-rebind-test","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"project-x","status":"HEALTHY"}`))
+	createEnvironmentRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-remote-agent-rebind-test","name":"远程 Agent 绑定测试环境","code":"remote-agent-rebind-test","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","status":"HEALTHY"}`))
 	createEnvironmentRequest.Header.Set("Content-Type", "application/json")
 	createEnvironmentRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createEnvironmentRecorder, createEnvironmentRequest)
@@ -711,19 +730,13 @@ func TestAgentHeartbeatRebindsExistingAgentEnvironment(t *testing.T) {
 
 	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"environmentId":"env-remote-agent-rebind-test","version":"v1-mock","capabilities":["mock-executor","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentTokenForTest(t, router, "agent-project-x", "env-project-x-prod"))
 	heartbeatRecorder := httptest.NewRecorder()
 	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
-	if heartbeatRecorder.Code != http.StatusOK {
-		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	if heartbeatRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected heartbeat status 400, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
 	}
-
-	leaseRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-x","environmentId":"env-remote-agent-rebind-test","maxTasks":1,"leaseSeconds":300}`))
-	leaseRequest.Header.Set("Content-Type", "application/json")
-	leaseRecorder := httptest.NewRecorder()
-	router.ServeHTTP(leaseRecorder, leaseRequest)
-	if leaseRecorder.Code != http.StatusOK {
-		t.Fatalf("expected rebind lease status 200, got %d: %s", leaseRecorder.Code, leaseRecorder.Body.String())
-	}
+	assertErrorResponse(t, heartbeatRecorder.Body.Bytes(), "VALIDATION_ERROR", "agent environment does not match claimed environment")
 
 	agentRequest := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
 	agentRecorder := httptest.NewRecorder()
@@ -742,13 +755,312 @@ func TestAgentHeartbeatRebindsExistingAgentEnvironment(t *testing.T) {
 	}
 	for _, item := range payload.Data.Items {
 		if item.ID == "agent-project-x" {
-			if item.EnvironmentID != "env-remote-agent-rebind-test" {
-				t.Fatalf("expected rebound environment id, got %+v", item)
+			if item.EnvironmentID != "env-project-x-prod" {
+				t.Fatalf("expected original environment id, got %+v", item)
 			}
 			return
 		}
 	}
 	t.Fatal("expected rebound agent in list")
+}
+
+func TestAgentRegisterClaimHeartbeatAndLeaseFlow(t *testing.T) {
+	router := newTestRouter()
+	agentID := "agent-registration-claim-test"
+	environmentID := "env-project-x-prod"
+
+	createTokenRequest := httptest.NewRequest(http.MethodPost, "/api/agents/register-token", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","ttlMinutes":10}`))
+	createTokenRequest.Header.Set("Content-Type", "application/json")
+	createTokenRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createTokenRecorder, createTokenRequest)
+	if createTokenRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected register token status 201, got %d: %s", createTokenRecorder.Code, createTokenRecorder.Body.String())
+	}
+	var tokenPayload struct {
+		Data struct {
+			Token          string `json:"token"`
+			InstallCommand string `json:"installCommand"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createTokenRecorder.Body.Bytes(), &tokenPayload); err != nil {
+		t.Fatalf("decode register token response: %v", err)
+	}
+	if tokenPayload.Data.Token == "" {
+		t.Fatal("expected register token")
+	}
+	if strings.Contains(tokenPayload.Data.InstallCommand, "AGENT_ENVIRONMENT_ID=") {
+		t.Fatalf("install command must not prebind environment: %s", tokenPayload.Data.InstallCommand)
+	}
+
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/agents/register", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","registerToken":"`+tokenPayload.Data.Token+`","version":"v1-remote-probe","capabilities":["remote-probe","kubectl","http-check"]}`))
+	registerRequest.Header.Set("Content-Type", "application/json")
+	registerRecorder := httptest.NewRecorder()
+	router.ServeHTTP(registerRecorder, registerRequest)
+	if registerRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected agent register status 201, got %d: %s", registerRecorder.Code, registerRecorder.Body.String())
+	}
+	var registerPayload struct {
+		Data struct {
+			Agent      domain.Agent `json:"agent"`
+			AgentToken string       `json:"agentToken"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(registerRecorder.Body.Bytes(), &registerPayload); err != nil {
+		t.Fatalf("decode agent register response: %v", err)
+	}
+	if registerPayload.Data.AgentToken == "" {
+		t.Fatal("expected agent runtime token")
+	}
+	if registerPayload.Data.Agent.EnvironmentID != "" || registerPayload.Data.Agent.ClaimStatus != "PENDING_CLAIM" {
+		t.Fatalf("expected registered agent to wait for page-side claim, got %+v", registerPayload.Data.Agent)
+	}
+
+	preClaimLeaseRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","maxTasks":1,"leaseSeconds":300}`))
+	preClaimLeaseRequest.Header.Set("Content-Type", "application/json")
+	preClaimLeaseRequest.Header.Set("Authorization", "Bearer "+registerPayload.Data.AgentToken)
+	preClaimLeaseRecorder := httptest.NewRecorder()
+	router.ServeHTTP(preClaimLeaseRecorder, preClaimLeaseRequest)
+	if preClaimLeaseRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected pre-claim lease status 400, got %d: %s", preClaimLeaseRecorder.Code, preClaimLeaseRecorder.Body.String())
+	}
+	assertErrorResponse(t, preClaimLeaseRecorder.Body.Bytes(), "VALIDATION_ERROR", "agent is online but not claimed by an environment")
+
+	claimRequest := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/claim", strings.NewReader(`{"environmentId":"`+environmentID+`"}`))
+	claimRequest.Header.Set("Content-Type", "application/json")
+	claimRecorder := httptest.NewRecorder()
+	router.ServeHTTP(claimRecorder, claimRequest)
+	if claimRecorder.Code != http.StatusOK {
+		t.Fatalf("expected claim status 200, got %d: %s", claimRecorder.Code, claimRecorder.Body.String())
+	}
+	var claimPayload struct {
+		Data domain.Agent `json:"data"`
+	}
+	if err := json.Unmarshal(claimRecorder.Body.Bytes(), &claimPayload); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if claimPayload.Data.EnvironmentID != environmentID || claimPayload.Data.ClaimStatus != "CLAIMED" {
+		t.Fatalf("expected claimed agent, got %+v", claimPayload.Data)
+	}
+
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/heartbeat", strings.NewReader(`{"version":"v1-remote-probe","capabilities":["remote-probe","kubectl","http-check"]}`))
+	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRequest.Header.Set("Authorization", "Bearer "+registerPayload.Data.AgentToken)
+	heartbeatRecorder := httptest.NewRecorder()
+	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
+	if heartbeatRecorder.Code != http.StatusOK {
+		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	}
+	var heartbeatPayload struct {
+		Data struct {
+			Agent domain.Agent `json:"agent"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(heartbeatRecorder.Body.Bytes(), &heartbeatPayload); err != nil {
+		t.Fatalf("decode heartbeat response: %v", err)
+	}
+	if heartbeatPayload.Data.Agent.EnvironmentID != environmentID || heartbeatPayload.Data.Agent.ClaimStatus != "CLAIMED" {
+		t.Fatalf("expected heartbeat to return claimed environment, got %+v", heartbeatPayload.Data.Agent)
+	}
+
+	createReleaseRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"`+environmentID+`","agentId":"`+agentID+`","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	createReleaseRequest.Header.Set("Content-Type", "application/json")
+	createReleaseRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createReleaseRecorder, createReleaseRequest)
+	if createReleaseRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected release create status 201, got %d: %s", createReleaseRecorder.Code, createReleaseRecorder.Body.String())
+	}
+	var createReleasePayload struct {
+		Data struct {
+			AgentTaskID string `json:"agentTaskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createReleaseRecorder.Body.Bytes(), &createReleasePayload); err != nil {
+		t.Fatalf("decode release response: %v", err)
+	}
+	if createReleasePayload.Data.AgentTaskID == "" {
+		t.Fatal("expected agent task id")
+	}
+
+	leaseRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"`+agentID+`","maxTasks":1,"leaseSeconds":300}`))
+	leaseRequest.Header.Set("Content-Type", "application/json")
+	leaseRequest.Header.Set("Authorization", "Bearer "+registerPayload.Data.AgentToken)
+	leaseRecorder := httptest.NewRecorder()
+	router.ServeHTTP(leaseRecorder, leaseRequest)
+	if leaseRecorder.Code != http.StatusOK {
+		t.Fatalf("expected lease status 200, got %d: %s", leaseRecorder.Code, leaseRecorder.Body.String())
+	}
+	var leasePayload leaseResponsePayload
+	if err := json.Unmarshal(leaseRecorder.Body.Bytes(), &leasePayload); err != nil {
+		t.Fatalf("decode lease response: %v", err)
+	}
+	if !leasePayload.Data.Leased || leasePayload.Data.Task == nil || leasePayload.Data.Task.ID != createReleasePayload.Data.AgentTaskID {
+		t.Fatalf("expected lease for created task, got %+v", leasePayload.Data)
+	}
+	if leasePayload.Data.Task.EnvironmentID != environmentID {
+		t.Fatalf("expected lease to use claimed environment, got %+v", leasePayload.Data.Task)
+	}
+}
+
+func TestEnvironmentRemoteProbeRequiresClaimedOnlineAgent(t *testing.T) {
+	router := newTestRouter()
+	createProjectProbeEnvironment(t, router, "env-probe-no-agent", "probe-no-agent", "project-x")
+
+	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-probe-no-agent/remote-probe", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected remote probe status 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	assertErrorResponse(t, recorder.Body.Bytes(), "VALIDATION_ERROR", "未找到已认领且在线的 Agent，请先在 Agent 管理中完成注册、启动和认领")
+}
+
+func TestEnvironmentRemoteProbeEnqueuesTaskForClaimedOnlineAgent(t *testing.T) {
+	router := newTestRouter()
+	createProjectProbeEnvironment(t, router, "env-probe-task", "probe-task", "project-x")
+	agentToken := registerTestAgent(t, router, "agent-probe-x", "env-probe-task")
+
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-probe-x/heartbeat", strings.NewReader(`{"version":"v1-remote-probe","capabilities":["remote-probe","kubectl","http-check"]}`))
+	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentToken)
+	heartbeatRecorder := httptest.NewRecorder()
+	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
+	if heartbeatRecorder.Code != http.StatusOK {
+		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	}
+
+	claimRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-probe-x/claim", strings.NewReader(`{"environmentId":"env-probe-task"}`))
+	claimRequest.Header.Set("Content-Type", "application/json")
+	claimRecorder := httptest.NewRecorder()
+	router.ServeHTTP(claimRecorder, claimRequest)
+	if claimRecorder.Code != http.StatusOK {
+		t.Fatalf("expected claim status 200, got %d: %s", claimRecorder.Code, claimRecorder.Body.String())
+	}
+
+	probeRequest := httptest.NewRequest(http.MethodPost, "/api/environments/env-probe-task/remote-probe", nil)
+	probeRecorder := httptest.NewRecorder()
+	router.ServeHTTP(probeRecorder, probeRequest)
+	if probeRecorder.Code != http.StatusOK {
+		t.Fatalf("expected remote probe status 200, got %d: %s", probeRecorder.Code, probeRecorder.Body.String())
+	}
+	var probePayload struct {
+		Data struct {
+			TaskID        string `json:"taskId"`
+			AgentID       string `json:"agentId"`
+			EnvironmentID string `json:"environmentId"`
+			Status        string `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(probeRecorder.Body.Bytes(), &probePayload); err != nil {
+		t.Fatalf("decode probe response: %v", err)
+	}
+	if probePayload.Data.AgentID != "agent-probe-x" || probePayload.Data.EnvironmentID != "env-probe-task" || probePayload.Data.Status != "PENDING" {
+		t.Fatalf("unexpected probe response: %+v", probePayload.Data)
+	}
+
+	lease := leaseAgentTask(t, router, `{"agentId":"agent-probe-x","environmentId":"env-probe-task","maxTasks":1,"leaseSeconds":300}`)
+	if !lease.Data.Leased || lease.Data.Task == nil {
+		t.Fatalf("expected remote probe task lease, got %+v", lease.Data)
+	}
+	if lease.Data.Task.ID != probePayload.Data.TaskID || lease.Data.Task.Type != "probe" || lease.Data.Task.Action != "remote_resource_probe" {
+		t.Fatalf("unexpected probe task: %+v", lease.Data.Task)
+	}
+	if lease.Data.Task.Payload["harborProjects"] != "project-x" {
+		t.Fatalf("unexpected probe payload: %+v", lease.Data.Task.Payload)
+	}
+	if _, ok := lease.Data.Task.Payload["jenkinsViews"]; ok {
+		t.Fatalf("unexpected probe payload: %+v", lease.Data.Task.Payload)
+	}
+}
+
+func TestEnvironmentRemoteProbeResultUpdatesEnvironmentStatus(t *testing.T) {
+	router := newTestRouter()
+	createProjectProbeEnvironment(t, router, "env-probe-result", "probe-result", "project-x")
+	agentToken := registerTestAgent(t, router, "agent-probe-result-x", "env-probe-result")
+
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-probe-result-x/heartbeat", strings.NewReader(`{"version":"v1-remote-probe","capabilities":["remote-probe","kubectl","http-check"]}`))
+	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentToken)
+	heartbeatRecorder := httptest.NewRecorder()
+	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
+	if heartbeatRecorder.Code != http.StatusOK {
+		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	}
+
+	claimRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-probe-result-x/claim", strings.NewReader(`{"environmentId":"env-probe-result"}`))
+	claimRequest.Header.Set("Content-Type", "application/json")
+	claimRecorder := httptest.NewRecorder()
+	router.ServeHTTP(claimRecorder, claimRequest)
+	if claimRecorder.Code != http.StatusOK {
+		t.Fatalf("expected claim status 200, got %d: %s", claimRecorder.Code, claimRecorder.Body.String())
+	}
+
+	probeRequest := httptest.NewRequest(http.MethodPost, "/api/environments/env-probe-result/remote-probe", nil)
+	probeRecorder := httptest.NewRecorder()
+	router.ServeHTTP(probeRecorder, probeRequest)
+	if probeRecorder.Code != http.StatusOK {
+		t.Fatalf("expected remote probe status 200, got %d: %s", probeRecorder.Code, probeRecorder.Body.String())
+	}
+	var probePayload struct {
+		Data struct {
+			TaskID string `json:"taskId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(probeRecorder.Body.Bytes(), &probePayload); err != nil {
+		t.Fatalf("decode probe response: %v", err)
+	}
+
+	lease := leaseAgentTask(t, router, `{"agentId":"agent-probe-result-x","environmentId":"env-probe-result","maxTasks":1,"leaseSeconds":300}`)
+	if !lease.Data.Leased || lease.Data.Task == nil || lease.Data.Task.ID != probePayload.Data.TaskID {
+		t.Fatalf("expected remote probe task lease, got %+v", lease.Data)
+	}
+
+	resultMessage := `{"status":"DEGRADED","checks":[{"component":"Harbor 镜像项目","status":"DEGRADED","message":"项目环境 Harbor 无法访问 project-x","checkedAt":"2026-06-22T12:00:00+08:00"}]}`
+	resultRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+probePayload.Data.TaskID+"/result", strings.NewReader(`{"status":"SUCCESS","message":`+strconv.Quote(resultMessage)+`}`))
+	resultRequest.Header.Set("Content-Type", "application/json")
+	resultRequest.Header.Set("Authorization", "Bearer "+agentToken)
+	resultRecorder := httptest.NewRecorder()
+	router.ServeHTTP(resultRecorder, resultRequest)
+	if resultRecorder.Code != http.StatusOK {
+		t.Fatalf("expected result report status 200, got %d: %s", resultRecorder.Code, resultRecorder.Body.String())
+	}
+
+	environmentRequest := httptest.NewRequest(http.MethodGet, "/api/environments/env-probe-result", nil)
+	environmentRecorder := httptest.NewRecorder()
+	router.ServeHTTP(environmentRecorder, environmentRequest)
+	if environmentRecorder.Code != http.StatusOK {
+		t.Fatalf("expected environment detail status 200, got %d: %s", environmentRecorder.Code, environmentRecorder.Body.String())
+	}
+	var environmentPayload struct {
+		Data domain.Environment `json:"data"`
+	}
+	if err := json.Unmarshal(environmentRecorder.Body.Bytes(), &environmentPayload); err != nil {
+		t.Fatalf("decode environment response: %v", err)
+	}
+	if environmentPayload.Data.Status != "DEGRADED" {
+		t.Fatalf("expected environment status DEGRADED, got %+v", environmentPayload.Data)
+	}
+
+	statusRequest := httptest.NewRequest(http.MethodGet, "/api/agent-tasks/"+probePayload.Data.TaskID+"/status", nil)
+	statusRecorder := httptest.NewRecorder()
+	router.ServeHTTP(statusRecorder, statusRequest)
+	if statusRecorder.Code != http.StatusOK {
+		t.Fatalf("expected task status 200, got %d: %s", statusRecorder.Code, statusRecorder.Body.String())
+	}
+	var statusPayload struct {
+		Data struct {
+			Probe remoteProbeResult `json:"probe"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(statusRecorder.Body.Bytes(), &statusPayload); err != nil {
+		t.Fatalf("decode task status response: %v", err)
+	}
+	if statusPayload.Data.Probe.Status != "DEGRADED" || len(statusPayload.Data.Probe.Checks) != 1 {
+		t.Fatalf("expected structured remote probe result, got %+v", statusPayload.Data.Probe)
+	}
+	if statusPayload.Data.Probe.Checks[0].Message != "项目环境 Harbor 无法访问 project-x" {
+		t.Fatalf("unexpected probe check: %+v", statusPayload.Data.Probe.Checks[0])
+	}
 }
 
 func TestReleaseFailureActionsUpdateAgentTaskStatus(t *testing.T) {
@@ -877,14 +1189,14 @@ func TestEnvironmentCheckUsesCachedScopesForRemoteEnvironment(t *testing.T) {
 	if payload.Data.Status != "HEALTHY" {
 		t.Fatalf("expected cached remote check healthy, got %+v", payload.Data)
 	}
-	if len(payload.Data.Checks) != 2 {
-		t.Fatalf("expected remote harbor/jenkins checks only, got %+v", payload.Data.Checks)
+	if len(payload.Data.Checks) != 1 {
+		t.Fatalf("expected remote harbor cached check only, got %+v", payload.Data.Checks)
 	}
 }
 
-func TestEnvironmentCheckMarksMissingRemoteJenkinsViewDegraded(t *testing.T) {
+func TestEnvironmentCheckIgnoresRemoteJenkinsView(t *testing.T) {
 	router := newTestRouter()
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-missing-jenkins-view","name":"缺失 Jenkins 视图环境","code":"missing-jenkins-view","type":"PROJECT","networkMode":"AGENT","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"view-not-found","status":"HEALTHY"}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(`{"id":"env-missing-jenkins-view","name":"缺失 Jenkins 视图环境","code":"missing-jenkins-view","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"project-x","registryId":"harbor-local-prod","registryProject":"project-x","jenkinsId":"jenkins-local-prod","jenkinsView":"view-not-found","status":"HEALTHY"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -907,8 +1219,8 @@ func TestEnvironmentCheckMarksMissingRemoteJenkinsViewDegraded(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode check response: %v", err)
 	}
-	if payload.Data.Status != "DEGRADED" {
-		t.Fatalf("expected missing jenkins view to degrade remote environment, got %+v", payload.Data)
+	if payload.Data.Status != "HEALTHY" {
+		t.Fatalf("expected remote jenkins view to be ignored by V1 project environment checks, got %+v", payload.Data)
 	}
 }
 
@@ -1317,11 +1629,14 @@ type leaseResponsePayload struct {
 		LeaseID string `json:"leaseId"`
 		Message string `json:"message"`
 		Task    *struct {
-			ID            string `json:"id"`
-			Status        string `json:"status"`
-			AgentID       string `json:"agentId"`
-			EnvironmentID string `json:"environmentId"`
-			LeaseID       string `json:"leaseId"`
+			ID            string            `json:"id"`
+			Type          string            `json:"type"`
+			Action        string            `json:"action"`
+			Status        string            `json:"status"`
+			AgentID       string            `json:"agentId"`
+			EnvironmentID string            `json:"environmentId"`
+			LeaseID       string            `json:"leaseId"`
+			Payload       map[string]string `json:"payload"`
 		} `json:"task"`
 	} `json:"data"`
 }
@@ -1351,8 +1666,10 @@ func createReleaseAgentTask(t *testing.T, router http.Handler) string {
 
 func heartbeatAgent(t *testing.T, router http.Handler, agentID string) {
 	t.Helper()
+	agentToken := agentTokenForTest(t, router, agentID, "env-project-x-prod")
 	request := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/heartbeat", strings.NewReader(`{"version":"v1-mock","capabilities":["mock-executor","image-sync","kubectl","http-check"]}`))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+agentToken)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -1364,6 +1681,7 @@ func leaseAgentTask(t *testing.T, router http.Handler, body string) leaseRespons
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+agentTokenForLeaseBody(t, router, body))
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -1376,6 +1694,84 @@ func leaseAgentTask(t *testing.T, router http.Handler, body string) leaseRespons
 	return payload
 }
 
+func agentTokenForLeaseBody(t *testing.T, router http.Handler, body string) string {
+	t.Helper()
+	var request struct {
+		AgentID       string `json:"agentId"`
+		EnvironmentID string `json:"environmentId"`
+	}
+	if err := json.Unmarshal([]byte(body), &request); err != nil {
+		t.Fatalf("decode lease body: %v", err)
+	}
+	return agentTokenForTest(t, router, request.AgentID, strings.TrimSpace(request.EnvironmentID))
+}
+
+func agentTokenForTest(t *testing.T, router http.Handler, agentID string, environmentID string) string {
+	t.Helper()
+	if value, ok := testAgentTokens.Load(agentID); ok {
+		return value.(string)
+	}
+	return registerTestAgent(t, router, agentID, environmentID)
+}
+
+func registerTestAgent(t *testing.T, router http.Handler, agentID string, environmentID string) string {
+	t.Helper()
+	if value, ok := testAgentTokens.Load(agentID); ok {
+		return value.(string)
+	}
+	createTokenRequest := httptest.NewRequest(http.MethodPost, "/api/agents/register-token", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","ttlMinutes":10}`))
+	createTokenRequest.Header.Set("Content-Type", "application/json")
+	createTokenRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createTokenRecorder, createTokenRequest)
+	if createTokenRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected register token status 201, got %d: %s", createTokenRecorder.Code, createTokenRecorder.Body.String())
+	}
+	var tokenPayload struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createTokenRecorder.Body.Bytes(), &tokenPayload); err != nil {
+		t.Fatalf("decode register token response: %v", err)
+	}
+	if tokenPayload.Data.Token == "" {
+		t.Fatal("expected register token")
+	}
+
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/agents/register", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","registerToken":"`+tokenPayload.Data.Token+`","version":"v1-test","capabilities":["mock-executor","image-sync","kubectl","http-check"]}`))
+	registerRequest.Header.Set("Content-Type", "application/json")
+	registerRecorder := httptest.NewRecorder()
+	router.ServeHTTP(registerRecorder, registerRequest)
+	if registerRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected agent register status 201, got %d: %s", registerRecorder.Code, registerRecorder.Body.String())
+	}
+	var registerPayload struct {
+		Data struct {
+			AgentToken string `json:"agentToken"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(registerRecorder.Body.Bytes(), &registerPayload); err != nil {
+		t.Fatalf("decode agent register response: %v", err)
+	}
+	if registerPayload.Data.AgentToken == "" {
+		t.Fatal("expected agent runtime token")
+	}
+	testAgentTokens.Store(agentID, registerPayload.Data.AgentToken)
+	return registerPayload.Data.AgentToken
+}
+
+func createProjectProbeEnvironment(t *testing.T, router http.Handler, id string, code string, scope string) {
+	t.Helper()
+	body := `{"id":"` + id + `","name":"项目探测测试环境","code":"` + code + `","type":"PROJECT","networkMode":"AGENT","clusterId":"k8s-local-prod","namespace":"` + scope + `","registryId":"harbor-local-prod","registryProject":"` + scope + `","status":"HEALTHY"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/environments", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected create probe environment status 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func newTestRouter() http.Handler {
 	return newTestRouterWithRepository(newTestRepository())
 }
@@ -1386,7 +1782,18 @@ func newTestRepository() *repository.MockRepository {
 		panic(err)
 	}
 	seedTestEnvironments(repo)
+	seedTestAgentTokens()
 	return repo
+}
+
+func seedTestAgentTokens() {
+	testAgentTokens.Range(func(key any, _ any) bool {
+		testAgentTokens.Delete(key)
+		return true
+	})
+	testAgentTokens.Store("agent-project-x", "agent-project-x-test-token")
+	testAgentTokens.Store("agent-project-y", "agent-project-y-test-token")
+	testAgentTokens.Store("agent-project-z", "agent-project-z-test-token")
 }
 
 func newTestRouterWithRepository(repo repository.Store) http.Handler {
@@ -1458,10 +1865,10 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 			Code:            "project-x-prod",
 			Type:            "PROJECT",
 			NetworkMode:     "AGENT",
+			ClusterID:       "k8s-local-prod",
+			Namespace:       "project-x",
 			RegistryID:      "harbor-local-prod",
 			RegistryProject: "project-x",
-			JenkinsID:       "jenkins-local-prod",
-			JenkinsView:     "project-x",
 			Status:          "HEALTHY",
 		},
 		{
@@ -1470,10 +1877,10 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 			Code:            "project-z-prod",
 			Type:            "PROJECT",
 			NetworkMode:     "AGENT",
+			ClusterID:       "k8s-local-prod",
+			Namespace:       "project-z",
 			RegistryID:      "harbor-local-prod",
 			RegistryProject: "project-z",
-			JenkinsID:       "jenkins-local-prod",
-			JenkinsView:     "project-z",
 			Status:          "UNKNOWN",
 		},
 	}

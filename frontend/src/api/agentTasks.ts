@@ -11,6 +11,20 @@ export type AgentTaskStatus = {
     updatedAt?: string
   }
   logs?: string[]
+  probe?: AgentTaskProbeResult
+}
+
+export type AgentTaskProbeResult = {
+  status?: string
+  checks?: AgentTaskProbeCheck[]
+}
+
+export type AgentTaskProbeCheck = {
+  component?: string
+  name?: string
+  status: string
+  message: string
+  checkedAt?: string
 }
 
 function resolveMockTaskType(taskId: string) {

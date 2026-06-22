@@ -82,7 +82,7 @@ Response data：
 
 ## 基础资源
 
-K8s、Harbor、Jenkins 是独立平台资源。环境只关联资源 ID，并选择或填写环境级作用域：K8s namespace、Harbor project、Jenkins view。
+K8s、Harbor、Jenkins 是独立平台资源。本地环境关联资源 ID，并选择或填写环境级作用域：K8s namespace、Harbor project、Jenkins view。项目环境 V1 只通过 Agent 关联和验证项目 K8s namespace、项目 Harbor project，不绑定 Jenkins view。
 
 资源接口原则：
 
@@ -90,8 +90,8 @@ K8s、Harbor、Jenkins 是独立平台资源。环境只关联资源 ID，并选
 - 响应不返回明文 kubeconfig、密码或 token，只返回非敏感元数据、状态、最近检查信息和缓存列表。
 - 资源状态由系统测试连接或刷新探测维护，用户不能手工更新。
 - 刷新探测成功时更新缓存；失败时保留旧缓存并记录失败原因。
-- 基础资源管理中的 K8s、Harbor、Jenkins 由平台后端探测，用于本地环境关联。
-- 远程环境不关联平台维护的基础资源，远程 K8s/Harbor/Jenkins 状态由 Agent 后续上报。
+- 基础资源管理中的 K8s、Harbor、Jenkins 由平台后端探测，用于本地环境关联和后续本地构建来源。
+- 项目环境的 K8s/Harbor 状态由 Agent 后续上报；Jenkins 属于平台侧本地基础资源，Agent 不连接 Jenkins。
 
 ### POST /api/kubernetes-clusters
 
@@ -278,7 +278,6 @@ Request：
 ```json
 {
   "agentId": "agent-project-x-prod",
-  "environmentId": "env-project-x-prod",
   "ttlMinutes": 10
 }
 ```
@@ -287,15 +286,15 @@ Response data：
 
 ```json
 {
-  "token": "agt_env-project-x-prod_1781750628",
+  "token": "agtr_1781750628",
   "expiresAt": "2026-06-07T13:20:00+08:00",
-  "installCommand": "cat > agent.env <<'EOF'\nAGENT_ID=agent-project-x-prod\nAGENT_ENVIRONMENT_ID=env-project-x-prod\nPLATFORM_URL=http://platform.example.com:8080\nAGENT_TOKEN=agt_env-project-x-prod_1781750628\nAGENT_MODE=mock\nAGENT_HEALTH_PORT=18080\nAGENT_POLL_INTERVAL_SECONDS=5\nAGENT_HEARTBEAT_INTERVAL_SECONDS=15\nAGENT_HTTP_TIMEOUT_SECONDS=10\nAGENT_MAX_TASKS=1\nAGENT_CAPABILITIES=mock-executor,image-sync,kubectl,http-check\nEOF\n./ops-release-agent -f ./agent.env"
+  "installCommand": "cat > agent.env <<'EOF'\nAGENT_ID=agent-project-x-prod\nPLATFORM_URL=http://platform.example.com:8080\nAGENT_REGISTER_TOKEN=agtr_1781750628\nAGENT_MODE=remote-probe\nAGENT_HEALTH_PORT=18080\nAGENT_POLL_INTERVAL_SECONDS=5\nAGENT_HEARTBEAT_INTERVAL_SECONDS=15\nAGENT_HTTP_TIMEOUT_SECONDS=10\nAGENT_MAX_TASKS=1\nAGENT_CAPABILITIES=remote-probe,kubectl,http-check\nAGENT_KUBECONFIG=\nAGENT_HARBOR_URL=\nAGENT_HARBOR_USERNAME=\nAGENT_HARBOR_PASSWORD=\nAGENT_HARBOR_INSECURE_SKIP_TLS_VERIFY=false\nEOF\n./ops-release-agent -f ./agent.env"
 }
 ```
 
 ### POST /api/agents/{id}/heartbeat
 
-Agent 上报心跳。V1 mock 阶段用于把 Agent 标记为在线，并刷新版本、能力和最近心跳时间。
+Agent 上报心跳。V1 必须校验首次注册后签发的长期 Agent token，用于把 Agent 标记为在线，并刷新版本、能力和最近心跳时间。
 
 Request：
 

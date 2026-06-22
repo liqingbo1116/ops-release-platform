@@ -96,6 +96,7 @@ type Agent struct {
 	EnvironmentName string   `json:"environmentName"`
 	Version         string   `json:"version"`
 	Status          string   `json:"status"`
+	ClaimStatus     string   `json:"claimStatus"`
 	Capabilities    []string `json:"capabilities"`
 	LastHeartbeatAt string   `json:"lastHeartbeatAt"`
 	CurrentTaskID   *string  `json:"currentTaskId"`

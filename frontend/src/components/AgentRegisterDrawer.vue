@@ -5,13 +5,11 @@
         <el-form-item label="Agent ID">
           <el-input v-model="agentId" :disabled="loading" placeholder="agent-<project>-<env>" />
         </el-form-item>
-        <el-form-item label="绑定环境">
-          <el-select v-model="environmentId" style="width: 100%" :disabled="loading">
-            <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id" />
-          </el-select>
+        <el-form-item label="平台地址">
+          <el-input :model-value="platformUrl" readonly placeholder="生成后显示" />
         </el-form-item>
         <el-form-item label="注册 Token">
-          <el-input :model-value="token" readonly placeholder="选择环境后生成 Token" />
+          <el-input :model-value="token" readonly placeholder="生成后显示一次性 Token" />
         </el-form-item>
         <el-form-item label="过期时间">
           <el-input :model-value="expiresAtText" readonly placeholder="生成后显示" />
@@ -27,62 +25,42 @@
         </el-form-item>
       </el-form>
       <el-button type="primary" :disabled="!installCommand" @click="copyInstallCommand">复制注册指令</el-button>
-      <el-button :loading="loading" :disabled="!environmentId" @click="generateToken">重新生成 Token</el-button>
+      <el-button :loading="loading" @click="generateToken">生成 Token</el-button>
+      <el-alert
+        type="info"
+        :closable="false"
+        title="Agent 可以先注册为待认领；待认领 Agent 只展示在线状态，不能执行发布或部署任务。"
+      />
     </div>
   </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { createAgentRegisterToken } from '@/api/agents'
 import { formatDateTime } from '@/utils/format'
 
-type Environment = {
-  id: string
-  name: string
-}
-
 const visible = defineModel<boolean>('visible', { required: true })
-const props = defineProps<{
-  environments: Environment[]
-}>()
 
-const environmentId = ref('')
 const agentId = ref('')
 const token = ref('')
+const platformUrl = ref('')
 const expiresAt = ref('')
 const installCommand = ref('')
 const loading = ref(false)
 
 const expiresAtText = computed(() => (expiresAt.value ? formatDateTime(expiresAt.value) : ''))
 
-watch(
-  () => props.environments,
-  (items) => {
-    if (!environmentId.value && items.length > 0) {
-      environmentId.value = items[0].id
-      agentId.value = defaultAgentId(items[0].id)
-    }
-  },
-  { immediate: true },
-)
-
-watch(environmentId, () => {
-  agentId.value = defaultAgentId(environmentId.value)
-  token.value = ''
-  expiresAt.value = ''
-  installCommand.value = ''
-})
-
 async function generateToken() {
-  if (!environmentId.value || !agentId.value.trim()) {
-    ElMessage.warning('请完整填写 Agent ID 和绑定环境')
+  if (!agentId.value.trim()) {
+    ElMessage.warning('请填写 Agent ID')
     return
   }
   loading.value = true
   try {
-    const result = await createAgentRegisterToken(environmentId.value, agentId.value.trim())
+    const result = await createAgentRegisterToken(agentId.value.trim())
+    platformUrl.value = result.platformUrl
     token.value = result.token
     expiresAt.value = result.expiresAt
     installCommand.value = result.installCommand
@@ -102,9 +80,5 @@ async function copyInstallCommand() {
   } catch {
     ElMessage.warning('复制失败，请手动复制')
   }
-}
-
-function defaultAgentId(id: string) {
-  return id ? `agent-${id.replace(/^env-/, '')}` : ''
 }
 </script>

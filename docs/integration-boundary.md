@@ -1,12 +1,12 @@
 ﻿# 第三方系统集成边界
 
-MVP 原则：先跑通平台业务闭环，所有外部系统先通过 adapter 层隔离。开发期默认使用 mock adapter，后续替换为真实 adapter。
+V1 原则：按阶段接入真实数据和真实外部系统。历史 mock adapter 只作为早期原型背景，不作为当前阶段完成标准。
 
 | 系统 | V1 策略 | 说明 |
 |---|---|---|
-| Jenkins | Mock first | 保留触发 job、查询构建状态接口 |
-| Harbor | Mock first | 保留查询镜像、同步镜像、校验 digest 接口 |
-| Kubernetes | Mock first | 保留采集 workload、更新 image、rollout 状态接口 |
+| Jenkins | 平台侧本地集成 | 本地 Jenkins 由平台后端直连，用于后续构建和版本来源；项目 Agent 不连接 Jenkins |
+| Harbor | 平台侧本地 + 项目 Agent | 本地 Harbor 由平台后端直连；项目 Harbor 由 Agent 探测和后续执行 |
+| Kubernetes | 本地直连 + 项目 Agent | 本地 K8s 由平台后端直连；项目 K8s 由 Agent 探测和后续执行 |
 | GitLab | 暂不真实写入 | 本地 GitOps 场景后续接入 |
 | ArgoCD | 暂不真实接入 | 本地环境后续可触发 sync |
 | Nacos | 只展示状态 | V1 不替代配置中心 |
@@ -36,7 +36,7 @@ type JenkinsAdapter interface {
 
 ## Agent 通信边界
 
-环境分为本地环境与项目环境。本地环境按平台侧可连通处理，可以由平台后端通过 adapter 直接访问本地 Jenkins、Harbor、Kubernetes 或 mock adapter，不需要 Agent。项目环境按平台侧不可连通处理，必须通过 Agent 接入；平台不得依赖访问项目环境 Agent endpoint，也不得向 Agent 主动推送任务。
+环境分为本地环境与项目环境。本地环境按平台侧可连通处理，可以由平台后端通过 adapter 直接访问本地 Jenkins、Harbor、Kubernetes，不需要 Agent。项目环境按平台侧不可连通处理，必须通过 Agent 接入项目 K8s/Harbor；平台不得依赖访问项目环境 Agent endpoint，也不得向 Agent 主动推送任务。Jenkins 属于平台侧本地基础资源，不属于项目 Agent 探测范围。
 
 项目环境由 Agent 主动出站访问平台 API，平台只负责登记待执行任务、保存状态和展示结果。Agent 负责主动领取/租约获取任务，并主动上报心跳、服务列表、镜像版本、步骤状态、日志和最终结果。
 
@@ -61,4 +61,4 @@ V1 Agent 协议约束：
 - 平台支持 `在线 / 待认领` Agent。待认领 Agent 只能显示未归属探测摘要，不能进入正式产品/服务视图，也不能执行发布/部署任务。
 - Agent 当前只支持 `AGENT_MAX_TASKS=1`，平台同一时间只向同一 Agent 下发一个运行中租约任务。
 - 平台会回收过期租约并允许任务重新租约，避免 Agent 进程退出或网络中断后任务永久停留在运行态。
-- 如需用户在项目环境部署 Agent、修改配置、开放网络或准备 K8s/Harbor/Jenkins 访问，必须及时说明具体配置、执行命令和成功信号。
+- 如需用户在项目环境部署 Agent、修改配置、开放网络或准备项目 K8s/Harbor 访问，必须及时说明具体配置、执行命令和成功信号。
