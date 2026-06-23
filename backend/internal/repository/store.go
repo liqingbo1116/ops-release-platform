@@ -51,7 +51,7 @@ type Store interface {
 	GetBaselineDetail(id string) (domain.BaselineDetail, bool)
 	LockBaseline(id string) (domain.BaselineDetail, bool)
 	GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool)
-	ListReleaseSourceServices(query string) []domain.ReleaseSourceService
+	ListReleaseSourceServices(productID string, query string) []domain.ReleaseSourceService
 	ListManagedServices(productID string) []domain.ManagedService
 	UpsertManagedServices(productID string, services []domain.DiscoveredService) ([]domain.ManagedService, error)
 	RemoveManagedServices(productID string, serviceIDs []string) ([]domain.ManagedService, error)

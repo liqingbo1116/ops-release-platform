@@ -230,15 +230,21 @@ type ReleaseImageTag struct {
 }
 
 type ReleaseSourceService struct {
-	ServiceID       string            `json:"serviceId"`
-	ServiceName     string            `json:"serviceName"`
-	Namespace       string            `json:"namespace"`
-	WorkloadName    string            `json:"workloadName"`
-	WorkloadType    string            `json:"workloadType"`
-	ImageRepository string            `json:"imageRepository"`
-	Tags            []ReleaseImageTag `json:"tags"`
-	Publishable     bool              `json:"publishable"`
-	Message         string            `json:"message,omitempty"`
+	ServiceID                string            `json:"serviceId"`
+	ServiceName              string            `json:"serviceName"`
+	Namespace                string            `json:"namespace"`
+	WorkloadName             string            `json:"workloadName"`
+	WorkloadType             string            `json:"workloadType"`
+	ImageRegistry            string            `json:"imageRegistry"`
+	ImageProject             string            `json:"imageProject"`
+	ImageRepository          string            `json:"imageRepository"`
+	ImageTag                 string            `json:"imageTag"`
+	ImageSource              string            `json:"imageSource"`
+	PrivateRegistryHost      string            `json:"privateRegistryHost,omitempty"`
+	PrivateRegistryConfirmed bool              `json:"privateRegistryConfirmed"`
+	Tags                     []ReleaseImageTag `json:"tags"`
+	Publishable              bool              `json:"publishable"`
+	Message                  string            `json:"message,omitempty"`
 }
 
 type ManagedService struct {

@@ -45,7 +45,13 @@ export type ReleaseSourceService = {
   namespace: string
   workloadName: string
   workloadType: string
+  imageRegistry: string
+  imageProject: string
   imageRepository: string
+  imageTag: string
+  imageSource: string
+  privateRegistryHost?: string
+  privateRegistryConfirmed: boolean
   tags: ReleaseImageTag[]
   publishable: boolean
   message?: string

@@ -1907,25 +1907,44 @@ func (h *Handler) ListReleaseSources(c *gin.Context) {
 		return
 	}
 
-	services := h.repo.ListReleaseSourceServices(c.Query("keyword"))
+	services := h.repo.ListReleaseSourceServices(environmentID, c.Query("keyword"))
 	for index := range services {
+		if services[index].ImageSource != "PRIVATE" {
+			services[index].Tags = []domain.ReleaseImageTag{}
+			services[index].Publishable = false
+			switch services[index].ImageSource {
+			case "UNMATCHED_PRIVATE":
+				services[index].Message = "私有镜像项目未纳管到当前产品"
+			case "EXTERNAL":
+				services[index].Message = "公共或外部镜像不作为 V1 发版来源"
+			default:
+				services[index].Message = "请先确认当前产品的私有镜像 registry"
+			}
+			continue
+		}
+		if !services[index].PrivateRegistryConfirmed {
+			services[index].Tags = []domain.ReleaseImageTag{}
+			services[index].Publishable = false
+			services[index].Message = "请先确认当前产品的私有镜像 registry"
+			continue
+		}
 		if strings.TrimSpace(services[index].ImageRepository) == "" {
 			services[index].Tags = []domain.ReleaseImageTag{}
 			services[index].Publishable = false
-			services[index].Message = "image repository is not configured"
+			services[index].Message = "镜像仓库路径缺失"
 			continue
 		}
 		tags, err := h.integrations.Registry.ListImageTags(c.Request.Context(), environment, services[index].ImageRepository)
 		if err != nil {
 			services[index].Tags = []domain.ReleaseImageTag{}
 			services[index].Publishable = false
-			services[index].Message = "registry image tags unavailable"
+			services[index].Message = "Harbor 镜像 tag 读取失败"
 			continue
 		}
 		services[index].Tags = toReleaseImageTags(tags)
 		services[index].Publishable = len(services[index].Tags) > 0
 		if !services[index].Publishable {
-			services[index].Message = "no image tags found"
+			services[index].Message = "Harbor 未发现可用镜像 tag"
 		}
 	}
 

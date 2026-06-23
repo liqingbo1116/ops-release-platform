@@ -899,9 +899,9 @@ func (s *DatabaseStore) GetDiffResult(id string, targetEnvironmentID string) (do
 	return s.mock.GetDiffResult(id, targetEnvironmentID)
 }
 
-func (s *DatabaseStore) ListReleaseSourceServices(query string) []domain.ReleaseSourceService {
+func (s *DatabaseStore) ListReleaseSourceServices(productID string, query string) []domain.ReleaseSourceService {
 	var models []ServiceModel
-	db := s.db.Order("name asc")
+	db := s.db.Where("product_id = ?", strings.TrimSpace(productID)).Order("name asc")
 	if trimmed := strings.TrimSpace(query); trimmed != "" {
 		like := "%" + trimmed + "%"
 		db = db.Where("id ILIKE ? OR name ILIKE ? OR namespace ILIKE ? OR workload_name ILIKE ? OR image_repository ILIKE ?", like, like, like, like, like)
@@ -1415,14 +1415,20 @@ func runtimeStatusHasData(status domain.RuntimeStatus) bool {
 func toDomainReleaseSourceService(model ServiceModel) domain.ReleaseSourceService {
 	repository := fallbackString(model.ImageRepository, strings.TrimSuffix(model.Image, ":"+model.ImageTag))
 	return domain.ReleaseSourceService{
-		ServiceID:       model.ID,
-		ServiceName:     model.Name,
-		Namespace:       model.Namespace,
-		WorkloadName:    model.WorkloadName,
-		WorkloadType:    model.WorkloadType,
-		ImageRepository: repository,
-		Tags:            []domain.ReleaseImageTag{},
-		Publishable:     false,
+		ServiceID:                model.ID,
+		ServiceName:              model.Name,
+		Namespace:                model.Namespace,
+		WorkloadName:             model.WorkloadName,
+		WorkloadType:             model.WorkloadType,
+		ImageRegistry:            model.ImageRegistry,
+		ImageProject:             model.ImageProject,
+		ImageRepository:          repository,
+		ImageTag:                 model.ImageTag,
+		ImageSource:              fallbackString(model.ImageSource, "UNKNOWN"),
+		PrivateRegistryHost:      model.PrivateRegistryHost,
+		PrivateRegistryConfirmed: model.PrivateRegistryConfirmed,
+		Tags:                     []domain.ReleaseImageTag{},
+		Publishable:              false,
 	}
 }
 

@@ -29,6 +29,11 @@
         <div class="metric-value">{{ unmanagedServices.length }}</div>
         <div class="metric-foot">可多次选择并纳管</div>
       </el-card>
+      <el-card shadow="never" class="metric-card">
+        <div class="metric-label">可发版服务</div>
+        <div class="metric-value">{{ publishableServiceCount }}</div>
+        <div class="metric-foot">来自已确认私有 Harbor tag</div>
+      </el-card>
     </div>
 
     <el-card shadow="never">
@@ -112,6 +117,18 @@
                 </el-tooltip>
                 <span>{{ row.imageProject || '-' }} / {{ row.imageTag || '无 tag' }}</span>
               </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="版本来源" min-width="220">
+          <template #default="{ row }">
+            <div class="version-source-cell">
+              <el-tooltip :content="versionSourceTip(row)" placement="top">
+                <el-tag size="small" :type="versionSourceTagType(row)" effect="light">
+                  {{ versionSourceLabel(row) }}
+                </el-tag>
+              </el-tooltip>
+              <span>{{ versionSourceMeta(row) }}</span>
             </div>
           </template>
         </el-table-column>
@@ -206,6 +223,7 @@ import {
   type EnvironmentInfo,
   type ProductService,
 } from '@/api/environments'
+import { listReleaseSources, type ReleaseSourceService } from '@/api/releases'
 
 const route = useRoute()
 const router = useRouter()
@@ -218,6 +236,7 @@ const errorMessage = ref('')
 const product = ref<EnvironmentInfo | null>(null)
 const managedServices = ref<ProductService[]>([])
 const discoveredServices = ref<DiscoveredProductService[]>([])
+const releaseSourceServices = ref<ReleaseSourceService[]>([])
 const selectedManagedServices = ref<ProductService[]>([])
 const selectedDiscoveredServices = ref<DiscoveredProductService[]>([])
 const selectedRegistryHost = ref('')
@@ -231,6 +250,14 @@ const productTitle = computed(() => {
   return `${product.value.name} / ${product.value.code} / ${sourceText}`
 })
 const unmanagedServices = computed(() => discoveredServices.value.filter((item) => !item.managed))
+const releaseSourceByServiceId = computed(() => {
+  const services = new Map<string, ReleaseSourceService>()
+  for (const service of releaseSourceServices.value) {
+    services.set(service.serviceId, service)
+  }
+  return services
+})
+const publishableServiceCount = computed(() => releaseSourceServices.value.filter((item) => item.publishable).length)
 const registryCandidates = computed(() => {
   const candidates = new Set<string>()
   for (const item of managedServices.value) {
@@ -269,6 +296,7 @@ async function loadPageData() {
     product.value = products.find((item) => item.id === productId.value) ?? null
     managedServices.value = managedItems
     discoveredServices.value = discoveredItems
+    releaseSourceServices.value = await listProductReleaseSources()
     if (!selectedRegistryHost.value || !registryCandidates.value.includes(selectedRegistryHost.value)) {
       selectedRegistryHost.value = registryCandidates.value[0] ?? ''
     }
@@ -278,9 +306,36 @@ async function loadPageData() {
   } catch (error) {
     managedServices.value = []
     discoveredServices.value = []
+    releaseSourceServices.value = []
     errorMessage.value = error instanceof Error ? error.message : '产品服务加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function listProductReleaseSources() {
+  if (managedServices.value.length === 0) return []
+  try {
+    const result = await listReleaseSources(productId.value)
+    return result.services
+  } catch {
+    return managedServices.value.map((service) => ({
+      serviceId: service.id,
+      serviceName: service.name,
+      namespace: service.namespace,
+      workloadName: service.workloadName,
+      workloadType: service.workloadType,
+      imageRegistry: service.imageRegistry,
+      imageProject: service.imageProject,
+      imageRepository: service.imageRepository,
+      imageTag: service.imageTag,
+      imageSource: service.imageSource,
+      privateRegistryHost: service.privateRegistryHost,
+      privateRegistryConfirmed: Boolean(service.privateRegistryConfirmed),
+      tags: [],
+      publishable: false,
+      message: '版本来源读取失败',
+    }))
   }
 }
 
@@ -410,6 +465,40 @@ function imageSourceTagType(source = ''): '' | 'success' | 'info' | 'warning' | 
   return 'info'
 }
 
+function releaseSourceOf(row: ProductService) {
+  return releaseSourceByServiceId.value.get(row.id)
+}
+
+function versionSourceLabel(row: ProductService) {
+  const source = releaseSourceOf(row)
+  if (source?.publishable) return '可发版'
+  if (source?.message) return '不可发版'
+  return '待确认'
+}
+
+function versionSourceTip(row: ProductService) {
+  const source = releaseSourceOf(row)
+  if (!source) return '版本来源尚未读取'
+  if (source.publishable) return `Harbor 已发现 ${source.tags.length} 个镜像 tag`
+  return source.message || '请先确认私有镜像 registry 与 Harbor project'
+}
+
+function versionSourceMeta(row: ProductService) {
+  const source = releaseSourceOf(row)
+  if (!source) return '未读取版本来源'
+  if (source.publishable) {
+    return `当前 ${source.imageTag || '无 tag'} / 可选 ${source.tags.length} 个 tag`
+  }
+  return source.message || '版本来源未就绪'
+}
+
+function versionSourceTagType(row: ProductService): '' | 'success' | 'info' | 'warning' | 'danger' | 'primary' {
+  const source = releaseSourceOf(row)
+  if (source?.publishable) return 'success'
+  if (source?.message) return 'warning'
+  return 'info'
+}
+
 onMounted(loadPageData)
 </script>
 
@@ -443,6 +532,7 @@ onMounted(loadPageData)
 .panel-head span,
 .container-name,
 .image-meta span,
+.version-source-cell span,
 .service-actions span {
   color: #7a8294;
   font-size: 12px;
@@ -500,7 +590,8 @@ onMounted(loadPageData)
 
 .service-name-cell,
 .image-cell,
-.image-meta {
+.image-meta,
+.version-source-cell {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -512,7 +603,8 @@ onMounted(loadPageData)
 }
 
 .service-name-cell span,
-.image-cell span {
+.image-cell span,
+.version-source-cell span {
   color: #606a7b;
   font-size: 12px;
   line-height: 18px;

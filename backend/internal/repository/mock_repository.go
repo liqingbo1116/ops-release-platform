@@ -856,7 +856,7 @@ func (r *MockRepository) ListReleases(query string) []domain.ReleaseOrder {
 	})
 }
 
-func (r *MockRepository) ListReleaseSourceServices(query string) []domain.ReleaseSourceService {
+func (r *MockRepository) ListReleaseSourceServices(productID string, query string) []domain.ReleaseSourceService {
 	services := make([]domain.ReleaseSourceService, 0)
 	for _, detail := range r.baselineDetails {
 		for _, item := range detail.Items {
@@ -870,7 +870,9 @@ func (r *MockRepository) ListReleaseSourceServices(query string) []domain.Releas
 				Namespace:       item.Namespace,
 				WorkloadName:    item.WorkloadName,
 				WorkloadType:    item.WorkloadType,
+				ImageProject:    "library",
 				ImageRepository: "library/" + repository,
+				ImageSource:     "PRIVATE",
 				Publishable:     false,
 			})
 		}
