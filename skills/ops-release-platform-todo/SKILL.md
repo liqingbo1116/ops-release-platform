@@ -63,6 +63,11 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - 清理剩余 mock
 - Performance tuning, bundle optimization, warning cleanup, refactor-only cleanup, and UI polish should be scheduled after the mainline unless they block build, test, or feature delivery.
 - When the user says `继续` or `继续开发`, select the next unfinished item on this mainline before taking optimization work.
+- After service/version-source closure, the default next implementation order is:
+  - strengthen 产品服务列表 as the main release entry
+  - bind services to Jenkins Pipelines selected from real Jenkins view/job data
+  - create release orders from service-row release actions with V1 flow nodes
+  - implement Jenkins execution/log collection, local Harbor image confirmation, local K8s result confirmation, and remote Agent release execution in that order
 - Each phase must use real data before it is considered complete. If Jenkins, Harbor/Registry, Kubernetes, PostgreSQL, Redis, Agent runtime, or another required tool is needed to replace mock and is not ready, stop at that phase and record the blocker.
 
 ## V1 Ordered Path
@@ -73,7 +78,7 @@ Use this skill to keep project progress explicit and avoid losing the current de
 4. 项目管理: real project records such as 项目A and 项目B, used as the top-level business ownership boundary.
 5. 产品管理: real product records such as 数据中台 and 物联中台 under projects; current environment records are the V1 transition implementation for product deployment scope.
 6. 服务与版本来源: real services under products, consuming product deployment-scope namespace/project/view/job ranges and real version source configuration.
-7. 发布单创建: real projects, products, agents, services, version sources, and readiness checks.
+7. 发布单创建: release orders are created from product service rows, using real projects, products, agents, services, Jenkins Pipeline bindings, version sources, and readiness checks.
 8. 基线管理: real baseline list, detail, source metadata, and service snapshot source.
 9. 部署执行: real platform-direct or Agent execution against the target infrastructure.
 10. 发布详情 / 部署详情: persisted real task status, steps, logs, and results.
@@ -96,6 +101,17 @@ When reconciling TODO with implementation, prefer checking whether the user can 
 9. verify audit and environment-level permission boundaries after the above flow works
 
 If the user asks “现在到哪一步了” or “下一步做什么”, answer against this user-view path and the ordered V1 path together.
+
+## Current Release Flow Rule
+
+- Users should find services through `项目 -> 产品 -> 服务`, then release directly from the service row.
+- Release orders are execution records and flow detail carriers, not the primary UI for finding services.
+- Do not add manual service, image, or Pipeline entry to the release flow. Use platform-direct discovery, Agent-reported data, Harbor data, and Jenkins view/job data.
+- Jenkins execution is observed by the platform through build state and console logs. The platform does not pause inside the Jenkins script.
+- After Jenkins ends, local Harbor image tag confirmation is mandatory for both local and remote products.
+- Remote Agent release execution must not start until the local Harbor image tag is confirmed.
+- Local product final result must include Jenkins, local Harbor, and local Kubernetes confirmation.
+- Remote product final result must include Jenkins, local Harbor, remote Harbor, remote Kubernetes, and Agent execution confirmation.
 
 ## Rules
 

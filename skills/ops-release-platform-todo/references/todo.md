@@ -1,6 +1,6 @@
 # Ops Release Platform TODO
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 Always verify this file against `git status --short --branch`, `git log -1 --oneline`, and implementation docs before acting.
 
@@ -29,21 +29,23 @@ Always verify this file against `git status --short --branch`, `git log -1 --one
 
 Latest pushed milestone:
 
-- `0dd329d docs: align v1 project product roadmap`
+- `cda9605 完善服务版本来源展示`
 
 ## Current Local Work
 
 - Local uncommitted documentation update:
-  - Agent V1 registration, claim, binary deployment, and no-mock development rules are being fixed in docs and this TODO.
+  - V1 service release flow, product service list priority, Jenkins Pipeline binding, local Harbor confirmation, and local/remote release execution rules are being fixed in docs and this TODO.
 
 ## Current Step
 
-- V1 mainline is currently ready to continue Agent management and remote resource reporting.
+- V1 mainline is currently in 服务与版本来源 / 发布单创建前置收口.
 - Foundation status:
   - 基础资源管理: functionally complete for V1; keep only bug fixes and integration follow-up.
-  - 产品管理: functionally complete for the current V1 transition; the backend still reuses environment records to carry product deployment scope and resource bindings.
+  - Agent 管理与远程资源上报: functionally complete enough for the current V1 release-flow work; keep only bug fixes and integration follow-up unless remote release execution exposes gaps.
+  - 项目管理 / 产品管理: functionally complete for the current V1 transition; the backend still reuses environment records to carry product deployment scope and resource bindings.
+  - 服务与版本来源: initial service discovery, managed service list, image source classification, private registry confirmation, and release-source readiness display are implemented.
 - Next default step:
-  - Agent 管理与远程资源上报: verify real registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, unbound/pending-claim status, product binding, online status, task leasing, and remote K8s/Harbor/service-image data reported by Agent through the platform API.
+  - Strengthen the product service list as the main release entry, then implement service-to-Jenkins Pipeline binding, then create release orders from service rows with V1 flow nodes.
 - Completed and pushed mock-first status:
   - release/deploy detail closure
   - Agent protocol mock closure
@@ -57,14 +59,14 @@ Latest pushed milestone:
   - frontend unit tests passed on 2026-06-09: 10 files, 39 tests
   - frontend build passed on 2026-06-09 with existing dependency annotation warnings only
 - Next default step:
-  - build and run the Agent binary on a remote Linux host or local remote-like host with real platform registration, heartbeat, token validation, task lease, and remote resource reporting. Do not use mock execution or mock data as completion evidence.
+  - Product service list closure, service Pipeline binding, and service-row release order creation. Do not use mock service, Pipeline, image, or version data as completion evidence.
 
 ## V1 Implementation Baseline
 
 This is the authoritative order for subsequent development. Each phase must use real data before it is considered complete. If a required external tool or runtime environment is not ready, stop at that phase and do not move on.
 
 1. 基础资源管理.
-2. 产品管理.
+2. 环境管理 / 产品管理过渡.
 3. Agent 管理与远程资源上报.
 4. 项目管理.
 5. 产品管理.
@@ -76,7 +78,7 @@ This is the authoritative order for subsequent development. Each phase must use 
 11. 登录与权限.
 12. 清理剩余 mock.
 
-Current step is step 3: Agent 管理与远程资源上报. Do not move to service/version development until Agent registration key generation, first registration, long-lived Agent token issuance and validation, heartbeat, unbound/pending-claim status, product binding, status visibility, task leasing, and remote K8s/Harbor/service-image reporting use real backend data and the mock/fallback boundary is removed or explicitly recorded as blocked by missing real runtime or infrastructure.
+Current step is step 6/7 boundary: 服务与版本来源收口 and 发布单创建前置. The next implementation must keep the user entry as 项目 -> 产品 -> 服务. Users should find a service in the product service list, bind or confirm the Jenkins Pipeline if needed, then click release from that service row. Release orders are execution records and flow detail carriers, not the primary place to find services.
 
 Agent registration design for V1:
 
@@ -118,20 +120,22 @@ Product management is considered ready for the next phase only because it suppor
 2. 产品管理. Done for the current V1 transition.
    - User-visible outcome: users can create local and remote products. Local products bind local K8s namespaces, local Harbor projects, and local Jenkins views. Remote products bind local Harbor projects and local Jenkins views as build/version sources, while their remote runtime K8s/Harbor scopes wait for Agent-reported data and platform-side mapping.
    - Remaining scope: follow-up adjustments only when service association consumes these bindings.
-3. Agent 管理与远程资源上报. Next.
+3. Agent 管理与远程资源上报. Done for current V1 release-flow prerequisites.
    - User-visible outcome: users can generate a registration token on the Agent page, copy the generated config text into a project-side Agent config file, start the Agent binary, see `在线 / 待认领`, inspect unowned reported resource summaries, bind the Agent to a product, and then map Agent-reported remote namespaces/Harbor projects to that product.
-   - Required before next phase: real Agent binary runtime, outbound connectivity to platform API, real registration/token validation, remote K8s/Harbor access from Agent, and platform-side product mapping for reported scopes. `docker compose` is not required for development closure and is deferred to formal production deployment verification.
-4. 项目管理.
+   - Remaining scope: bug fixes and follow-up gaps exposed by remote release execution. `docker compose` is not required for development closure and is deferred to formal production deployment verification.
+4. 项目管理. Done for current V1 transition.
    - User-visible outcome: users can create and select top-level projects such as 项目A and 项目B as the business ownership boundary.
    - Dependency: completed environments/products must be attachable to projects without rewriting resource management.
-5. 产品管理.
+5. 产品管理. Done for current V1 transition.
    - User-visible outcome: users can create products such as 数据中台 and 物联中台 under a project. The current environment model is reused as the V1 transition implementation for product deployment scope and resource bindings.
    - Dependency: completed environment bindings from step 2 must be consumed here as product resource scope, not duplicated.
-6. 服务与版本来源.
-   - User-visible outcome: users can create services under products and select actual namespace, Harbor project, Jenkins view/job, repository, branch, image name, and version source inside the target product scope. Local Jenkins and local Harbor are the build/version source; remote Agent-reported K8s/Harbor scopes are runtime targets.
+6. 服务与版本来源. Current.
+   - User-visible outcome: users manage services under products, see current workload images, classify private/external image sources, confirm product private registry, and use the product service list as the main release entry.
+   - Next required work: strengthen the product service list with search/filter, release entry, Pipeline status, latest release status, and batch manage/unmanage actions; keep service management based on real platform or Agent discovery.
    - Dependency: project ownership from step 4, product deployment scope from step 5, and environment bindings from step 2 as the V1 transition implementation must be consumed here, not duplicated.
-7. 发布单创建.
-   - User-visible outcome: users can select project, product, services, and version source to create a release order with product resource and Agent readiness checks.
+7. 发布单创建. Next.
+   - User-visible outcome: users click release from a service row; the platform creates a release order automatically with project, product, service, bound Jenkins Pipeline, target image/tag, and V1 flow nodes.
+   - Rule: release orders are execution records and flow detail carriers, not the primary service selection UI.
 8. 基线管理.
    - User-visible outcome: users can view environment baselines, record service version snapshots, and compare target release versions with the current baseline.
 9. 部署执行.
@@ -155,6 +159,53 @@ V1 must prioritize functional closure over optimization work. The minimum accept
 - Agent-driven execution and status reporting are visible end to end
 
 Until this mainline is complete, performance tuning, warning cleanup, and refactor-only work stay behind feature work unless they block delivery.
+
+## V1 Service Release Flow TODO
+
+Use this section as the current implementation guide after service/version-source closure.
+
+1. Product service list closure.
+   - Make `项目 -> 产品 -> 服务` the main release entry.
+   - Show service name, workload type, namespace, current image, current tag, image source, private registry confirmation, Jenkins Pipeline binding status, and latest release status.
+   - Add search and filters for service name, namespace, workload type, image source, Pipeline binding status, and release readiness.
+   - Keep `纳管服务`, `移除纳管`, and `刷新服务` as service-list maintenance actions.
+   - Managed/unmanaged service actions must use real platform-direct or Agent-reported workload data. Do not add manual service entry.
+   - Removing managed services only removes the platform management relationship; it must not delete Kubernetes workloads, Harbor images, Jenkins Pipelines, or historical release records.
+2. Service-to-Jenkins Pipeline binding.
+   - Pipeline choices must come from the product's bound Jenkins view/job data or live Jenkins query.
+   - The user selects a Pipeline from a list. Do not allow free-text Pipeline names.
+   - The first release of an unbound service must ask the user to bind a Pipeline first.
+   - The platform may recommend a Pipeline by matching service name, workload name, or image name, but the user must confirm.
+   - Store the binding on the service and reuse it for later releases; allow changing the binding from service detail.
+3. Service-row release order creation.
+   - The user clicks release on a service row.
+   - The platform opens a confirmation view with project, product, service, current version, target version, bound Jenkins Pipeline, and planned flow nodes.
+   - Confirming creates a release order automatically.
+   - The release order records execution state and flow details. It is not the primary place where users find services.
+4. Jenkins execution and logs.
+   - The platform triggers the bound Jenkins Pipeline, captures build number, polls build state, and reads console logs.
+   - Jenkins runs shell/Pipeline logic that already exists outside the platform.
+   - During Jenkins execution the platform observes status and logs only; it does not pause or insert intermediate control inside the Jenkins script.
+5. Local Harbor image confirmation.
+   - After Jenkins ends, the platform must query the local Harbor project and confirm the target image tag exists.
+   - This check is required for both local and remote products.
+   - If Jenkins succeeds but the image tag is missing, the release fails.
+   - If Jenkins fails but the image tag exists, show that explicitly and do not automatically continue.
+   - If Harbor cannot be queried, mark the release abnormal and show the connection or permission reason.
+6. Local product release result.
+   - Jenkins is expected to build, push to local Harbor, and update GitLab YAML.
+   - Argo CD performs the CD side outside the platform.
+   - The platform must still connect to local Kubernetes and confirm the workload image tag or rollout result after local Harbor confirmation.
+   - The final result must show Jenkins, local Harbor, and local Kubernetes status.
+7. Remote product release result.
+   - Jenkins is expected to build and push to local Harbor only.
+   - The platform may dispatch Agent remote release work only after local Harbor confirms the target image tag exists.
+   - If local Harbor image confirmation fails, do not dispatch Agent.
+   - Agent must pull/copy the image into remote Harbor using remote Harbor's pull/replication ability, confirm the remote image tag exists, update remote Kubernetes workload image, and report status/logs/final result.
+   - The final result must show Jenkins, local Harbor, remote Harbor, remote Kubernetes, and Agent status.
+8. Flow extension boundary.
+   - Future approval, manual confirmation, risk check, canary, and rollback controls should be inserted before Jenkins or after Jenkins as platform-controlled nodes.
+   - V1 does not try to pause or control steps inside the existing Jenkins script.
 
 ## Agent Deployment Assumption
 

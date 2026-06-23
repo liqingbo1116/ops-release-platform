@@ -295,11 +295,28 @@ V1 最低交付目标：
 
 目标：
 
-- 服务列表、Jenkins Job、Harbor 镜像 tag、运行态服务版本来源全部改为真实数据。
+- 产品服务列表、Jenkins Job、Harbor 镜像 tag、运行态服务版本来源全部改为真实数据。
+- 产品服务列表是服务发版的主入口，用户应先按项目/产品定位服务，再从服务行上直接发起发版。
 - 服务必须归属到产品，并在产品部署范围内选择实际使用的 K8s namespace、Harbor project、Jenkins view/job。
-- 服务发版可选择 Jenkins Job 或 Harbor 镜像 tag。
+- 服务纳管页面定位为服务维护页，不作为日常发版主入口；用户可从产品服务列表进入纳管/移除纳管。
+- 服务发版不允许手工录入服务或镜像来源，必须基于平台直连或 Agent 上报的真实 workload、镜像和 Jenkins Pipeline 列表选择。
 - 服务部署的目标缺失服务来自真实运行态或真实基线，不来自 mock。
 - 删除服务、版本、Job、镜像 tag 的 mock 数据与 fallback。
+
+服务列表设计要求：
+
+- 按 `项目 -> 产品 -> 服务` 展示服务。
+- 支持按服务名、namespace、workload 类型、镜像来源、Pipeline 绑定状态、可发版状态过滤。
+- 展示服务名、Deployment/StatefulSet/DaemonSet 类型、namespace、当前镜像、当前 tag、镜像来源、私有 registry 确认状态、Jenkins Pipeline 绑定状态、最近一次发版状态。
+- 每个服务提供发版、绑定/更换 Pipeline、查看详情、移除纳管入口。
+- 纳管页展示探测到的 workload，支持多选纳管和多选移除；移除纳管只解除平台管理关系，不删除 K8s workload、Harbor 镜像、Jenkins Pipeline 或历史发版记录。
+
+Jenkins Pipeline 绑定要求：
+
+- Pipeline 列表来自产品绑定的 Jenkins view/job 缓存或真实 Jenkins 查询。
+- 服务第一次发版前如未绑定 Pipeline，必须提示用户先从列表选择，不允许手工录入 Pipeline 名称。
+- 平台可以按服务名、workload 名、镜像名推荐 Pipeline，但最终由用户确认。
+- 绑定关系保存到服务级配置，后续发版默认复用，并支持在服务详情中更换。
 
 必须准备：
 
@@ -316,23 +333,71 @@ V1 最低交付目标：
 
 - 如果服务、Job、镜像 tag 或运行态版本仍是 mock，不能进入阶段 7。
 - 如果服务没有产品归属，或没有消费产品部署范围中的 namespace/project/view/job，不能进入阶段 7。
+- 如果用户不能从产品服务列表直接定位服务并进入发版，不能进入阶段 7。
+- 如果服务发版仍要求用户手工录入服务、镜像或 Pipeline，不能进入阶段 7。
 
 ### 阶段 7：发布单创建
 
 目标：
 
-- 发布单页面从真实项目、真实产品、真实 Agent、真实服务版本来源读取数据。
+- 发布入口从产品服务列表进入，用户点击服务上的发版按钮后自动创建发布单。
+- 发布单是流程记录和执行详情载体，不是用户寻找服务的主入口。
+- 发布单创建必须从真实项目、真实产品、真实 Agent、真实服务、真实 Jenkins Pipeline、真实 Harbor 镜像来源读取数据。
+- 发布单创建时生成固定 V1 流程节点，并为后续审批、人工确认、灰度等节点预留扩展模型。
 - 删除发布单表单中的 mock 服务、mock 版本、mock 环境依赖。
+
+V1 发版流程：
+
+- Jenkins 执行前平台可以控制流程，例如后续插入审批或人工确认。
+- Jenkins 执行中平台只观察状态和日志，不控制暂停，也不插入中间节点。
+- Jenkins 结束后，无论本地产品还是远程产品，平台都必须查询本地 Harbor，确认目标镜像 tag 是否已经推送到本地 Harbor project。
+- Jenkins 失败时也允许执行本地 Harbor 确认；如果镜像不存在，发版失败或停止后续流程；如果镜像已存在，页面应明确提示“流水线失败但镜像已存在”，默认不自动继续。
+
+本地产品流程：
+
+1. 用户从产品服务列表点击服务发版。
+2. 平台创建发布单并触发已绑定 Jenkins Pipeline。
+3. Jenkins 完成编译构建、制作镜像、推送本地 Harbor、修改 GitLab YAML。
+4. 平台获取 Jenkins build number、执行状态和 console log。
+5. 平台确认本地 Harbor project 中存在目标镜像 tag。
+6. 平台连接本地 K8s，确认目标 workload 当前镜像 tag 或 rollout 结果。
+7. 平台展示 Jenkins、Harbor、K8s 三类结果，最终判定发版成功或失败。
+
+远程产品流程：
+
+1. 用户从产品服务列表点击服务发版。
+2. 平台创建发布单并触发已绑定 Jenkins Pipeline。
+3. Jenkins 完成编译构建、制作镜像、推送本地 Harbor。
+4. 平台获取 Jenkins build number、执行状态和 console log。
+5. 平台确认本地 Harbor project 中存在目标镜像 tag。
+6. 只有本地 Harbor 镜像确认存在后，平台才允许下发 Agent 远程发版任务。
+7. Agent 通过远程 Harbor 的 pull/复制能力从本地 Harbor 拉取镜像，并确认远程 Harbor 中存在目标镜像 tag。
+8. Agent 连接远程 K8s 更新目标 workload 镜像，并回传状态、日志和最终结果。
+9. 平台展示 Jenkins、本地 Harbor、远程 Harbor、远程 K8s 和 Agent 执行结果。
+
+流程节点模型要求：
+
+- 本地产品固定节点：创建发布单、触发 Jenkins、获取 Jenkins 日志、确认本地 Harbor 镜像、确认本地 K8s 运行结果、完成。
+- 远程产品固定节点：创建发布单、触发 Jenkins、获取 Jenkins 日志、确认本地 Harbor 镜像、下发 Agent 任务、远程 Harbor 拉取/确认镜像、远程 K8s 更新、完成。
+- 远程产品如本地 Harbor 镜像不存在，必须停止在 Agent 节点之前，不能继续远程发版。
+- 发布详情页必须展示每个节点的状态、时间、失败原因和关键日志摘要。
 
 必须准备：
 
 - 阶段 1 到阶段 6 已完成
 - 环境与 Agent 已真实关联
 - 真实服务发版来源或真实服务部署来源可用
+- 平台后端可访问本地 Jenkins 和本地 Harbor
+- 本地产品如需验收发版结果，平台后端可访问本地 K8s
+- 远程产品如需验收远程发版，Agent 已绑定产品，并可访问远程 Harbor 与远程 K8s
 
 门禁：
 
 - 如果发布单创建仍依赖 mock 项目、mock 产品、mock Agent、mock 服务或 mock 版本，不能进入阶段 8。
+- 如果用户仍必须先进入发布单页面再找服务，不能进入阶段 8。
+- 如果平台不能获取 Jenkins 执行状态和日志，不能进入真实发版验收。
+- 如果 Jenkins 后没有本地 Harbor 镜像确认节点，不能进入真实发版验收。
+- 如果远程产品在本地 Harbor 镜像不存在时仍会下发 Agent 任务，不能进入阶段 8。
 
 ### 阶段 8：基线管理
 
