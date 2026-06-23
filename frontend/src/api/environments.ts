@@ -14,6 +14,7 @@ export type EnvironmentInfo = {
   namespace: string
   registryId: string
   registryProject: string
+  privateRegistryHost: string
   jenkinsId: string
   jenkinsView: string
   status: string
@@ -74,6 +75,34 @@ export type EnvironmentProbeResult = {
   message: string
 }
 
+export type ProductService = {
+  id: string
+  productId: string
+  name: string
+  namespace: string
+  workloadName: string
+  workloadType: string
+  containerName: string
+  containerType: 'APP' | 'INIT' | string
+  image: string
+  imageRegistry: string
+  imageProject: string
+  imageRepository: string
+  imageTag: string
+  imageSource: 'PRIVATE' | 'EXTERNAL' | 'UNMATCHED_PRIVATE' | string
+  privateRegistryHost?: string
+  privateRegistryConfirmed?: boolean
+  replicas: number
+  readyReplicas: number
+  createdAt?: string
+  updatedAt?: string
+  managed?: boolean
+}
+
+export type DiscoveredProductService = ProductService & {
+  managed: boolean
+}
+
 function normalizeEnvironment(item: {
   id: string
   name: string
@@ -88,6 +117,7 @@ function normalizeEnvironment(item: {
   namespace?: string
   registryId?: string
   registryProject?: string
+  privateRegistryHost?: string
   jenkinsId?: string
   jenkinsView?: string
   status: string
@@ -107,6 +137,7 @@ function normalizeEnvironment(item: {
     namespace: item.namespace ?? '',
     registryId: item.registryId ?? '',
     registryProject: item.registryProject ?? '',
+    privateRegistryHost: item.privateRegistryHost ?? '',
     jenkinsId: item.jenkinsId ?? '',
     jenkinsView: item.jenkinsView ?? '',
     bindings: item.bindings ?? [],
@@ -132,4 +163,34 @@ export async function checkEnvironment(id: string): Promise<EnvironmentCheckResu
 
 export async function probeEnvironment(id: string): Promise<EnvironmentProbeResult> {
   return postData<EnvironmentProbeResult>(`/api/environments/${id}/remote-probe`)
+}
+
+export async function listEnvironmentServices(id: string): Promise<ProductService[]> {
+  const result = await getData<PageResult<ProductService>>(`/api/environments/${id}/services?pageSize=500`)
+  return result.items
+}
+
+export async function listDiscoveredEnvironmentServices(id: string): Promise<DiscoveredProductService[]> {
+  const result = await getData<PageResult<DiscoveredProductService>>(
+    `/api/environments/${id}/discovered-services?pageSize=500`,
+  )
+  return result.items
+}
+
+export async function adoptEnvironmentServices(
+  id: string,
+  services: DiscoveredProductService[],
+): Promise<ProductService[]> {
+  return postData<ProductService[]>(`/api/environments/${id}/services/adopt`, { services })
+}
+
+export async function removeEnvironmentServices(id: string, serviceIds: string[]): Promise<ProductService[]> {
+  return postData<ProductService[]>(`/api/environments/${id}/services/remove`, { serviceIds })
+}
+
+export async function confirmEnvironmentServiceRegistry(
+  id: string,
+  privateRegistryHost: string,
+): Promise<ProductService[]> {
+  return postData<ProductService[]>(`/api/environments/${id}/services/confirm-registry`, { privateRegistryHost })
 }

@@ -111,7 +111,7 @@ func (MockKubernetesAdapter) CheckConnection(ctx context.Context, environment do
 	}, nil
 }
 
-func (MockKubernetesAdapter) ListWorkloads(ctx context.Context, environmentID string) ([]Workload, error) {
+func (MockKubernetesAdapter) ListWorkloads(ctx context.Context, environment domain.Environment) ([]Workload, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -120,19 +120,21 @@ func (MockKubernetesAdapter) ListWorkloads(ctx context.Context, environmentID st
 			Namespace:     "project-x",
 			Name:          "user-service",
 			Type:          "Deployment",
-			Image:         "harbor.local/project-x/user-service",
-			Tag:           "20260607-a1b2c3",
 			Replicas:      4,
 			ReadyReplicas: 4,
+			Containers: []WorkloadContainer{
+				{Name: "user-service", Type: "APP", Image: "harbor.local/project-x/user-service:20260607-a1b2c3"},
+			},
 		},
 		{
 			Namespace:     "project-x",
 			Name:          "order-service",
 			Type:          "Deployment",
-			Image:         "harbor.local/project-x/order-service",
-			Tag:           "20260606-111aaa",
 			Replicas:      3,
 			ReadyReplicas: 3,
+			Containers: []WorkloadContainer{
+				{Name: "order-service", Type: "APP", Image: "harbor.local/project-x/order-service:20260606-111aaa"},
+			},
 		},
 	}, nil
 }

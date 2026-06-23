@@ -25,7 +25,7 @@ type Store interface {
 	GetHarborRegistry(id string) (domain.HarborRegistry, bool)
 	CreateHarborRegistry(input domain.HarborRegistry) (domain.HarborRegistry, error)
 	UpdateHarborRegistry(id string, input domain.HarborRegistry) (domain.HarborRegistry, bool, error)
-	UpdateHarborRegistryProbe(id string, status string, message string, projects []string, checkedAt time.Time) (domain.HarborRegistry, bool, error)
+	UpdateHarborRegistryProbe(id string, status string, message string, projects []string, registryHost string, checkedAt time.Time) (domain.HarborRegistry, bool, error)
 	ListJenkinsInstances(query string) []domain.JenkinsInstance
 	GetJenkinsInstance(id string) (domain.JenkinsInstance, bool)
 	CreateJenkinsInstance(input domain.JenkinsInstance) (domain.JenkinsInstance, error)
@@ -52,6 +52,10 @@ type Store interface {
 	LockBaseline(id string) (domain.BaselineDetail, bool)
 	GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool)
 	ListReleaseSourceServices(query string) []domain.ReleaseSourceService
+	ListManagedServices(productID string) []domain.ManagedService
+	UpsertManagedServices(productID string, services []domain.DiscoveredService) ([]domain.ManagedService, error)
+	RemoveManagedServices(productID string, serviceIDs []string) ([]domain.ManagedService, error)
+	ConfirmManagedServiceRegistry(productID string, registryHost string, harborProjects []string) ([]domain.ManagedService, error)
 	CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error)
 	ListReleases(query string) []domain.ReleaseOrder
 	GetReleaseDetail(id string) (domain.ReleaseDetail, bool)

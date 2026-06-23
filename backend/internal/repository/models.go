@@ -34,16 +34,27 @@ func (ProductModel) TableName() string {
 }
 
 type ServiceModel struct {
-	ID              string    `gorm:"primaryKey;size:64"`
-	ProductID       string    `gorm:"size:64;index;not null"`
-	Name            string    `gorm:"size:128;not null"`
-	Namespace       string    `gorm:"size:128;not null"`
-	WorkloadName    string    `gorm:"size:128;not null"`
-	WorkloadType    string    `gorm:"size:32;not null"`
-	ImageRepository string    `gorm:"size:512;not null"`
-	HealthCheckPath string    `gorm:"size:256"`
-	CreatedAt       time.Time `gorm:"autoCreateTime"`
-	UpdatedAt       time.Time `gorm:"autoUpdateTime"`
+	ID                       string `gorm:"primaryKey;size:64"`
+	ProductID                string `gorm:"size:64;index;not null"`
+	Name                     string `gorm:"size:128;not null"`
+	Namespace                string `gorm:"size:128;not null"`
+	WorkloadName             string `gorm:"size:128;not null"`
+	WorkloadType             string `gorm:"size:32;not null"`
+	ContainerName            string `gorm:"size:128;index"`
+	ContainerType            string `gorm:"size:32"`
+	Image                    string `gorm:"size:768"`
+	ImageRegistry            string `gorm:"size:256"`
+	ImageProject             string `gorm:"size:128"`
+	ImageRepository          string `gorm:"size:512;not null"`
+	ImageTag                 string `gorm:"size:256"`
+	ImageSource              string `gorm:"size:32"`
+	PrivateRegistryHost      string `gorm:"size:256"`
+	PrivateRegistryConfirmed bool
+	Replicas                 int
+	ReadyReplicas            int
+	HealthCheckPath          string    `gorm:"size:256"`
+	CreatedAt                time.Time `gorm:"autoCreateTime"`
+	UpdatedAt                time.Time `gorm:"autoUpdateTime"`
 }
 
 func (ServiceModel) TableName() string {
@@ -51,25 +62,26 @@ func (ServiceModel) TableName() string {
 }
 
 type EnvironmentModel struct {
-	ID               string     `gorm:"primaryKey;size:64"`
-	Name             string     `gorm:"size:128;not null"`
-	Code             string     `gorm:"size:128;uniqueIndex;not null"`
-	ProjectID        string     `gorm:"size:64;index"`
-	ProductStatus    string     `gorm:"size:32;index;not null;default:UNBOUND"`
-	Type             string     `gorm:"size:32;index;not null"`
-	DeployTargetType string     `gorm:"size:32;not null;default:KUBERNETES"`
-	NetworkMode      string     `gorm:"size:32;not null"`
-	ClusterID        string     `gorm:"size:64"`
-	Namespace        string     `gorm:"size:128"`
-	RegistryID       string     `gorm:"size:64"`
-	RegistryProject  string     `gorm:"size:128"`
-	JenkinsID        string     `gorm:"size:64"`
-	JenkinsView      string     `gorm:"size:128"`
-	AgentID          string     `gorm:"size:64"`
-	Status           string     `gorm:"size:32;index;not null"`
-	LastCheckAt      *time.Time `gorm:"index"`
-	CreatedAt        time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt        time.Time  `gorm:"autoUpdateTime"`
+	ID                  string     `gorm:"primaryKey;size:64"`
+	Name                string     `gorm:"size:128;not null"`
+	Code                string     `gorm:"size:128;uniqueIndex;not null"`
+	ProjectID           string     `gorm:"size:64;index"`
+	ProductStatus       string     `gorm:"size:32;index;not null;default:UNBOUND"`
+	Type                string     `gorm:"size:32;index;not null"`
+	DeployTargetType    string     `gorm:"size:32;not null;default:KUBERNETES"`
+	NetworkMode         string     `gorm:"size:32;not null"`
+	ClusterID           string     `gorm:"size:64"`
+	Namespace           string     `gorm:"size:128"`
+	RegistryID          string     `gorm:"size:64"`
+	RegistryProject     string     `gorm:"size:128"`
+	PrivateRegistryHost string     `gorm:"size:256"`
+	JenkinsID           string     `gorm:"size:64"`
+	JenkinsView         string     `gorm:"size:128"`
+	AgentID             string     `gorm:"size:64"`
+	Status              string     `gorm:"size:32;index;not null"`
+	LastCheckAt         *time.Time `gorm:"index"`
+	CreatedAt           time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt           time.Time  `gorm:"autoUpdateTime"`
 }
 
 func (EnvironmentModel) TableName() string {
@@ -116,6 +128,7 @@ type HarborRegistryModel struct {
 	ID                    string `gorm:"primaryKey;size:64"`
 	Name                  string `gorm:"size:128;not null"`
 	URL                   string `gorm:"size:512;not null"`
+	RegistryHost          string `gorm:"size:256"`
 	Scheme                string `gorm:"size:16"`
 	Username              string `gorm:"size:128"`
 	Password              string `gorm:"type:text"`

@@ -3,6 +3,8 @@ package integration
 import (
 	"context"
 	"testing"
+
+	"ops-release-platform/backend/internal/domain"
 )
 
 func TestNewSuiteDefaultsToMock(t *testing.T) {
@@ -67,7 +69,7 @@ func TestMockAdapters(t *testing.T) {
 		t.Fatalf("unexpected image info: %+v", image)
 	}
 
-	workloads, err := suite.Kubernetes.ListWorkloads(ctx, "env-project-x-prod")
+	workloads, err := suite.Kubernetes.ListWorkloads(ctx, domain.Environment{ID: "env-project-x-prod", Namespace: "project-x-prod"})
 	if err != nil {
 		t.Fatalf("list workloads: %v", err)
 	}

@@ -80,10 +80,10 @@ func (h *Handler) probeHarborRegistry(c *gin.Context, refresh bool) {
 		NotFound(c, "harbor registry not found")
 		return
 	}
-	projects, err := checkHarborRegistry(c.Request.Context(), registry, refresh)
+	projects, registryHost, err := checkHarborRegistry(c.Request.Context(), registry, refresh)
 	checkedAt := time.Now()
 	status, message := probeResult(err, "harbor connection ok")
-	item, ok, updateErr := h.repo.UpdateHarborRegistryProbe(id, status, message, projects, checkedAt)
+	item, ok, updateErr := h.repo.UpdateHarborRegistryProbe(id, status, message, projects, registryHost, checkedAt)
 	if updateErr != nil {
 		BadRequest(c, "update harbor probe result failed")
 		return
@@ -174,25 +174,30 @@ func checkKubernetesCluster(ctx context.Context, cluster domain.KubernetesCluste
 	return compactProbeList(namespaces), nil
 }
 
-func checkHarborRegistry(ctx context.Context, registry domain.HarborRegistry, refresh bool) ([]string, error) {
+func checkHarborRegistry(ctx context.Context, registry domain.HarborRegistry, refresh bool) ([]string, string, error) {
 	client := basicAuthClient(registry.InsecureSkipTLSVerify)
 	headers := basicAuthHeaders(registry.Username, registry.Password)
 	baseURL := normalizeProbeURL(registry.URL, registry.Scheme)
-	if _, err := getJSON(ctx, client, joinURL(baseURL, "/api/v2.0/systeminfo"), headers); err != nil {
-		return nil, err
+	systemInfoBody, err := getJSON(ctx, client, joinURL(baseURL, "/api/v2.0/systeminfo"), headers)
+	if err != nil {
+		return nil, "", err
+	}
+	registryHost := harborRegistryHostFromPayload(systemInfoBody)
+	if registryHost == "" {
+		registryHost = harborRegistryHostFromConfigurations(ctx, client, baseURL, headers)
 	}
 	if !refresh {
-		return nil, nil
+		return nil, registryHost, nil
 	}
 	body, err := getJSON(ctx, client, joinURL(baseURL, "/api/v2.0/projects?page_size=100"), headers)
 	if err != nil {
-		return nil, err
+		return nil, registryHost, err
 	}
 	var response []struct {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("parse harbor projects failed: %w", err)
+		return nil, registryHost, fmt.Errorf("parse harbor projects failed: %w", err)
 	}
 	projects := make([]string, 0, len(response))
 	for _, item := range response {
@@ -200,7 +205,52 @@ func checkHarborRegistry(ctx context.Context, registry domain.HarborRegistry, re
 			projects = append(projects, name)
 		}
 	}
-	return compactProbeList(projects), nil
+	return compactProbeList(projects), registryHost, nil
+}
+
+func harborRegistryHostFromConfigurations(ctx context.Context, client *http.Client, baseURL string, headers map[string]string) string {
+	body, err := getJSON(ctx, client, joinURL(baseURL, "/api/v2.0/configurations"), headers)
+	if err != nil {
+		return ""
+	}
+	return harborRegistryHostFromPayload(body)
+}
+
+func harborRegistryHostFromPayload(body []byte) string {
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	values := map[string]string{}
+	collectHarborRegistryFields(payload, values)
+	for _, key := range []string{"registry_url", "registryHost", "registry_host", "external_url", "externalURL"} {
+		if host := normalizedImageRegistry(values[key]); host != "" {
+			return host
+		}
+	}
+	return ""
+}
+
+func collectHarborRegistryFields(value any, output map[string]string) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			if stringValue, ok := item.(string); ok {
+				output[key] = stringValue
+				continue
+			}
+			if nested, ok := item.(map[string]any); ok {
+				if stringValue, ok := nested["value"].(string); ok {
+					output[key] = stringValue
+				}
+			}
+			collectHarborRegistryFields(item, output)
+		}
+	case []any:
+		for _, item := range typed {
+			collectHarborRegistryFields(item, output)
+		}
+	}
 }
 
 func checkJenkinsInstance(ctx context.Context, instance domain.JenkinsInstance, refresh bool) ([]string, []string, error) {

@@ -57,10 +57,28 @@ type RuntimeStatus struct {
 }
 
 type RuntimeComponentStatus struct {
-	Status    string   `json:"status"`
-	Message   string   `json:"message"`
-	UpdatedAt string   `json:"updatedAt"`
-	Items     []string `json:"items"`
+	Status       string            `json:"status"`
+	Message      string            `json:"message"`
+	UpdatedAt    string            `json:"updatedAt"`
+	Endpoint     string            `json:"endpoint,omitempty"`
+	RegistryHost string            `json:"registryHost,omitempty"`
+	Items        []string          `json:"items"`
+	Workloads    []RuntimeWorkload `json:"workloads"`
+}
+
+type RuntimeWorkload struct {
+	Namespace     string             `json:"namespace"`
+	Name          string             `json:"name"`
+	Type          string             `json:"type"`
+	Replicas      int                `json:"replicas"`
+	ReadyReplicas int                `json:"readyReplicas"`
+	Containers    []RuntimeContainer `json:"containers"`
+}
+
+type RuntimeContainer struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Image string `json:"image"`
 }
 
 type Task struct {

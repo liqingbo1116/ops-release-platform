@@ -56,7 +56,7 @@ type RegistryAdapter interface {
 
 type KubernetesAdapter interface {
 	CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error)
-	ListWorkloads(ctx context.Context, environmentID string) ([]Workload, error)
+	ListWorkloads(ctx context.Context, environment domain.Environment) ([]Workload, error)
 	SetImage(ctx context.Context, environmentID string, req SetImageRequest) error
 	GetRolloutStatus(ctx context.Context, environmentID string, workload string) (RolloutStatus, error)
 }
@@ -103,13 +103,18 @@ type SyncImageResult struct {
 }
 
 type Workload struct {
-	Namespace     string `json:"namespace"`
-	Name          string `json:"name"`
-	Type          string `json:"type"`
-	Image         string `json:"image"`
-	Tag           string `json:"tag"`
-	Replicas      int    `json:"replicas"`
-	ReadyReplicas int    `json:"readyReplicas"`
+	Namespace     string              `json:"namespace"`
+	Name          string              `json:"name"`
+	Type          string              `json:"type"`
+	Replicas      int                 `json:"replicas"`
+	ReadyReplicas int                 `json:"readyReplicas"`
+	Containers    []WorkloadContainer `json:"containers"`
+}
+
+type WorkloadContainer struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Image string `json:"image"`
 }
 
 type SetImageRequest struct {

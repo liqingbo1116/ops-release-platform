@@ -112,6 +112,7 @@
         <el-table-column label="操作" fixed="right" width="120">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
+            <el-button link type="primary" @click="openServicePage(row)">服务</el-button>
             <el-button link type="primary" @click="openDrawer(row)">详情</el-button>
           </template>
         </el-table-column>
@@ -265,6 +266,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import EnvironmentConfigDrawer from '@/components/EnvironmentConfigDrawer.vue'
 import StatusTag from '@/components/StatusTag.vue'
@@ -295,6 +297,7 @@ import {
 import { listAgents, type AgentInfo, type AgentRuntimeComponentStatus } from '@/api/agents'
 
 const keyword = ref('')
+const router = useRouter()
 const environmentType = ref('')
 const drawerVisible = ref(false)
 const dialogVisible = ref(false)
@@ -749,6 +752,10 @@ async function loadAll() {
 function openDrawer(row: EnvironmentInfo) {
   activeEnvironment.value = row
   drawerVisible.value = true
+}
+
+function openServicePage(row: EnvironmentInfo) {
+  router.push(`/environments/${row.id}/services`)
 }
 
 function openCreateDialog() {
@@ -1252,4 +1259,5 @@ onMounted(loadAll)
   font-size: 12px;
   line-height: 18px;
 }
+
 </style>

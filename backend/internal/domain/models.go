@@ -18,28 +18,30 @@ type Project struct {
 }
 
 type Environment struct {
-	ID               string                       `json:"id"`
-	Name             string                       `json:"name"`
-	Code             string                       `json:"code"`
-	ProjectID        string                       `json:"projectId"`
-	ProjectName      string                       `json:"projectName"`
-	ProductStatus    string                       `json:"productStatus"`
-	Type             string                       `json:"type"`
-	DeployTargetType string                       `json:"deployTargetType"`
-	NetworkMode      string                       `json:"networkMode"`
-	ClusterID        string                       `json:"clusterId"`
-	Namespace        string                       `json:"namespace"`
-	RegistryID       string                       `json:"registryId"`
-	RegistryProject  string                       `json:"registryProject"`
-	JenkinsID        string                       `json:"jenkinsId"`
-	JenkinsView      string                       `json:"jenkinsView"`
-	Bindings         []EnvironmentResourceBinding `json:"bindings"`
-	Status           string                       `json:"status"`
-	AgentStatus      string                       `json:"agentStatus"`
-	LastCheckAt      string                       `json:"lastCheckAt"`
+	ID                  string                       `json:"id"`
+	Name                string                       `json:"name"`
+	Code                string                       `json:"code"`
+	ProjectID           string                       `json:"projectId"`
+	ProjectName         string                       `json:"projectName"`
+	ProductStatus       string                       `json:"productStatus"`
+	Type                string                       `json:"type"`
+	DeployTargetType    string                       `json:"deployTargetType"`
+	NetworkMode         string                       `json:"networkMode"`
+	ClusterID           string                       `json:"clusterId"`
+	Namespace           string                       `json:"namespace"`
+	RegistryID          string                       `json:"registryId"`
+	RegistryProject     string                       `json:"registryProject"`
+	PrivateRegistryHost string                       `json:"privateRegistryHost"`
+	JenkinsID           string                       `json:"jenkinsId"`
+	JenkinsView         string                       `json:"jenkinsView"`
+	Bindings            []EnvironmentResourceBinding `json:"bindings"`
+	Status              string                       `json:"status"`
+	AgentStatus         string                       `json:"agentStatus"`
+	LastCheckAt         string                       `json:"lastCheckAt"`
 
 	ClusterAPIServer      string `json:"-"`
 	ClusterCredentialRef  string `json:"-"`
+	ClusterKubeconfig     string `json:"-"`
 	RegistryURL           string `json:"-"`
 	RegistryCredentialRef string `json:"-"`
 	JenkinsURL            string `json:"-"`
@@ -75,6 +77,7 @@ type HarborRegistry struct {
 	ID                    string   `json:"id"`
 	Name                  string   `json:"name"`
 	URL                   string   `json:"url"`
+	RegistryHost          string   `json:"registryHost"`
 	Scheme                string   `json:"scheme"`
 	Username              string   `json:"username"`
 	InsecureSkipTLSVerify bool     `json:"insecureSkipTLSVerify"`
@@ -123,10 +126,28 @@ type RuntimeStatus struct {
 }
 
 type RuntimeComponentStatus struct {
-	Status    string   `json:"status"`
-	Message   string   `json:"message"`
-	UpdatedAt string   `json:"updatedAt"`
-	Items     []string `json:"items"`
+	Status       string            `json:"status"`
+	Message      string            `json:"message"`
+	UpdatedAt    string            `json:"updatedAt"`
+	Endpoint     string            `json:"endpoint,omitempty"`
+	RegistryHost string            `json:"registryHost,omitempty"`
+	Items        []string          `json:"items"`
+	Workloads    []RuntimeWorkload `json:"workloads"`
+}
+
+type RuntimeWorkload struct {
+	Namespace     string             `json:"namespace"`
+	Name          string             `json:"name"`
+	Type          string             `json:"type"`
+	Replicas      int                `json:"replicas"`
+	ReadyReplicas int                `json:"readyReplicas"`
+	Containers    []RuntimeContainer `json:"containers"`
+}
+
+type RuntimeContainer struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Image string `json:"image"`
 }
 
 type Baseline struct {
@@ -218,6 +239,63 @@ type ReleaseSourceService struct {
 	Tags            []ReleaseImageTag `json:"tags"`
 	Publishable     bool              `json:"publishable"`
 	Message         string            `json:"message,omitempty"`
+}
+
+type ManagedService struct {
+	ID                       string `json:"id"`
+	ProductID                string `json:"productId"`
+	Name                     string `json:"name"`
+	Namespace                string `json:"namespace"`
+	WorkloadName             string `json:"workloadName"`
+	WorkloadType             string `json:"workloadType"`
+	ContainerName            string `json:"containerName"`
+	ContainerType            string `json:"containerType"`
+	Image                    string `json:"image"`
+	ImageRegistry            string `json:"imageRegistry"`
+	ImageProject             string `json:"imageProject"`
+	ImageRepository          string `json:"imageRepository"`
+	ImageTag                 string `json:"imageTag"`
+	ImageSource              string `json:"imageSource"`
+	PrivateRegistryHost      string `json:"privateRegistryHost,omitempty"`
+	PrivateRegistryConfirmed bool   `json:"privateRegistryConfirmed"`
+	Replicas                 int    `json:"replicas"`
+	ReadyReplicas            int    `json:"readyReplicas"`
+	CreatedAt                string `json:"createdAt"`
+	UpdatedAt                string `json:"updatedAt"`
+}
+
+type DiscoveredService struct {
+	ID                       string `json:"id"`
+	ProductID                string `json:"productId"`
+	Name                     string `json:"name"`
+	Namespace                string `json:"namespace"`
+	WorkloadName             string `json:"workloadName"`
+	WorkloadType             string `json:"workloadType"`
+	ContainerName            string `json:"containerName"`
+	ContainerType            string `json:"containerType"`
+	Image                    string `json:"image"`
+	ImageRegistry            string `json:"imageRegistry"`
+	ImageProject             string `json:"imageProject"`
+	ImageRepository          string `json:"imageRepository"`
+	ImageTag                 string `json:"imageTag"`
+	ImageSource              string `json:"imageSource"`
+	PrivateRegistryHost      string `json:"privateRegistryHost,omitempty"`
+	PrivateRegistryConfirmed bool   `json:"privateRegistryConfirmed"`
+	Replicas                 int    `json:"replicas"`
+	ReadyReplicas            int    `json:"readyReplicas"`
+	Managed                  bool   `json:"managed"`
+}
+
+type AdoptServiceInput struct {
+	Services []DiscoveredService `json:"services"`
+}
+
+type RemoveManagedServiceInput struct {
+	ServiceIDs []string `json:"serviceIds"`
+}
+
+type ConfirmServiceRegistryInput struct {
+	PrivateRegistryHost string `json:"privateRegistryHost"`
 }
 
 type ReleaseSource struct {

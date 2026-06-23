@@ -160,6 +160,21 @@ type RealKubernetesAdapter struct {
 	timeout time.Duration
 }
 
+func ListWorkloadsWithKubeconfig(ctx context.Context, kubeconfig string, apiServer string, namespaces []string, timeout time.Duration) ([]Workload, error) {
+	adapter := RealKubernetesAdapter{
+		configs: map[string]ClusterConfig{
+			"cluster": {Kubeconfig: kubeconfig},
+		},
+		timeout: timeout,
+	}
+	return adapter.ListWorkloads(ctx, domain.Environment{
+		ClusterID:         "cluster",
+		ClusterAPIServer:  apiServer,
+		ClusterKubeconfig: kubeconfig,
+		Namespace:         strings.Join(namespaces, ","),
+	})
+}
+
 func (a RealKubernetesAdapter) CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error) {
 	cfg, key, err := clusterConfigForEnvironment(a.configs, environment)
 	if err != nil {
@@ -193,8 +208,41 @@ func (a RealKubernetesAdapter) CheckConnection(ctx context.Context, environment 
 	}, nil
 }
 
-func (a RealKubernetesAdapter) ListWorkloads(ctx context.Context, environmentID string) ([]Workload, error) {
-	return nil, ErrNotImplemented
+func (a RealKubernetesAdapter) ListWorkloads(ctx context.Context, environment domain.Environment) ([]Workload, error) {
+	cfg, _, err := clusterConfigForEnvironment(a.configs, environment)
+	if err != nil {
+		return nil, err
+	}
+	client, server, err := kubernetesHTTPClient(cfg, a.timeout)
+	if err != nil {
+		return nil, err
+	}
+	if configuredServer := strings.TrimSpace(environment.ClusterAPIServer); configuredServer != "" {
+		server = configuredServer
+	}
+	namespaces := workloadNamespaces(environment)
+	if len(namespaces) == 0 {
+		return nil, errors.New("kubernetes namespace is required")
+	}
+	items := make([]Workload, 0)
+	for _, namespace := range namespaces {
+		deployments, err := a.listWorkloadsByType(ctx, client, server, namespace, "Deployment", "/apis/apps/v1/namespaces/"+url.PathEscape(namespace)+"/deployments")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, deployments...)
+		statefulSets, err := a.listWorkloadsByType(ctx, client, server, namespace, "StatefulSet", "/apis/apps/v1/namespaces/"+url.PathEscape(namespace)+"/statefulsets")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, statefulSets...)
+		daemonSets, err := a.listWorkloadsByType(ctx, client, server, namespace, "DaemonSet", "/apis/apps/v1/namespaces/"+url.PathEscape(namespace)+"/daemonsets")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, daemonSets...)
+	}
+	return items, nil
 }
 
 func (a RealKubernetesAdapter) SetImage(ctx context.Context, environmentID string, req SetImageRequest) error {
@@ -203,6 +251,76 @@ func (a RealKubernetesAdapter) SetImage(ctx context.Context, environmentID strin
 
 func (a RealKubernetesAdapter) GetRolloutStatus(ctx context.Context, environmentID string, workload string) (RolloutStatus, error) {
 	return RolloutStatus{}, ErrNotImplemented
+}
+
+func (a RealKubernetesAdapter) listWorkloadsByType(ctx context.Context, client *http.Client, server string, namespace string, workloadType string, path string) ([]Workload, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(server, "/")+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("kubernetes %s %s returned status %d", namespace, strings.ToLower(workloadType), resp.StatusCode)
+	}
+	var payload kubeWorkloadList
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8*1024*1024)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	items := make([]Workload, 0, len(payload.Items))
+	for _, item := range payload.Items {
+		containers := make([]WorkloadContainer, 0, len(item.Spec.Template.Spec.InitContainers)+len(item.Spec.Template.Spec.Containers))
+		for _, container := range item.Spec.Template.Spec.InitContainers {
+			if strings.TrimSpace(container.Name) == "" || strings.TrimSpace(container.Image) == "" {
+				continue
+			}
+			containers = append(containers, WorkloadContainer{Name: container.Name, Type: "INIT", Image: container.Image})
+		}
+		for _, container := range item.Spec.Template.Spec.Containers {
+			if strings.TrimSpace(container.Name) == "" || strings.TrimSpace(container.Image) == "" {
+				continue
+			}
+			containers = append(containers, WorkloadContainer{Name: container.Name, Type: "APP", Image: container.Image})
+		}
+		items = append(items, Workload{
+			Namespace:     firstNonEmpty(item.Metadata.Namespace, namespace),
+			Name:          item.Metadata.Name,
+			Type:          workloadType,
+			Replicas:      item.Spec.Replicas,
+			ReadyReplicas: item.Status.ReadyReplicas,
+			Containers:    containers,
+		})
+	}
+	return items, nil
+}
+
+func workloadNamespaces(environment domain.Environment) []string {
+	values := make([]string, 0)
+	for _, binding := range environment.Bindings {
+		if binding.ResourceType != "K8S" || binding.BindingRole != "BUILD_SOURCE" || binding.ScopeValue == "" {
+			continue
+		}
+		values = appendUniqueTrimmed(values, binding.ScopeValue)
+	}
+	values = appendUniqueTrimmed(values, environment.Namespace)
+	return values
+}
+
+func appendUniqueTrimmed(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, item := range values {
+		if item == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func compactRegistries(input map[string]RegistryConfig) map[string]RegistryConfig {
@@ -276,6 +394,9 @@ func clusterConfigForEnvironment(configs map[string]ClusterConfig, environment d
 	resourceID := strings.TrimSpace(environment.ClusterID)
 	if resourceID == "" {
 		return ClusterConfig{}, "", errors.New("kubernetes cluster resource is not selected")
+	}
+	if strings.TrimSpace(environment.ClusterKubeconfig) != "" {
+		return ClusterConfig{Kubeconfig: environment.ClusterKubeconfig}, resourceID, nil
 	}
 	key := strings.ToLower(firstNonEmpty(environment.ClusterCredentialRef, resourceID))
 	cfg, ok := configs[key]
@@ -352,6 +473,34 @@ type harborTag struct {
 	PushTime string `json:"push_time"`
 }
 
+type kubeWorkloadList struct {
+	Items []kubeWorkload `json:"items"`
+}
+
+type kubeWorkload struct {
+	Metadata struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"metadata"`
+	Spec struct {
+		Replicas int `json:"replicas"`
+		Template struct {
+			Spec struct {
+				InitContainers []kubeContainer `json:"initContainers"`
+				Containers     []kubeContainer `json:"containers"`
+			} `json:"spec"`
+		} `json:"template"`
+	} `json:"spec"`
+	Status struct {
+		ReadyReplicas int `json:"readyReplicas"`
+	} `json:"status"`
+}
+
+type kubeContainer struct {
+	Name  string `json:"name"`
+	Image string `json:"image"`
+}
+
 type kubeconfigFile struct {
 	Clusters       []namedCluster `yaml:"clusters"`
 	Users          []namedUser    `yaml:"users"`
@@ -395,7 +544,7 @@ type kubeContext struct {
 }
 
 func kubernetesHTTPClient(cfg ClusterConfig, timeout time.Duration) (*http.Client, string, error) {
-	content, err := os.ReadFile(cfg.Kubeconfig)
+	content, baseDir, err := kubeconfigContent(cfg.Kubeconfig)
 	if err != nil {
 		return nil, "", err
 	}
@@ -409,7 +558,7 @@ func kubernetesHTTPClient(cfg ClusterConfig, timeout time.Duration) (*http.Clien
 	}
 	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: cluster.InsecureSkipTLSVerify}}
 	if !cluster.InsecureSkipTLSVerify {
-		pool, err := certPoolFromKubeconfig(filepath.Dir(cfg.Kubeconfig), cluster)
+		pool, err := certPoolFromKubeconfig(baseDir, cluster)
 		if err != nil {
 			return nil, "", err
 		}
@@ -417,7 +566,7 @@ func kubernetesHTTPClient(cfg ClusterConfig, timeout time.Duration) (*http.Clien
 			transport.TLSClientConfig.RootCAs = pool
 		}
 	}
-	cert, err := clientCertFromKubeconfig(filepath.Dir(cfg.Kubeconfig), user)
+	cert, err := clientCertFromKubeconfig(baseDir, user)
 	if err != nil {
 		return nil, "", err
 	}
@@ -425,6 +574,17 @@ func kubernetesHTTPClient(cfg ClusterConfig, timeout time.Duration) (*http.Clien
 		transport.TLSClientConfig.Certificates = []tls.Certificate{*cert}
 	}
 	return &http.Client{Timeout: timeout, Transport: bearerTokenTransport{token: user.Token, next: transport}}, cluster.Server, nil
+}
+
+func kubeconfigContent(value string) ([]byte, string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, "", errors.New("kubeconfig is required")
+	}
+	if content, err := os.ReadFile(value); err == nil {
+		return content, filepath.Dir(value), nil
+	}
+	return []byte(value), "", nil
 }
 
 func selectedKubeEntries(config kubeconfigFile) (kubeCluster, kubeUser, error) {

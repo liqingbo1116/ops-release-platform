@@ -187,25 +187,26 @@ func (r *MockRepository) CreateEnvironment(input domain.Environment) (domain.Env
 		id = "env-" + normalized.Code
 	}
 	item := domain.Environment{
-		ID:               id,
-		Name:             normalized.Name,
-		Code:             normalized.Code,
-		ProjectID:        normalized.ProjectID,
-		ProjectName:      r.projectInfo(normalized.ProjectID).Name,
-		ProductStatus:    normalizeProductStatusWithProject(normalized.ProductStatus, normalized.ProjectID, r.projectInfo(normalized.ProjectID)),
-		Type:             normalized.Type,
-		DeployTargetType: normalized.DeployTargetType,
-		NetworkMode:      normalized.NetworkMode,
-		ClusterID:        normalized.ClusterID,
-		Namespace:        normalized.Namespace,
-		RegistryID:       normalized.RegistryID,
-		RegistryProject:  normalized.RegistryProject,
-		JenkinsID:        normalized.JenkinsID,
-		JenkinsView:      normalized.JenkinsView,
-		Status:           r.environmentStatusAfterDefinitionSave(normalized, firstNonEmpty(normalized.Status, "UNKNOWN")),
-		AgentStatus:      "UNBOUND",
-		LastCheckAt:      "",
-		Bindings:         withEnvironmentID(normalized.Bindings, id),
+		ID:                  id,
+		Name:                normalized.Name,
+		Code:                normalized.Code,
+		ProjectID:           normalized.ProjectID,
+		ProjectName:         r.projectInfo(normalized.ProjectID).Name,
+		ProductStatus:       normalizeProductStatusWithProject(normalized.ProductStatus, normalized.ProjectID, r.projectInfo(normalized.ProjectID)),
+		Type:                normalized.Type,
+		DeployTargetType:    normalized.DeployTargetType,
+		NetworkMode:         normalized.NetworkMode,
+		ClusterID:           normalized.ClusterID,
+		Namespace:           normalized.Namespace,
+		RegistryID:          normalized.RegistryID,
+		RegistryProject:     normalized.RegistryProject,
+		PrivateRegistryHost: normalized.PrivateRegistryHost,
+		JenkinsID:           normalized.JenkinsID,
+		JenkinsView:         normalized.JenkinsView,
+		Status:              r.environmentStatusAfterDefinitionSave(normalized, firstNonEmpty(normalized.Status, "UNKNOWN")),
+		AgentStatus:         "UNBOUND",
+		LastCheckAt:         "",
+		Bindings:            withEnvironmentID(normalized.Bindings, id),
 	}
 	if item.ID == "" || item.Name == "" || item.Code == "" || item.Type == "" || item.NetworkMode == "" {
 		return domain.Environment{}, fmt.Errorf("missing required fields")
@@ -243,6 +244,7 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 		r.environments[index].Namespace = strings.TrimSpace(input.Namespace)
 		r.environments[index].RegistryID = strings.TrimSpace(input.RegistryID)
 		r.environments[index].RegistryProject = strings.TrimSpace(input.RegistryProject)
+		r.environments[index].PrivateRegistryHost = strings.TrimSpace(input.PrivateRegistryHost)
 		r.environments[index].JenkinsID = strings.TrimSpace(input.JenkinsID)
 		r.environments[index].JenkinsView = strings.TrimSpace(input.JenkinsView)
 		r.environments[index].Bindings = input.Bindings
@@ -264,6 +266,7 @@ func (r *MockRepository) UpdateEnvironment(id string, input domain.Environment) 
 		r.environments[index].Namespace = normalized.Namespace
 		r.environments[index].RegistryID = normalized.RegistryID
 		r.environments[index].RegistryProject = normalized.RegistryProject
+		r.environments[index].PrivateRegistryHost = normalized.PrivateRegistryHost
 		r.environments[index].JenkinsID = normalized.JenkinsID
 		r.environments[index].JenkinsView = normalized.JenkinsView
 		r.environments[index].Status = r.environmentStatusAfterDefinitionSave(normalized, r.environments[index].Status)
@@ -505,7 +508,7 @@ func (r *MockRepository) UpdateHarborRegistry(id string, input domain.HarborRegi
 	return domain.HarborRegistry{}, false, nil
 }
 
-func (r *MockRepository) UpdateHarborRegistryProbe(id string, status string, message string, projects []string, checkedAt time.Time) (domain.HarborRegistry, bool, error) {
+func (r *MockRepository) UpdateHarborRegistryProbe(id string, status string, message string, projects []string, registryHost string, checkedAt time.Time) (domain.HarborRegistry, bool, error) {
 	for index := range r.harbor {
 		if r.harbor[index].ID != id {
 			continue
@@ -514,6 +517,9 @@ func (r *MockRepository) UpdateHarborRegistryProbe(id string, status string, mes
 		r.harbor[index].ProbeMessage = strings.TrimSpace(message)
 		if projects != nil {
 			r.harbor[index].Projects = append([]string(nil), projects...)
+		}
+		if value := strings.TrimSpace(registryHost); value != "" {
+			r.harbor[index].RegistryHost = value
 		}
 		r.harbor[index].LastCheckAt = checkedAt.Format(time.RFC3339)
 		return r.harbor[index], true, nil
@@ -873,6 +879,22 @@ func (r *MockRepository) ListReleaseSourceServices(query string) []domain.Releas
 	return filter(services, query, func(item domain.ReleaseSourceService) string {
 		return item.ServiceID + " " + item.ServiceName + " " + item.Namespace + " " + item.WorkloadName + " " + item.ImageRepository
 	})
+}
+
+func (r *MockRepository) ListManagedServices(productID string) []domain.ManagedService {
+	return []domain.ManagedService{}
+}
+
+func (r *MockRepository) UpsertManagedServices(productID string, services []domain.DiscoveredService) ([]domain.ManagedService, error) {
+	return []domain.ManagedService{}, nil
+}
+
+func (r *MockRepository) RemoveManagedServices(productID string, serviceIDs []string) ([]domain.ManagedService, error) {
+	return []domain.ManagedService{}, nil
+}
+
+func (r *MockRepository) ConfirmManagedServiceRegistry(productID string, registryHost string, harborProjects []string) ([]domain.ManagedService, error) {
+	return []domain.ManagedService{}, nil
 }
 
 func (r *MockRepository) CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error) {

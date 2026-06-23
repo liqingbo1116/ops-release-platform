@@ -15,6 +15,7 @@ export type HarborRegistry = {
   id: string
   name: string
   url: string
+  registryHost: string
   scheme: 'http' | 'https'
   username: string
   insecureSkipTLSVerify: boolean

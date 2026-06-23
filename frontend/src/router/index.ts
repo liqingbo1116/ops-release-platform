@@ -4,6 +4,7 @@ const LoginPage = () => import('@/pages/LoginPage.vue')
 const DashboardPage = () => import('@/pages/DashboardPage.vue')
 const ProjectPage = () => import('@/pages/ProjectPage.vue')
 const EnvironmentPage = () => import('@/pages/EnvironmentPage.vue')
+const ProductServicePage = () => import('@/pages/ProductServicePage.vue')
 const IntegrationResourcePage = () => import('@/pages/IntegrationResourcePage.vue')
 const AgentPage = () => import('@/pages/AgentPage.vue')
 const BaselineListPage = () => import('@/pages/BaselineListPage.vue')
@@ -27,6 +28,7 @@ const router = createRouter({
     { path: '/dashboard', name: 'dashboard', component: DashboardPage, meta: { title: '首页工作台' } },
     { path: '/projects', name: 'projects', component: ProjectPage, meta: { title: '项目管理' } },
     { path: '/environments', name: 'environments', component: EnvironmentPage, meta: { title: '产品管理' } },
+    { path: '/environments/:id/services', name: 'product-services', component: ProductServicePage, meta: { title: '产品服务' } },
     { path: '/integration-resources', name: 'integration-resources', component: IntegrationResourcePage, meta: { title: '基础资源' } },
     { path: '/agents', name: 'agents', component: AgentPage, meta: { title: 'Agent 管理' } },
     { path: '/baselines', name: 'baselines', component: BaselineListPage, meta: { title: '环境基线列表' } },

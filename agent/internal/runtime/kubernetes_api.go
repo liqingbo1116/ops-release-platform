@@ -13,10 +13,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml"
+
+	"ops-release-platform/agent/internal/reporter"
 )
 
 type kubeconfigFile struct {
@@ -68,6 +71,33 @@ type kubeNamespaceList struct {
 			Name string `json:"name"`
 		} `json:"metadata"`
 	} `json:"items"`
+}
+
+type kubeWorkloadList struct {
+	Items []kubeWorkload `json:"items"`
+}
+
+type kubeWorkload struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		Replicas *int `json:"replicas"`
+		Template struct {
+			Spec struct {
+				InitContainers []kubeContainer `json:"initContainers"`
+				Containers     []kubeContainer `json:"containers"`
+			} `json:"spec"`
+		} `json:"template"`
+	} `json:"spec"`
+	Status struct {
+		ReadyReplicas int `json:"readyReplicas"`
+	} `json:"status"`
+}
+
+type kubeContainer struct {
+	Name  string `json:"name"`
+	Image string `json:"image"`
 }
 
 func newKubernetesClient(kubeconfigPath string, timeout time.Duration, timeoutTransport http.RoundTripper) (kubernetesClient, error) {
@@ -157,6 +187,85 @@ func (c kubernetesClient) listNamespaces(ctx context.Context) ([]string, error) 
 		}
 	}
 	return compactRuntimeItems(items), nil
+}
+
+func (c kubernetesClient) listWorkloads(ctx context.Context, namespaces []string) ([]reporter.RuntimeWorkload, error) {
+	items := make([]reporter.RuntimeWorkload, 0)
+	for _, namespace := range namespaces {
+		name := strings.TrimSpace(namespace)
+		if name == "" {
+			continue
+		}
+		deployments, err := c.listWorkloadsByType(ctx, name, "Deployment", "/apis/apps/v1/namespaces/"+url.PathEscape(name)+"/deployments")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, deployments...)
+		statefulSets, err := c.listWorkloadsByType(ctx, name, "StatefulSet", "/apis/apps/v1/namespaces/"+url.PathEscape(name)+"/statefulsets")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, statefulSets...)
+		daemonSets, err := c.listWorkloadsByType(ctx, name, "DaemonSet", "/apis/apps/v1/namespaces/"+url.PathEscape(name)+"/daemonsets")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, daemonSets...)
+	}
+	sortRuntimeWorkloads(items)
+	return items, nil
+}
+
+func (c kubernetesClient) listWorkloadsByType(ctx context.Context, namespace string, workloadType string, path string) ([]reporter.RuntimeWorkload, error) {
+	body, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var payload kubeWorkloadList
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse kubernetes %s failed: %w", workloadType, err)
+	}
+	items := make([]reporter.RuntimeWorkload, 0, len(payload.Items))
+	for _, workload := range payload.Items {
+		name := strings.TrimSpace(workload.Metadata.Name)
+		if name == "" {
+			continue
+		}
+		replicas := 0
+		if workload.Spec.Replicas != nil {
+			replicas = *workload.Spec.Replicas
+		}
+		containers := make([]reporter.RuntimeContainer, 0, len(workload.Spec.Template.Spec.InitContainers)+len(workload.Spec.Template.Spec.Containers))
+		for _, container := range workload.Spec.Template.Spec.InitContainers {
+			if strings.TrimSpace(container.Name) == "" || strings.TrimSpace(container.Image) == "" {
+				continue
+			}
+			containers = append(containers, reporter.RuntimeContainer{
+				Name:  strings.TrimSpace(container.Name),
+				Type:  "INIT",
+				Image: strings.TrimSpace(container.Image),
+			})
+		}
+		for _, container := range workload.Spec.Template.Spec.Containers {
+			if strings.TrimSpace(container.Name) == "" || strings.TrimSpace(container.Image) == "" {
+				continue
+			}
+			containers = append(containers, reporter.RuntimeContainer{
+				Name:  strings.TrimSpace(container.Name),
+				Type:  "APP",
+				Image: strings.TrimSpace(container.Image),
+			})
+		}
+		items = append(items, reporter.RuntimeWorkload{
+			Namespace:     namespace,
+			Name:          name,
+			Type:          workloadType,
+			Replicas:      replicas,
+			ReadyReplicas: workload.Status.ReadyReplicas,
+			Containers:    containers,
+		})
+	}
+	return items, nil
 }
 
 func (c kubernetesClient) namespaceExists(ctx context.Context, namespace string) error {
@@ -261,4 +370,12 @@ func (t kubeAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		req.SetBasicAuth(t.username, t.password)
 	}
 	return t.next.RoundTrip(req)
+}
+
+func sortRuntimeWorkloads(items []reporter.RuntimeWorkload) {
+	sort.Slice(items, func(left, right int) bool {
+		a := items[left].Namespace + "\x00" + items[left].Type + "\x00" + items[left].Name
+		b := items[right].Namespace + "\x00" + items[right].Type + "\x00" + items[right].Name
+		return a < b
+	})
 }

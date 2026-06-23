@@ -4,6 +4,8 @@ import (
 	"crypto/sha1"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -142,21 +144,22 @@ func (s *DatabaseStore) CreateEnvironment(input domain.Environment) (domain.Envi
 		id = "env-" + normalized.Code
 	}
 	model := EnvironmentModel{
-		ID:               id,
-		Name:             strings.TrimSpace(normalized.Name),
-		Code:             normalized.Code,
-		ProjectID:        normalized.ProjectID,
-		ProductStatus:    normalizeProductStatus(normalized.ProductStatus, normalized.ProjectID),
-		Type:             normalized.Type,
-		DeployTargetType: normalized.DeployTargetType,
-		NetworkMode:      normalized.NetworkMode,
-		ClusterID:        normalized.ClusterID,
-		Namespace:        normalized.Namespace,
-		RegistryID:       normalized.RegistryID,
-		RegistryProject:  normalized.RegistryProject,
-		JenkinsID:        normalized.JenkinsID,
-		JenkinsView:      normalized.JenkinsView,
-		Status:           fallbackString(strings.TrimSpace(normalized.Status), "UNKNOWN"),
+		ID:                  id,
+		Name:                strings.TrimSpace(normalized.Name),
+		Code:                normalized.Code,
+		ProjectID:           normalized.ProjectID,
+		ProductStatus:       normalizeProductStatus(normalized.ProductStatus, normalized.ProjectID),
+		Type:                normalized.Type,
+		DeployTargetType:    normalized.DeployTargetType,
+		NetworkMode:         normalized.NetworkMode,
+		ClusterID:           normalized.ClusterID,
+		Namespace:           normalized.Namespace,
+		RegistryID:          normalized.RegistryID,
+		RegistryProject:     normalized.RegistryProject,
+		PrivateRegistryHost: normalized.PrivateRegistryHost,
+		JenkinsID:           normalized.JenkinsID,
+		JenkinsView:         normalized.JenkinsView,
+		Status:              fallbackString(strings.TrimSpace(normalized.Status), "UNKNOWN"),
 	}
 	model.Status = s.environmentStatusByScopeCache(normalized, model.Status)
 	if model.ID == "" || model.Name == "" || model.Code == "" || model.Type == "" || model.NetworkMode == "" {
@@ -204,28 +207,30 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 	model.Namespace = strings.TrimSpace(input.Namespace)
 	model.RegistryID = strings.TrimSpace(input.RegistryID)
 	model.RegistryProject = strings.TrimSpace(input.RegistryProject)
+	model.PrivateRegistryHost = strings.TrimSpace(input.PrivateRegistryHost)
 	model.JenkinsID = strings.TrimSpace(input.JenkinsID)
 	model.JenkinsView = strings.TrimSpace(input.JenkinsView)
 	if status := strings.TrimSpace(input.Status); status != "" {
 		model.Status = status
 	}
 	normalized, err := normalizeEnvironmentInput(domain.Environment{
-		ID:               model.ID,
-		Name:             model.Name,
-		Code:             model.Code,
-		ProjectID:        model.ProjectID,
-		ProductStatus:    model.ProductStatus,
-		Type:             model.Type,
-		DeployTargetType: model.DeployTargetType,
-		NetworkMode:      model.NetworkMode,
-		ClusterID:        model.ClusterID,
-		Namespace:        model.Namespace,
-		RegistryID:       model.RegistryID,
-		RegistryProject:  model.RegistryProject,
-		JenkinsID:        model.JenkinsID,
-		JenkinsView:      model.JenkinsView,
-		Bindings:         input.Bindings,
-		Status:           model.Status,
+		ID:                  model.ID,
+		Name:                model.Name,
+		Code:                model.Code,
+		ProjectID:           model.ProjectID,
+		ProductStatus:       model.ProductStatus,
+		Type:                model.Type,
+		DeployTargetType:    model.DeployTargetType,
+		NetworkMode:         model.NetworkMode,
+		ClusterID:           model.ClusterID,
+		Namespace:           model.Namespace,
+		RegistryID:          model.RegistryID,
+		RegistryProject:     model.RegistryProject,
+		PrivateRegistryHost: model.PrivateRegistryHost,
+		JenkinsID:           model.JenkinsID,
+		JenkinsView:         model.JenkinsView,
+		Bindings:            input.Bindings,
+		Status:              model.Status,
 	})
 	if err != nil {
 		return domain.Environment{}, false, err
@@ -239,6 +244,7 @@ func (s *DatabaseStore) UpdateEnvironment(id string, input domain.Environment) (
 	model.Namespace = normalized.Namespace
 	model.RegistryID = normalized.RegistryID
 	model.RegistryProject = normalized.RegistryProject
+	model.PrivateRegistryHost = normalized.PrivateRegistryHost
 	model.JenkinsID = normalized.JenkinsID
 	model.JenkinsView = normalized.JenkinsView
 	model.Status = s.environmentStatusByScopeCache(normalized, model.Status)
@@ -454,7 +460,7 @@ func (s *DatabaseStore) UpdateHarborRegistry(id string, input domain.HarborRegis
 	return toDomainHarborRegistry(model), true, nil
 }
 
-func (s *DatabaseStore) UpdateHarborRegistryProbe(id string, status string, message string, projects []string, checkedAt time.Time) (domain.HarborRegistry, bool, error) {
+func (s *DatabaseStore) UpdateHarborRegistryProbe(id string, status string, message string, projects []string, registryHost string, checkedAt time.Time) (domain.HarborRegistry, bool, error) {
 	var model HarborRegistryModel
 	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -466,6 +472,9 @@ func (s *DatabaseStore) UpdateHarborRegistryProbe(id string, status string, mess
 	model.ProbeMessage = strings.TrimSpace(message)
 	if projects != nil {
 		model.Projects = compactStringList(projects)
+	}
+	if value := strings.TrimSpace(registryHost); value != "" {
+		model.RegistryHost = value
 	}
 	model.LastCheckAt = &checkedAt
 	if err := s.db.Save(&model).Error; err != nil {
@@ -907,6 +916,196 @@ func (s *DatabaseStore) ListReleaseSourceServices(query string) []domain.Release
 	return items
 }
 
+func (s *DatabaseStore) ListManagedServices(productID string) []domain.ManagedService {
+	var models []ServiceModel
+	db := s.db.Where("product_id = ?", strings.TrimSpace(productID)).Order("namespace asc, workload_type asc, workload_name asc, container_type asc, container_name asc")
+	if err := db.Find(&models).Error; err != nil {
+		return []domain.ManagedService{}
+	}
+	items := make([]domain.ManagedService, 0, len(models))
+	for _, model := range models {
+		items = append(items, toDomainManagedService(model))
+	}
+	return items
+}
+
+func (s *DatabaseStore) UpsertManagedServices(productID string, services []domain.DiscoveredService) ([]domain.ManagedService, error) {
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return nil, errors.New("product id is required")
+	}
+	if _, ok := s.GetEnvironment(productID); !ok {
+		return nil, errors.New("product not found")
+	}
+	models := make([]ServiceModel, 0, len(services))
+	for _, service := range services {
+		model := serviceModelFromDiscovered(productID, service)
+		if model.ID == "" || model.Namespace == "" || model.WorkloadName == "" || model.ContainerName == "" || model.Image == "" {
+			continue
+		}
+		models = append(models, model)
+	}
+	if len(models) == 0 {
+		return []domain.ManagedService{}, nil
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		for _, model := range models {
+			var existing ServiceModel
+			err := tx.Where("id = ?", model.ID).Take(&existing).Error
+			if err == nil {
+				model.CreatedAt = existing.CreatedAt
+				if err := tx.Model(&existing).Updates(map[string]any{
+					"product_id":                 model.ProductID,
+					"name":                       model.Name,
+					"namespace":                  model.Namespace,
+					"workload_name":              model.WorkloadName,
+					"workload_type":              model.WorkloadType,
+					"container_name":             model.ContainerName,
+					"container_type":             model.ContainerType,
+					"image":                      model.Image,
+					"image_registry":             model.ImageRegistry,
+					"image_project":              model.ImageProject,
+					"image_repository":           model.ImageRepository,
+					"image_tag":                  model.ImageTag,
+					"image_source":               model.ImageSource,
+					"private_registry_host":      model.PrivateRegistryHost,
+					"private_registry_confirmed": model.PrivateRegistryConfirmed,
+					"replicas":                   model.Replicas,
+					"ready_replicas":             model.ReadyReplicas,
+				}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err := tx.Create(&model).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.ListManagedServices(productID), nil
+}
+
+func (s *DatabaseStore) RemoveManagedServices(productID string, serviceIDs []string) ([]domain.ManagedService, error) {
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return nil, errors.New("product id is required")
+	}
+	if _, ok := s.GetEnvironment(productID); !ok {
+		return nil, errors.New("product not found")
+	}
+	ids := make([]string, 0, len(serviceIDs))
+	seen := map[string]bool{}
+	for _, id := range serviceIDs {
+		value := strings.TrimSpace(id)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		ids = append(ids, value)
+	}
+	if len(ids) == 0 {
+		return s.ListManagedServices(productID), nil
+	}
+	if err := s.db.Where("product_id = ? AND id IN ?", productID, ids).Delete(&ServiceModel{}).Error; err != nil {
+		return nil, err
+	}
+	return s.ListManagedServices(productID), nil
+}
+
+func (s *DatabaseStore) ConfirmManagedServiceRegistry(productID string, registryHost string, harborProjects []string) ([]domain.ManagedService, error) {
+	productID = strings.TrimSpace(productID)
+	registryHost = normalizeRegistryHost(registryHost)
+	if productID == "" {
+		return nil, errors.New("product id is required")
+	}
+	if registryHost == "" {
+		return nil, errors.New("private registry host is required")
+	}
+	projectSet := make(map[string]bool, len(harborProjects))
+	for _, project := range harborProjects {
+		if value := strings.TrimSpace(project); value != "" {
+			projectSet[value] = true
+		}
+	}
+	var models []ServiceModel
+	if err := s.db.Where("product_id = ?", productID).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	if len(models) == 0 {
+		return []domain.ManagedService{}, nil
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		for _, model := range models {
+			imageRegistry := normalizeRegistryHost(model.ImageRegistry)
+			imageProject := strings.TrimSpace(model.ImageProject)
+			imageSource := "EXTERNAL"
+			privateRegistryHost := ""
+			privateRegistryConfirmed := false
+			if imageRegistry != "" && sameRegistryHostValue(imageRegistry, registryHost) {
+				privateRegistryHost = registryHost
+				privateRegistryConfirmed = true
+				if projectSet[imageProject] {
+					imageSource = "PRIVATE"
+				} else {
+					imageSource = "UNMATCHED_PRIVATE"
+				}
+			}
+			if err := tx.Model(&model).Updates(map[string]any{
+				"image_source":               imageSource,
+				"private_registry_host":      privateRegistryHost,
+				"private_registry_confirmed": privateRegistryConfirmed,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.ListManagedServices(productID), nil
+}
+
+func normalizeRegistryHost(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if !strings.Contains(value, "://") {
+		value = "http://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return strings.TrimRight(strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(value, "http://"), "https://")), "/")
+	}
+	host := parsed.Host
+	if host == "" {
+		host = parsed.Path
+	}
+	return strings.TrimRight(strings.ToLower(host), "/")
+}
+
+func sameRegistryHostValue(left string, right string) bool {
+	left = normalizeRegistryHost(left)
+	right = normalizeRegistryHost(right)
+	if left == right {
+		return true
+	}
+	leftHost, leftPort, leftErr := net.SplitHostPort(left)
+	rightHost, rightPort, rightErr := net.SplitHostPort(right)
+	if leftErr == nil && rightErr == nil {
+		return leftHost == rightHost && leftPort == rightPort
+	}
+	return false
+}
+
 func (s *DatabaseStore) CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error) {
 	model := ReleaseOrderModel{
 		ID:                   strings.TrimSpace(input.ID),
@@ -1033,24 +1232,25 @@ func toDomainEnvironment(model EnvironmentModel, boundAgentStatus string, projec
 		agentStatus = fallbackString(boundAgentStatus, "OFFLINE")
 	}
 	return domain.Environment{
-		ID:               model.ID,
-		Name:             model.Name,
-		Code:             model.Code,
-		ProjectID:        model.ProjectID,
-		ProjectName:      project.Name,
-		ProductStatus:    normalizeProductStatusWithProject(model.ProductStatus, model.ProjectID, project),
-		Type:             model.Type,
-		DeployTargetType: fallbackString(strings.TrimSpace(model.DeployTargetType), "KUBERNETES"),
-		NetworkMode:      model.NetworkMode,
-		ClusterID:        model.ClusterID,
-		Namespace:        model.Namespace,
-		RegistryID:       model.RegistryID,
-		RegistryProject:  model.RegistryProject,
-		JenkinsID:        model.JenkinsID,
-		JenkinsView:      model.JenkinsView,
-		Status:           model.Status,
-		AgentStatus:      agentStatus,
-		LastCheckAt:      lastCheckAt,
+		ID:                  model.ID,
+		Name:                model.Name,
+		Code:                model.Code,
+		ProjectID:           model.ProjectID,
+		ProjectName:         project.Name,
+		ProductStatus:       normalizeProductStatusWithProject(model.ProductStatus, model.ProjectID, project),
+		Type:                model.Type,
+		DeployTargetType:    fallbackString(strings.TrimSpace(model.DeployTargetType), "KUBERNETES"),
+		NetworkMode:         model.NetworkMode,
+		ClusterID:           model.ClusterID,
+		Namespace:           model.Namespace,
+		RegistryID:          model.RegistryID,
+		RegistryProject:     model.RegistryProject,
+		PrivateRegistryHost: model.PrivateRegistryHost,
+		JenkinsID:           model.JenkinsID,
+		JenkinsView:         model.JenkinsView,
+		Status:              model.Status,
+		AgentStatus:         agentStatus,
+		LastCheckAt:         lastCheckAt,
 	}
 }
 
@@ -1082,6 +1282,7 @@ func toDomainHarborRegistry(model HarborRegistryModel) domain.HarborRegistry {
 		ID:                    model.ID,
 		Name:                  model.Name,
 		URL:                   model.URL,
+		RegistryHost:          model.RegistryHost,
 		Scheme:                fallbackString(model.Scheme, schemeFromURL(model.URL)),
 		Username:              model.Username,
 		CredentialRef:         model.CredentialRef,
@@ -1200,24 +1401,112 @@ func runtimeStatusHasData(status domain.RuntimeStatus) bool {
 	return status.Kubernetes.Status != "" ||
 		status.Kubernetes.Message != "" ||
 		status.Kubernetes.UpdatedAt != "" ||
+		status.Kubernetes.Endpoint != "" ||
 		len(status.Kubernetes.Items) > 0 ||
+		len(status.Kubernetes.Workloads) > 0 ||
 		status.Harbor.Status != "" ||
 		status.Harbor.Message != "" ||
 		status.Harbor.UpdatedAt != "" ||
-		len(status.Harbor.Items) > 0
+		status.Harbor.Endpoint != "" ||
+		len(status.Harbor.Items) > 0 ||
+		len(status.Harbor.Workloads) > 0
 }
 
 func toDomainReleaseSourceService(model ServiceModel) domain.ReleaseSourceService {
+	repository := fallbackString(model.ImageRepository, strings.TrimSuffix(model.Image, ":"+model.ImageTag))
 	return domain.ReleaseSourceService{
 		ServiceID:       model.ID,
 		ServiceName:     model.Name,
 		Namespace:       model.Namespace,
 		WorkloadName:    model.WorkloadName,
 		WorkloadType:    model.WorkloadType,
-		ImageRepository: model.ImageRepository,
+		ImageRepository: repository,
 		Tags:            []domain.ReleaseImageTag{},
 		Publishable:     false,
 	}
+}
+
+func toDomainManagedService(model ServiceModel) domain.ManagedService {
+	return domain.ManagedService{
+		ID:                       model.ID,
+		ProductID:                model.ProductID,
+		Name:                     model.Name,
+		Namespace:                model.Namespace,
+		WorkloadName:             model.WorkloadName,
+		WorkloadType:             model.WorkloadType,
+		ContainerName:            model.ContainerName,
+		ContainerType:            fallbackString(model.ContainerType, "APP"),
+		Image:                    model.Image,
+		ImageRegistry:            model.ImageRegistry,
+		ImageProject:             model.ImageProject,
+		ImageRepository:          model.ImageRepository,
+		ImageTag:                 model.ImageTag,
+		ImageSource:              fallbackString(model.ImageSource, "UNKNOWN"),
+		PrivateRegistryHost:      model.PrivateRegistryHost,
+		PrivateRegistryConfirmed: model.PrivateRegistryConfirmed,
+		Replicas:                 model.Replicas,
+		ReadyReplicas:            model.ReadyReplicas,
+		CreatedAt:                model.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:                model.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func serviceModelFromDiscovered(productID string, service domain.DiscoveredService) ServiceModel {
+	namespace := strings.TrimSpace(service.Namespace)
+	workloadName := strings.TrimSpace(service.WorkloadName)
+	if workloadName == "" {
+		workloadName = strings.TrimSpace(service.Name)
+	}
+	workloadType := fallbackString(strings.TrimSpace(service.WorkloadType), "Deployment")
+	containerName := strings.TrimSpace(service.ContainerName)
+	containerType := fallbackString(strings.TrimSpace(service.ContainerType), "APP")
+	image := strings.TrimSpace(service.Image)
+	imageRegistry := strings.TrimSpace(service.ImageRegistry)
+	imageProject := strings.TrimSpace(service.ImageProject)
+	imageRepository := strings.TrimSpace(service.ImageRepository)
+	imageTag := strings.TrimSpace(service.ImageTag)
+	imageSource := fallbackString(strings.TrimSpace(service.ImageSource), "UNKNOWN")
+	privateRegistryHost := strings.TrimSpace(service.PrivateRegistryHost)
+	id := strings.TrimSpace(service.ID)
+	if id == "" {
+		id = stableServiceID(productID, namespace, workloadType, workloadName, containerType, containerName)
+	}
+	return ServiceModel{
+		ID:                       id,
+		ProductID:                productID,
+		Name:                     fallbackString(strings.TrimSpace(service.Name), workloadName),
+		Namespace:                namespace,
+		WorkloadName:             workloadName,
+		WorkloadType:             workloadType,
+		ContainerName:            containerName,
+		ContainerType:            containerType,
+		Image:                    image,
+		ImageRegistry:            imageRegistry,
+		ImageProject:             imageProject,
+		ImageRepository:          imageRepository,
+		ImageTag:                 imageTag,
+		ImageSource:              imageSource,
+		PrivateRegistryHost:      privateRegistryHost,
+		PrivateRegistryConfirmed: service.PrivateRegistryConfirmed,
+		Replicas:                 service.Replicas,
+		ReadyReplicas:            service.ReadyReplicas,
+	}
+}
+
+func stableServiceID(parts ...string) string {
+	key := strings.Join(parts, "\x00")
+	sum := sha1.Sum([]byte(key))
+	return "svc-" + hexString(sum[:8])
+}
+
+func hexString(input []byte) string {
+	const chars = "0123456789abcdef"
+	output := make([]byte, len(input)*2)
+	for index, value := range input {
+		output[index*2] = chars[value>>4]
+		output[index*2+1] = chars[value&0x0f]
+	}
+	return string(output)
 }
 
 func toDomainReleaseOrder(model ReleaseOrderModel, environmentName string, agentName string) domain.ReleaseOrder {
@@ -1323,21 +1612,22 @@ func normalizeEnvironmentInput(input domain.Environment) (domain.Environment, er
 		return domain.Environment{}, errors.New("unsupported deploy target type")
 	}
 	item := domain.Environment{
-		ID:               strings.TrimSpace(input.ID),
-		Name:             strings.TrimSpace(input.Name),
-		Code:             code,
-		ProjectID:        strings.TrimSpace(input.ProjectID),
-		ProductStatus:    normalizeProductStatus(input.ProductStatus, input.ProjectID),
-		Type:             environmentType,
-		DeployTargetType: deployTargetType,
-		NetworkMode:      strings.ToUpper(strings.TrimSpace(input.NetworkMode)),
-		ClusterID:        strings.TrimSpace(input.ClusterID),
-		Namespace:        strings.TrimSpace(input.Namespace),
-		RegistryID:       strings.TrimSpace(input.RegistryID),
-		RegistryProject:  strings.TrimSpace(input.RegistryProject),
-		JenkinsID:        strings.TrimSpace(input.JenkinsID),
-		JenkinsView:      strings.TrimSpace(input.JenkinsView),
-		Status:           strings.TrimSpace(input.Status),
+		ID:                  strings.TrimSpace(input.ID),
+		Name:                strings.TrimSpace(input.Name),
+		Code:                code,
+		ProjectID:           strings.TrimSpace(input.ProjectID),
+		ProductStatus:       normalizeProductStatus(input.ProductStatus, input.ProjectID),
+		Type:                environmentType,
+		DeployTargetType:    deployTargetType,
+		NetworkMode:         strings.ToUpper(strings.TrimSpace(input.NetworkMode)),
+		ClusterID:           strings.TrimSpace(input.ClusterID),
+		Namespace:           strings.TrimSpace(input.Namespace),
+		RegistryID:          strings.TrimSpace(input.RegistryID),
+		RegistryProject:     strings.TrimSpace(input.RegistryProject),
+		PrivateRegistryHost: strings.TrimSpace(input.PrivateRegistryHost),
+		JenkinsID:           strings.TrimSpace(input.JenkinsID),
+		JenkinsView:         strings.TrimSpace(input.JenkinsView),
+		Status:              strings.TrimSpace(input.Status),
 	}
 	if item.Type == "" {
 		return domain.Environment{}, errors.New("environment type is required")

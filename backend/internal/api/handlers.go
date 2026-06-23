@@ -3,12 +3,16 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -381,6 +385,655 @@ func (h *Handler) ProbeEnvironment(c *gin.Context) {
 	})
 }
 
+func (h *Handler) ListEnvironmentServices(c *gin.Context) {
+	environmentID := c.Param("id")
+	if _, ok := h.repo.GetEnvironment(environmentID); !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	OK(c, paginate(h.repo.ListManagedServices(environmentID), c))
+}
+
+func (h *Handler) ListDiscoveredEnvironmentServices(c *gin.Context) {
+	environmentID := c.Param("id")
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	services, err := h.discoverEnvironmentServices(c.Request.Context(), environment)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	OK(c, paginate(services, c))
+}
+
+func (h *Handler) AdoptEnvironmentServices(c *gin.Context) {
+	environmentID := c.Param("id")
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	var input domain.AdoptServiceInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "invalid service adopt request")
+		return
+	}
+	if len(input.Services) == 0 {
+		BadRequest(c, "请选择需要纳管的服务")
+		return
+	}
+	discovered, err := h.discoverEnvironmentServices(c.Request.Context(), environment)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	byID := make(map[string]domain.DiscoveredService, len(discovered))
+	for _, item := range discovered {
+		byID[item.ID] = item
+	}
+	selected := make([]domain.DiscoveredService, 0, len(input.Services))
+	seen := map[string]bool{}
+	for _, requested := range input.Services {
+		id := strings.TrimSpace(requested.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		service, exists := byID[id]
+		if !exists {
+			BadRequest(c, "只能纳管当前产品已发现的服务")
+			return
+		}
+		seen[id] = true
+		selected = append(selected, service)
+	}
+	if len(selected) == 0 {
+		BadRequest(c, "请选择需要纳管的服务")
+		return
+	}
+	services, err := h.repo.UpsertManagedServices(environmentID, selected)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	OK(c, services)
+}
+
+func (h *Handler) RemoveEnvironmentServices(c *gin.Context) {
+	environmentID := c.Param("id")
+	if _, ok := h.repo.GetEnvironment(environmentID); !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	var input domain.RemoveManagedServiceInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "invalid service remove request")
+		return
+	}
+	if len(input.ServiceIDs) == 0 {
+		BadRequest(c, "请选择需要移除纳管的服务")
+		return
+	}
+	services, err := h.repo.RemoveManagedServices(environmentID, input.ServiceIDs)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	OK(c, services)
+}
+
+func (h *Handler) ConfirmEnvironmentServiceRegistry(c *gin.Context) {
+	environmentID := c.Param("id")
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	var input domain.ConfirmServiceRegistryInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "invalid private registry confirm request")
+		return
+	}
+	confirmedRegistryHost := normalizedImageRegistry(input.PrivateRegistryHost)
+	if confirmedRegistryHost == "" {
+		BadRequest(c, "请选择需要确认的私有镜像 registry")
+		return
+	}
+	managed := h.repo.ListManagedServices(environment.ID)
+	if len(managed) == 0 {
+		BadRequest(c, "请先纳管服务，再确认私有镜像 registry")
+		return
+	}
+	candidates := h.privateRegistryCandidatesFromManagedServices(c.Request.Context(), environment, workloadBindingRole(environment), managed)
+	if !registryCandidateAllowed(confirmedRegistryHost, candidates) {
+		BadRequest(c, "确认的私有镜像 registry 不在已纳管服务可识别的候选范围内")
+		return
+	}
+	updatedEnvironment, _, err := h.repo.UpdateEnvironment(environment.ID, domain.Environment{
+		ID:                  environment.ID,
+		Name:                environment.Name,
+		Code:                environment.Code,
+		ProjectID:           environment.ProjectID,
+		ProductStatus:       environment.ProductStatus,
+		Type:                environment.Type,
+		DeployTargetType:    environment.DeployTargetType,
+		NetworkMode:         environment.NetworkMode,
+		ClusterID:           environment.ClusterID,
+		Namespace:           environment.Namespace,
+		RegistryID:          environment.RegistryID,
+		RegistryProject:     environment.RegistryProject,
+		PrivateRegistryHost: confirmedRegistryHost,
+		JenkinsID:           environment.JenkinsID,
+		JenkinsView:         environment.JenkinsView,
+		Bindings:            environment.Bindings,
+		Status:              environment.Status,
+	})
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	projects := mapKeys(h.harborScope(c.Request.Context(), updatedEnvironment, workloadBindingRole(updatedEnvironment)).Projects)
+	services, err := h.repo.ConfirmManagedServiceRegistry(updatedEnvironment.ID, confirmedRegistryHost, projects)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	OK(c, services)
+}
+
+func (h *Handler) discoverEnvironmentServices(ctx context.Context, environment domain.Environment) ([]domain.DiscoveredService, error) {
+	workloads, err := h.environmentWorkloads(ctx, environment)
+	if err != nil {
+		return nil, err
+	}
+	namespaceSet := h.boundScopeSet(environment, "K8S", workloadBindingRole(environment))
+	harbor := h.harborScopeForDiscovery(ctx, environment, workloadBindingRole(environment))
+	harbor = inferHarborScopeRegistryHost(harbor, workloads)
+	privateRegistryHost := normalizedImageRegistry(harbor.RegistryHost)
+	managed := h.repo.ListManagedServices(environment.ID)
+	managedIDs := make(map[string]bool, len(managed))
+	for _, item := range managed {
+		managedIDs[item.ID] = true
+	}
+	services := make([]domain.DiscoveredService, 0)
+	for _, workload := range workloads {
+		namespace := strings.TrimSpace(workload.Namespace)
+		if len(namespaceSet) > 0 && !namespaceSet[namespace] {
+			continue
+		}
+		for _, container := range workload.Containers {
+			image := strings.TrimSpace(container.Image)
+			if image == "" {
+				continue
+			}
+			imageParts := parseContainerImage(image)
+			imageSource := classifyImageSource(imageParts, harbor)
+			containerType := firstNonEmpty(strings.TrimSpace(container.Type), "APP")
+			id := stableDiscoveredServiceID(environment.ID, namespace, workload.Type, workload.Name, containerType, container.Name)
+			services = append(services, domain.DiscoveredService{
+				ID:                       id,
+				ProductID:                environment.ID,
+				Name:                     firstNonEmpty(workload.Name, container.Name),
+				Namespace:                namespace,
+				WorkloadName:             workload.Name,
+				WorkloadType:             workload.Type,
+				ContainerName:            container.Name,
+				ContainerType:            containerType,
+				Image:                    image,
+				ImageRegistry:            imageParts.Registry,
+				ImageProject:             imageParts.Project,
+				ImageRepository:          imageParts.Repository,
+				ImageTag:                 imageParts.Tag,
+				ImageSource:              imageSource,
+				PrivateRegistryHost:      privateRegistryHost,
+				PrivateRegistryConfirmed: privateRegistryHost != "" && sameRegistryHost(environment.PrivateRegistryHost, privateRegistryHost),
+				Replicas:                 workload.Replicas,
+				ReadyReplicas:            workload.ReadyReplicas,
+				Managed:                  managedIDs[id],
+			})
+		}
+	}
+	log.Printf("environment %s service discovery: type=%s namespaces=%v workloads=%d services=%d harborRegistry=%s harborProjects=%v", environment.ID, environment.Type, mapKeys(namespaceSet), len(workloads), len(services), harbor.RegistryHost, mapKeys(harbor.Projects))
+	return services, nil
+}
+
+func mapKeys(input map[string]bool) []string {
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (h *Handler) environmentWorkloads(ctx context.Context, environment domain.Environment) ([]integration.Workload, error) {
+	if environment.Type == "PROJECT" {
+		agentItem, ok := h.findProbeAgent(environment.ID)
+		if !ok {
+			return nil, fmt.Errorf("未找到已绑定且在线的 Agent，无法获取远程服务清单")
+		}
+		if agentItem.RuntimeStatus.Kubernetes.Status != "HEALTHY" {
+			return nil, fmt.Errorf("远程 K8s 未就绪：%s", firstNonEmpty(agentItem.RuntimeStatus.Kubernetes.Message, "等待 Agent 上报"))
+		}
+		return workloadsFromRuntime(agentItem.RuntimeStatus.Kubernetes.Workloads), nil
+	}
+	clusterID, namespaces := h.kubernetesScopeForDiscovery(environment)
+	if clusterID == "" {
+		return nil, fmt.Errorf("本地产品未绑定 Kubernetes 集群")
+	}
+	if len(namespaces) == 0 {
+		return nil, fmt.Errorf("本地产品未绑定 Kubernetes namespace")
+	}
+	cluster, ok := h.repo.GetKubernetesCluster(clusterID)
+	if !ok {
+		return nil, fmt.Errorf("kubernetes cluster not found")
+	}
+	if strings.TrimSpace(cluster.Kubeconfig) == "" {
+		return nil, fmt.Errorf("kubernetes cluster kubeconfig is required")
+	}
+	return integration.ListWorkloadsWithKubeconfig(ctx, cluster.Kubeconfig, cluster.APIServer, namespaces, 10*time.Second)
+}
+
+func workloadsFromRuntime(items []domain.RuntimeWorkload) []integration.Workload {
+	workloads := make([]integration.Workload, 0, len(items))
+	for _, item := range items {
+		containers := make([]integration.WorkloadContainer, 0, len(item.Containers))
+		for _, container := range item.Containers {
+			containers = append(containers, integration.WorkloadContainer{
+				Name:  container.Name,
+				Type:  container.Type,
+				Image: container.Image,
+			})
+		}
+		workloads = append(workloads, integration.Workload{
+			Namespace:     item.Namespace,
+			Name:          item.Name,
+			Type:          item.Type,
+			Replicas:      item.Replicas,
+			ReadyReplicas: item.ReadyReplicas,
+			Containers:    containers,
+		})
+	}
+	return workloads
+}
+
+func workloadBindingRole(environment domain.Environment) string {
+	if environment.Type == "PROJECT" {
+		return "RUNTIME_TARGET"
+	}
+	return "BUILD_SOURCE"
+}
+
+func (h *Handler) boundScopeSet(environment domain.Environment, resourceType string, bindingRole string) map[string]bool {
+	scopes := map[string]bool{}
+	for _, binding := range environment.Bindings {
+		if binding.ResourceType == resourceType && binding.BindingRole == bindingRole {
+			if scope := strings.TrimSpace(binding.ScopeValue); scope != "" {
+				scopes[scope] = true
+			}
+		}
+	}
+	if len(scopes) == 0 && resourceType == "K8S" && bindingRole == "BUILD_SOURCE" {
+		if scope := strings.TrimSpace(environment.Namespace); scope != "" {
+			scopes[scope] = true
+		}
+	}
+	return scopes
+}
+
+func (h *Handler) kubernetesScopeForDiscovery(environment domain.Environment) (string, []string) {
+	clusterID := strings.TrimSpace(environment.ClusterID)
+	namespaces := make([]string, 0)
+	for _, binding := range environment.Bindings {
+		if binding.ResourceType != "K8S" || binding.BindingRole != workloadBindingRole(environment) {
+			continue
+		}
+		if clusterID == "" {
+			clusterID = strings.TrimSpace(binding.ResourceID)
+		}
+		namespaces = appendUniqueString(namespaces, binding.ScopeValue)
+	}
+	namespaces = appendUniqueString(namespaces, environment.Namespace)
+	return clusterID, namespaces
+}
+
+func appendUniqueString(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, item := range values {
+		if item == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+type harborScopeInfo struct {
+	RegistryHost string
+	Projects     map[string]bool
+	Confirmed    bool
+}
+
+func (h *Handler) harborScope(ctx context.Context, environment domain.Environment, bindingRole string) harborScopeInfo {
+	info := harborScopeInfo{Projects: map[string]bool{}}
+	if registryHost := normalizedImageRegistry(environment.PrivateRegistryHost); registryHost != "" {
+		info.RegistryHost = registryHost
+		info.Confirmed = true
+	}
+	for _, binding := range environment.Bindings {
+		if binding.ResourceType != "HARBOR" || binding.BindingRole != bindingRole {
+			continue
+		}
+		if scope := strings.TrimSpace(binding.ScopeValue); scope != "" {
+			info.Projects[scope] = true
+		}
+		if info.RegistryHost == "" {
+			info.RegistryHost = h.harborRegistryHost(ctx, binding.ResourceID)
+		}
+	}
+	if info.RegistryHost == "" {
+		info.RegistryHost = h.harborRegistryHost(ctx, environment.RegistryID)
+	}
+	if len(info.Projects) == 0 {
+		if project := strings.TrimSpace(environment.RegistryProject); project != "" {
+			info.Projects[project] = true
+		}
+	}
+	return info
+}
+
+func (h *Handler) harborScopeForDiscovery(ctx context.Context, environment domain.Environment, bindingRole string) harborScopeInfo {
+	if environment.Type != "PROJECT" {
+		return h.harborScope(ctx, environment, bindingRole)
+	}
+	info := harborScopeInfo{Projects: map[string]bool{}}
+	if registryHost := normalizedImageRegistry(environment.PrivateRegistryHost); registryHost != "" {
+		info.RegistryHost = registryHost
+		info.Confirmed = true
+	}
+	for _, binding := range environment.Bindings {
+		if binding.ResourceType != "HARBOR" || binding.BindingRole != bindingRole {
+			continue
+		}
+		if scope := strings.TrimSpace(binding.ScopeValue); scope != "" {
+			info.Projects[scope] = true
+		}
+	}
+	agentItem, ok := h.findProbeAgent(environment.ID)
+	if !ok {
+		return info
+	}
+	if info.RegistryHost == "" {
+		info.RegistryHost = normalizedImageRegistry(agentItem.RuntimeStatus.Harbor.RegistryHost)
+	}
+	return info
+}
+
+func (h *Handler) privateRegistryCandidates(ctx context.Context, environment domain.Environment, bindingRole string, workloads []integration.Workload) []string {
+	candidates := []string{}
+	if value := normalizedImageRegistry(environment.PrivateRegistryHost); value != "" {
+		candidates = appendUniqueRegistryCandidate(candidates, value)
+	}
+	if environment.Type == "PROJECT" {
+		if agentItem, ok := h.findProbeAgent(environment.ID); ok {
+			candidates = appendUniqueRegistryCandidate(candidates, agentItem.RuntimeStatus.Harbor.RegistryHost)
+		}
+	} else {
+		for _, binding := range environment.Bindings {
+			if binding.ResourceType != "HARBOR" || binding.BindingRole != bindingRole {
+				continue
+			}
+			candidates = appendUniqueRegistryCandidate(candidates, h.harborRegistryHost(ctx, binding.ResourceID))
+		}
+		candidates = appendUniqueRegistryCandidate(candidates, h.harborRegistryHost(ctx, environment.RegistryID))
+	}
+	harbor := h.harborScopeForDiscovery(ctx, environment, bindingRole)
+	for _, candidate := range inferRegistryCandidatesFromWorkloads(harbor, workloads) {
+		candidates = appendUniqueRegistryCandidate(candidates, candidate)
+	}
+	return candidates
+}
+
+func (h *Handler) privateRegistryCandidatesFromManagedServices(ctx context.Context, environment domain.Environment, bindingRole string, services []domain.ManagedService) []string {
+	candidates := []string{}
+	if value := normalizedImageRegistry(environment.PrivateRegistryHost); value != "" {
+		candidates = appendUniqueRegistryCandidate(candidates, value)
+	}
+	if environment.Type == "PROJECT" {
+		if agentItem, ok := h.findProbeAgent(environment.ID); ok {
+			candidates = appendUniqueRegistryCandidate(candidates, agentItem.RuntimeStatus.Harbor.RegistryHost)
+		}
+	} else {
+		for _, binding := range environment.Bindings {
+			if binding.ResourceType != "HARBOR" || binding.BindingRole != bindingRole {
+				continue
+			}
+			candidates = appendUniqueRegistryCandidate(candidates, h.harborRegistryHost(ctx, binding.ResourceID))
+		}
+		candidates = appendUniqueRegistryCandidate(candidates, h.harborRegistryHost(ctx, environment.RegistryID))
+	}
+	harbor := h.harborScope(ctx, environment, bindingRole)
+	for _, candidate := range inferRegistryCandidatesFromManagedServices(harbor, services) {
+		candidates = appendUniqueRegistryCandidate(candidates, candidate)
+	}
+	return candidates
+}
+
+func appendUniqueRegistryCandidate(values []string, candidate string) []string {
+	candidate = normalizedImageRegistry(candidate)
+	if candidate == "" {
+		return values
+	}
+	for _, value := range values {
+		if sameRegistryHost(value, candidate) {
+			return values
+		}
+	}
+	return append(values, candidate)
+}
+
+func registryCandidateAllowed(registryHost string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if sameRegistryHost(registryHost, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) harborRegistryHost(ctx context.Context, registryID string) string {
+	registryID = strings.TrimSpace(registryID)
+	if registryID == "" || registryID == runtimeHarborResourceID {
+		return ""
+	}
+	registry, ok := h.repo.GetHarborRegistry(registryID)
+	if !ok {
+		return ""
+	}
+	if registryHost := normalizedImageRegistry(registry.RegistryHost); registryHost != "" {
+		return registryHost
+	}
+	_, registryHost, err := checkHarborRegistry(ctx, registry, false)
+	if err != nil || registryHost == "" {
+		return ""
+	}
+	if item, ok, updateErr := h.repo.UpdateHarborRegistryProbe(registryID, registry.Status, registry.ProbeMessage, registry.Projects, registryHost, time.Now()); updateErr == nil && ok {
+		return normalizedImageRegistry(item.RegistryHost)
+	}
+	return normalizedImageRegistry(registryHost)
+}
+
+const runtimeHarborResourceID = "agent-runtime-harbor"
+
+type parsedContainerImage struct {
+	Registry   string
+	Project    string
+	Repository string
+	Tag        string
+}
+
+func parseContainerImage(image string) parsedContainerImage {
+	image = strings.TrimSpace(image)
+	name := image
+	if at := strings.Index(name, "@"); at >= 0 {
+		name = name[:at]
+	}
+	tag := ""
+	if slash := strings.LastIndex(name, "/"); slash >= 0 {
+		if colon := strings.LastIndex(name, ":"); colon > slash {
+			tag = name[colon+1:]
+			name = name[:colon]
+		}
+	} else if colon := strings.LastIndex(name, ":"); colon >= 0 {
+		tag = name[colon+1:]
+		name = name[:colon]
+	}
+	parts := strings.Split(name, "/")
+	registry := "docker.io"
+	repositoryParts := parts
+	if len(parts) > 1 && looksLikeRegistry(parts[0]) {
+		registry = normalizedImageRegistry(parts[0])
+		repositoryParts = parts[1:]
+	}
+	project := "library"
+	if len(repositoryParts) > 1 {
+		project = repositoryParts[0]
+	}
+	return parsedContainerImage{
+		Registry:   registry,
+		Project:    project,
+		Repository: strings.Join(repositoryParts, "/"),
+		Tag:        tag,
+	}
+}
+
+func classifyImageSource(image parsedContainerImage, harbor harborScopeInfo) string {
+	if strings.EqualFold(image.Registry, "docker.io") || strings.EqualFold(image.Registry, "registry-1.docker.io") {
+		return "EXTERNAL"
+	}
+	if harbor.RegistryHost != "" && sameRegistryHost(image.Registry, harbor.RegistryHost) {
+		if harbor.Projects[image.Project] {
+			return "PRIVATE"
+		}
+		return "UNMATCHED_PRIVATE"
+	}
+	return "EXTERNAL"
+}
+
+func inferHarborScopeRegistryHost(harbor harborScopeInfo, workloads []integration.Workload) harborScopeInfo {
+	if harbor.RegistryHost != "" || len(harbor.Projects) == 0 {
+		return harbor
+	}
+	candidates := inferRegistryCandidatesFromWorkloads(harbor, workloads)
+	if len(candidates) != 1 {
+		return harbor
+	}
+	harbor.RegistryHost = candidates[0]
+	return harbor
+}
+
+func inferRegistryCandidatesFromWorkloads(harbor harborScopeInfo, workloads []integration.Workload) []string {
+	if len(harbor.Projects) == 0 {
+		return []string{}
+	}
+	candidateSet := map[string]bool{}
+	for _, workload := range workloads {
+		for _, container := range workload.Containers {
+			image := parseContainerImage(container.Image)
+			if image.Registry == "" || strings.EqualFold(image.Registry, "docker.io") || strings.EqualFold(image.Registry, "registry-1.docker.io") {
+				continue
+			}
+			if harbor.Projects[image.Project] {
+				candidateSet[image.Registry] = true
+			}
+		}
+	}
+	candidates := make([]string, 0, len(candidateSet))
+	for candidate := range candidateSet {
+		candidates = append(candidates, candidate)
+	}
+	sort.Strings(candidates)
+	return candidates
+}
+
+func inferRegistryCandidatesFromManagedServices(harbor harborScopeInfo, services []domain.ManagedService) []string {
+	if len(harbor.Projects) == 0 {
+		return []string{}
+	}
+	candidateSet := map[string]bool{}
+	for _, service := range services {
+		image := parseContainerImage(service.Image)
+		if image.Registry == "" || strings.EqualFold(image.Registry, "docker.io") || strings.EqualFold(image.Registry, "registry-1.docker.io") {
+			continue
+		}
+		if harbor.Projects[image.Project] {
+			candidateSet[image.Registry] = true
+		}
+	}
+	candidates := make([]string, 0, len(candidateSet))
+	for candidate := range candidateSet {
+		candidates = append(candidates, candidate)
+	}
+	sort.Strings(candidates)
+	return candidates
+}
+
+func looksLikeRegistry(value string) bool {
+	return strings.Contains(value, ".") || strings.Contains(value, ":") || value == "localhost"
+}
+
+func normalizedImageRegistry(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if !strings.Contains(value, "://") {
+		value = "http://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return strings.TrimPrefix(strings.TrimPrefix(value, "http://"), "https://")
+	}
+	host := parsed.Host
+	if host == "" {
+		host = parsed.Path
+	}
+	return strings.TrimRight(strings.ToLower(host), "/")
+}
+
+func sameRegistryHost(left string, right string) bool {
+	left = normalizedImageRegistry(left)
+	right = normalizedImageRegistry(right)
+	if left == right {
+		return true
+	}
+	leftHost, leftPort, leftErr := net.SplitHostPort(left)
+	rightHost, rightPort, rightErr := net.SplitHostPort(right)
+	if leftErr == nil && rightErr == nil {
+		return leftHost == rightHost && leftPort == rightPort
+	}
+	return false
+}
+
+func stableDiscoveredServiceID(parts ...string) string {
+	key := strings.Join(parts, "\x00")
+	sum := sha1.Sum([]byte(key))
+	return "svc-" + hex.EncodeToString(sum[:8])
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func (h *Handler) findProbeAgent(environmentID string) (domain.Agent, bool) {
 	for _, item := range h.repo.ListAgents("") {
 		if item.EnvironmentID == environmentID && item.Status == "ONLINE" && item.ClaimStatus == "CLAIMED" {
@@ -574,6 +1227,7 @@ func (h *Handler) environmentWithIntegrationResources(environment domain.Environ
 	}
 	environment.ClusterAPIServer = cluster.APIServer
 	environment.ClusterCredentialRef = cluster.CredentialRef
+	environment.ClusterKubeconfig = cluster.Kubeconfig
 	environment.RegistryURL = registry.URL
 	environment.RegistryCredentialRef = registry.CredentialRef
 	if strings.TrimSpace(environment.JenkinsID) != "" {

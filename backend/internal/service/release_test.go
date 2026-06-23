@@ -258,7 +258,7 @@ func (f failingKubernetesAdapter) CheckConnection(ctx context.Context, environme
 	return integration.IntegrationCheck{}, f.err
 }
 
-func (f failingKubernetesAdapter) ListWorkloads(ctx context.Context, environmentID string) ([]integration.Workload, error) {
+func (f failingKubernetesAdapter) ListWorkloads(ctx context.Context, environment domain.Environment) ([]integration.Workload, error) {
 	return nil, f.err
 }
 

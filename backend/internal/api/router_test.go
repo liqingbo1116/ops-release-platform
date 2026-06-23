@@ -472,7 +472,7 @@ func TestEnvironmentVerifiedScopesClearDegradedOnSave(t *testing.T) {
 		t.Fatalf("expected initial unverified scopes to be degraded, got %+v", createResponse.Data)
 	}
 
-	if _, _, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x", "project-later"}, time.Now()); err != nil {
+	if _, _, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x", "project-later"}, "", time.Now()); err != nil {
 		t.Fatalf("update harbor probe: %v", err)
 	}
 	if _, _, err := repo.UpdateKubernetesClusterProbe("k8s-local-prod", "HEALTHY", "", []string{"default", "project-x", "namespace-later"}, time.Now()); err != nil {
@@ -642,6 +642,37 @@ func TestResourceManagementDoesNotExposeHarborAndJenkinsSecrets(t *testing.T) {
 	}
 	if jenkinsPayload.Data.Status != "HEALTHY" || !stringSliceContains(jenkinsPayload.Data.Views, "project-x") || !stringSliceContains(jenkinsPayload.Data.Jobs, "build-project-x") {
 		t.Fatalf("expected healthy jenkins cache, got %+v", jenkinsPayload.Data)
+	}
+}
+
+func TestHarborRegistryHostFromPayloadReadsConfigurationValue(t *testing.T) {
+	body := []byte(`{"external_url":{"value":"https://reg.example.org:5000"}}`)
+	if got := harborRegistryHostFromPayload(body); got != "reg.example.org:5000" {
+		t.Fatalf("expected registry host from harbor configuration, got %q", got)
+	}
+}
+
+func TestInferHarborScopeRegistryHost(t *testing.T) {
+	harbor := harborScopeInfo{
+		Projects: map[string]bool{"project-x": true},
+	}
+	workloads := []integration.Workload{
+		{
+			Namespace: "default",
+			Name:      "app",
+			Containers: []integration.WorkloadContainer{
+				{Name: "app", Image: "reg.example.org:5000/project-x/app:v1"},
+				{Name: "sidecar", Image: "docker.io/library/busybox:latest"},
+			},
+		},
+	}
+	got := inferHarborScopeRegistryHost(harbor, workloads)
+	if got.RegistryHost != "reg.example.org:5000" {
+		t.Fatalf("expected inferred registry host, got %q", got.RegistryHost)
+	}
+	image := parseContainerImage("reg.example.org:5000/project-x/app:v1")
+	if source := classifyImageSource(image, got); source != "PRIVATE" {
+		t.Fatalf("expected private image after registry inference, got %q", source)
 	}
 }
 
@@ -1863,7 +1894,7 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 	if _, ok, err := repo.UpdateKubernetesClusterProbe("k8s-local-prod", "HEALTHY", "", []string{"default", "project-x"}, time.Now()); err != nil || !ok {
 		panic("seed kubernetes probe failed")
 	}
-	if _, ok, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x"}, time.Now()); err != nil || !ok {
+	if _, ok, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x"}, "", time.Now()); err != nil || !ok {
 		panic("seed harbor probe failed")
 	}
 	if _, ok, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z"}, []string{"mock-release"}, time.Now()); err != nil || !ok {

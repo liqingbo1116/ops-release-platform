@@ -269,7 +269,11 @@ func (c *ReleaseCreator) CreateDeployTask(ctx context.Context, request CreateDep
 	request.ServiceIDs = allowedServiceIDs
 
 	if c.integrations.Kubernetes != nil {
-		if _, err := c.integrations.Kubernetes.ListWorkloads(ctx, request.TargetEnvironmentID); err != nil {
+		environment, err := c.targetEnvironment(request.TargetEnvironmentID)
+		if err != nil {
+			return CreateDeployTaskResult{}, err
+		}
+		if _, err := c.integrations.Kubernetes.ListWorkloads(ctx, environment); err != nil {
 			return CreateDeployTaskResult{}, ErrWorkloadProbe
 		}
 	}

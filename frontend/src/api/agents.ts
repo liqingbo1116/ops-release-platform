@@ -24,6 +24,22 @@ export type AgentRuntimeComponentStatus = {
   message: string
   updatedAt: string
   items: string[]
+  workloads?: RuntimeWorkload[]
+}
+
+export type RuntimeWorkload = {
+  namespace: string
+  name: string
+  type: string
+  replicas: number
+  readyReplicas: number
+  containers: RuntimeContainer[]
+}
+
+export type RuntimeContainer = {
+  name: string
+  type: 'APP' | 'INIT' | string
+  image: string
 }
 
 export type AgentRegisterToken = {
