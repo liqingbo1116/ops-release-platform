@@ -18,6 +18,7 @@ const groups = [
     items: [
       { label: '项目管理', path: '/projects' },
       { label: '产品管理', path: '/environments' },
+      { label: '服务管理', path: '/services' },
       { label: '基础资源', path: '/integration-resources' },
       { label: 'Agent 管理', path: '/agents' },
     ],
@@ -52,6 +53,7 @@ const groups = [
       { label: '角色管理', path: '/roles' },
       { label: '环境权限', path: '/permissions/environments' },
       { label: '更新日志', path: '/changelog' },
+      { label: '审计日志', path: '/operation-logs' },
     ],
   },
 ]

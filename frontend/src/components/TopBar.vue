@@ -2,12 +2,11 @@
   <header class="topbar">
     <div class="crumb">运维发布交付平台 / <strong>{{ currentTitle }}</strong></div>
     <div class="top-actions">
-      <el-button @click="$router.push('/agents')">Agent 状态</el-button>
-      <el-button type="primary" @click="$router.push('/releases/create')">新建发布单</el-button>
       <el-dropdown @command="handleCommand">
-        <el-button>
-          {{ authStore.user?.displayName ?? '未登录' }} / {{ authStore.user?.roles[0] ?? '-' }}
-        </el-button>
+        <button class="top-user-trigger" type="button">
+          <span class="top-user-name">{{ authStore.user?.displayName ?? '未登录' }}</span>
+          <span class="top-user-role">{{ authStore.user?.roles[0] ?? '-' }}</span>
+        </button>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="logout">退出登录</el-dropdown-item>

@@ -19,6 +19,7 @@ const UserListPage = () => import('@/pages/UserListPage.vue')
 const RoleListPage = () => import('@/pages/RoleListPage.vue')
 const EnvironmentPermissionPage = () => import('@/pages/EnvironmentPermissionPage.vue')
 const ChangelogPage = () => import('@/pages/ChangelogPage.vue')
+const OperationLogPage = () => import('@/pages/OperationLogPage.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -28,6 +29,7 @@ const router = createRouter({
     { path: '/dashboard', name: 'dashboard', component: DashboardPage, meta: { title: '首页工作台' } },
     { path: '/projects', name: 'projects', component: ProjectPage, meta: { title: '项目管理' } },
     { path: '/environments', name: 'environments', component: EnvironmentPage, meta: { title: '产品管理' } },
+    { path: '/services', name: 'services', component: ProductServicePage, meta: { title: '服务管理' } },
     { path: '/environments/:id/services', name: 'product-services', component: ProductServicePage, meta: { title: '产品服务' } },
     { path: '/integration-resources', name: 'integration-resources', component: IntegrationResourcePage, meta: { title: '基础资源' } },
     { path: '/agents', name: 'agents', component: AgentPage, meta: { title: 'Agent 管理' } },
@@ -43,6 +45,7 @@ const router = createRouter({
     { path: '/roles', name: 'roles', component: RoleListPage, meta: { title: '角色管理' } },
     { path: '/permissions/environments', name: 'environment-permissions', component: EnvironmentPermissionPage, meta: { title: '环境权限' } },
     { path: '/changelog', name: 'changelog', component: ChangelogPage, meta: { title: '更新日志' } },
+    { path: '/operation-logs', name: 'operation-logs', component: OperationLogPage, meta: { title: '审计日志' } },
   ],
 })
 

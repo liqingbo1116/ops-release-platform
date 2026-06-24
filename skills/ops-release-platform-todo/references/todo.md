@@ -1,6 +1,6 @@
 # Ops Release Platform TODO
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 Always verify this file against `git status --short --branch`, `git log -1 --oneline`, and implementation docs before acting.
 
@@ -35,6 +35,8 @@ Latest pushed milestone:
 
 - Local uncommitted documentation update:
   - V1 service release flow, product service list priority, Jenkins Pipeline binding, local Harbor confirmation, and local/remote release execution rules are being fixed in docs and this TODO.
+  - V1 real-environment source-of-truth rule is being fixed in docs and skill: if a managed service disappears from the real product environment, platform must auto-unmanage it, hide it from the main service list, and record the change instead of keeping stale active service data.
+  - Remote product service-change reconciliation must happen when Agent reports arrive; it must not wait for a user refresh click after the platform has already received newer Agent data.
 
 ## Current Step
 
@@ -132,6 +134,7 @@ Product management is considered ready for the next phase only because it suppor
 6. 服务与版本来源. Current.
    - User-visible outcome: users manage services under products, see current workload images, classify private/external image sources, confirm product private registry, and use the product service list as the main release entry.
    - Next required work: strengthen the product service list with search/filter, release entry, Pipeline status, latest release status, and batch manage/unmanage actions; keep service management based on real platform or Agent discovery.
+   - Data rule: real local/remote product runtime is the source of truth. Managed-service records are only platform relationships. If an already managed service disappears from the real product environment, the platform must auto-unmanage it when latest probe/Agent report data arrives, remove it from the active service list, prevent release, and optionally write a resource-change event. Remote Agent reports must be reconciled on ingestion, not only after a user clicks refresh.
    - Dependency: project ownership from step 4, product deployment scope from step 5, and environment bindings from step 2 as the V1 transition implementation must be consumed here, not duplicated.
 7. 发布单创建. Next.
    - User-visible outcome: users click release from a service row; the platform creates a release order automatically with project, product, service, bound Jenkins Pipeline, target image/tag, and V1 flow nodes.
@@ -171,6 +174,9 @@ Use this section as the current implementation guide after service/version-sourc
    - Keep `纳管服务`, `移除纳管`, and `刷新服务` as service-list maintenance actions.
    - Managed/unmanaged service actions must use real platform-direct or Agent-reported workload data. Do not add manual service entry.
    - Removing managed services only removes the platform management relationship; it must not delete Kubernetes workloads, Harbor images, Jenkins Pipelines, or historical release records.
+   - If a managed workload is deleted or disappears from the real product environment, the platform must auto-remove the management relationship when latest probe/report data arrives, hide it from the active service list, and block release actions. Keep the fact in event/change history instead of keeping a stale active row.
+   - Agent-reported changes for remote products must be processed by backend ingestion immediately after report validation; do not defer reconciliation until the user manually refreshes the page.
+   - If an unmanaged workload is deleted or disappears from the real product environment, it disappears from discovery when latest probe/report data arrives.
 2. Service-to-Jenkins Pipeline binding.
    - Pipeline choices must come from the product's bound Jenkins view/job data or live Jenkins query.
    - The user selects a Pipeline from a list. Do not allow free-text Pipeline names.

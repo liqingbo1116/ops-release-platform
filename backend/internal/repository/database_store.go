@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -561,7 +562,7 @@ func (s *DatabaseStore) UpdateJenkinsInstance(id string, input domain.JenkinsIns
 	return toDomainJenkinsInstance(model), true, nil
 }
 
-func (s *DatabaseStore) UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, checkedAt time.Time) (domain.JenkinsInstance, bool, error) {
+func (s *DatabaseStore) UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, pipelines []domain.JenkinsPipeline, checkedAt time.Time) (domain.JenkinsInstance, bool, error) {
 	var model JenkinsInstanceModel
 	if err := s.db.Where("id = ?", id).Take(&model).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -576,6 +577,9 @@ func (s *DatabaseStore) UpdateJenkinsInstanceProbe(id string, status string, mes
 	}
 	if jobs != nil {
 		model.Jobs = compactStringList(jobs)
+	}
+	if pipelines != nil {
+		model.Pipelines = compactJenkinsPipelines(pipelines)
 	}
 	model.LastCheckAt = &checkedAt
 	if err := s.db.Save(&model).Error; err != nil {
@@ -859,6 +863,65 @@ func (s *DatabaseStore) AssignAgentTask(id string, taskID string) (domain.Agent,
 	return s.GetAgent(id)
 }
 
+func (s *DatabaseStore) ListOperationLogs(query string, environmentID string, resourceType string) []domain.OperationLog {
+	var models []OperationLogModel
+	db := s.db.Order("created_at desc")
+	if trimmed := strings.TrimSpace(query); trimmed != "" {
+		like := "%" + trimmed + "%"
+		db = db.Where("id ILIKE ? OR action ILIKE ? OR resource_type ILIKE ? OR resource_id ILIKE ? OR resource_name ILIKE ? OR project_name ILIKE ? OR product_name ILIKE ? OR namespace ILIKE ? OR workload_name ILIKE ? OR container_name ILIKE ? OR result ILIKE ? OR detail ILIKE ? OR operator_name ILIKE ?", like, like, like, like, like, like, like, like, like, like, like, like, like)
+	}
+	if trimmed := strings.TrimSpace(environmentID); trimmed != "" {
+		db = db.Where("environment_id = ?", trimmed)
+	}
+	if trimmed := strings.TrimSpace(resourceType); trimmed != "" {
+		db = db.Where("resource_type = ?", strings.ToUpper(trimmed))
+	}
+	if err := db.Limit(500).Find(&models).Error; err != nil {
+		return []domain.OperationLog{}
+	}
+	items := make([]domain.OperationLog, 0, len(models))
+	for _, model := range models {
+		items = append(items, toDomainOperationLog(model))
+	}
+	return items
+}
+
+func (s *DatabaseStore) CreateOperationLog(input domain.OperationLog) (domain.OperationLog, error) {
+	now := time.Now()
+	model := OperationLogModel{
+		ID:            strings.TrimSpace(input.ID),
+		OperatorID:    firstNonEmpty(strings.TrimSpace(input.OperatorID), "system"),
+		OperatorName:  firstNonEmpty(strings.TrimSpace(input.OperatorName), "平台"),
+		Action:        strings.ToUpper(strings.TrimSpace(input.Action)),
+		ResourceType:  strings.ToUpper(strings.TrimSpace(input.ResourceType)),
+		ResourceID:    strings.TrimSpace(input.ResourceID),
+		ResourceName:  strings.TrimSpace(input.ResourceName),
+		ProjectID:     strings.TrimSpace(input.ProjectID),
+		ProjectName:   strings.TrimSpace(input.ProjectName),
+		EnvironmentID: strings.TrimSpace(input.EnvironmentID),
+		ProductName:   strings.TrimSpace(input.ProductName),
+		TaskID:        strings.TrimSpace(input.TaskID),
+		Namespace:     strings.TrimSpace(input.Namespace),
+		WorkloadType:  strings.TrimSpace(input.WorkloadType),
+		WorkloadName:  strings.TrimSpace(input.WorkloadName),
+		ContainerName: strings.TrimSpace(input.ContainerName),
+		ContainerType: strings.TrimSpace(input.ContainerType),
+		Result:        strings.ToUpper(firstNonEmpty(strings.TrimSpace(input.Result), "SUCCESS")),
+		Detail:        strings.TrimSpace(input.Detail),
+		CreatedAt:     now,
+	}
+	if model.ID == "" {
+		model.ID = fmt.Sprintf("oplog-%s", now.Format("20060102150405.000000000"))
+	}
+	if model.Action == "" || model.ResourceType == "" || model.ResourceID == "" {
+		return domain.OperationLog{}, errors.New("missing required operation log fields")
+	}
+	if err := s.db.Create(&model).Error; err != nil {
+		return domain.OperationLog{}, err
+	}
+	return toDomainOperationLog(model), nil
+}
+
 func (s *DatabaseStore) GetCurrentUser() domain.CurrentUser {
 	return s.mock.GetCurrentUser()
 }
@@ -1071,6 +1134,41 @@ func (s *DatabaseStore) ConfirmManagedServiceRegistry(productID string, registry
 		return nil, err
 	}
 	return s.ListManagedServices(productID), nil
+}
+
+func (s *DatabaseStore) BindManagedServicePipeline(productID string, serviceID string, jobName string, branch string) (domain.ManagedService, bool, error) {
+	productID = strings.TrimSpace(productID)
+	serviceID = strings.TrimSpace(serviceID)
+	jobName = strings.TrimSpace(jobName)
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		branch = "main"
+	}
+	if productID == "" || serviceID == "" {
+		return domain.ManagedService{}, false, errors.New("product id and service id are required")
+	}
+	if jobName == "" {
+		return domain.ManagedService{}, false, errors.New("jenkins job name is required")
+	}
+	var model ServiceModel
+	if err := s.db.Where("product_id = ? AND id = ?", productID, serviceID).Take(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ManagedService{}, false, nil
+		}
+		return domain.ManagedService{}, false, err
+	}
+	now := time.Now()
+	if err := s.db.Model(&model).Updates(map[string]any{
+		"jenkins_job_name":  jobName,
+		"jenkins_branch":    branch,
+		"pipeline_bound_at": now,
+	}).Error; err != nil {
+		return domain.ManagedService{}, false, err
+	}
+	model.JenkinsJobName = jobName
+	model.JenkinsBranch = branch
+	model.PipelineBoundAt = &now
+	return toDomainManagedService(model), true, nil
 }
 
 func normalizeRegistryHost(value string) string {
@@ -1313,6 +1411,7 @@ func toDomainJenkinsInstance(model JenkinsInstanceModel) domain.JenkinsInstance 
 		ProbeMessage:          model.ProbeMessage,
 		Views:                 compactStringList(model.Views),
 		Jobs:                  compactStringList(model.Jobs),
+		Pipelines:             compactJenkinsPipelines(model.Pipelines),
 	}
 }
 
@@ -1333,6 +1432,53 @@ func compactStringList(values []string) []string {
 		seen[trimmed] = struct{}{}
 		output = append(output, trimmed)
 	}
+	return output
+}
+
+func compactJenkinsPipelines(values []domain.JenkinsPipeline) []domain.JenkinsPipeline {
+	if len(values) == 0 {
+		return []domain.JenkinsPipeline{}
+	}
+	seen := map[string]struct{}{}
+	output := make([]domain.JenkinsPipeline, 0, len(values))
+	for _, value := range values {
+		value.Name = strings.TrimSpace(value.Name)
+		value.View = strings.TrimSpace(value.View)
+		value.ViewURL = strings.TrimSpace(value.ViewURL)
+		value.URL = strings.TrimSpace(value.URL)
+		if value.Name == "" {
+			continue
+		}
+		parameters := make([]domain.JenkinsPipelineParameter, 0, len(value.Parameters))
+		parameterSeen := map[string]struct{}{}
+		for _, parameter := range value.Parameters {
+			parameter.Name = strings.TrimSpace(parameter.Name)
+			parameter.Type = strings.TrimSpace(parameter.Type)
+			parameter.DefaultValue = strings.TrimSpace(parameter.DefaultValue)
+			parameter.Description = strings.TrimSpace(parameter.Description)
+			if parameter.Name == "" {
+				continue
+			}
+			if _, ok := parameterSeen[parameter.Name]; ok {
+				continue
+			}
+			parameterSeen[parameter.Name] = struct{}{}
+			parameters = append(parameters, parameter)
+		}
+		value.Parameters = parameters
+		key := value.View + "\x00" + value.Name
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		output = append(output, value)
+	}
+	sort.Slice(output, func(i, j int) bool {
+		if output[i].View == output[j].View {
+			return output[i].Name < output[j].Name
+		}
+		return output[i].View < output[j].View
+	})
 	return output
 }
 
@@ -1397,6 +1543,31 @@ func toDomainAgent(model AgentModel, environmentName string) domain.Agent {
 	}
 }
 
+func toDomainOperationLog(model OperationLogModel) domain.OperationLog {
+	return domain.OperationLog{
+		ID:            model.ID,
+		OperatorID:    model.OperatorID,
+		OperatorName:  model.OperatorName,
+		Action:        model.Action,
+		ResourceType:  model.ResourceType,
+		ResourceID:    model.ResourceID,
+		ResourceName:  model.ResourceName,
+		ProjectID:     model.ProjectID,
+		ProjectName:   model.ProjectName,
+		EnvironmentID: model.EnvironmentID,
+		ProductName:   model.ProductName,
+		TaskID:        model.TaskID,
+		Namespace:     model.Namespace,
+		WorkloadType:  model.WorkloadType,
+		WorkloadName:  model.WorkloadName,
+		ContainerName: model.ContainerName,
+		ContainerType: model.ContainerType,
+		Result:        model.Result,
+		Detail:        model.Detail,
+		CreatedAt:     model.CreatedAt.Format(time.RFC3339),
+	}
+}
+
 func runtimeStatusHasData(status domain.RuntimeStatus) bool {
 	return status.Kubernetes.Status != "" ||
 		status.Kubernetes.Message != "" ||
@@ -1427,9 +1598,20 @@ func toDomainReleaseSourceService(model ServiceModel) domain.ReleaseSourceServic
 		ImageSource:              fallbackString(model.ImageSource, "UNKNOWN"),
 		PrivateRegistryHost:      model.PrivateRegistryHost,
 		PrivateRegistryConfirmed: model.PrivateRegistryConfirmed,
+		JenkinsJobName:           model.JenkinsJobName,
+		JenkinsBranch:            model.JenkinsBranch,
+		JenkinsPipelineBound:     strings.TrimSpace(model.JenkinsJobName) != "",
+		PipelineBoundAt:          formatOptionalTime(model.PipelineBoundAt),
 		Tags:                     []domain.ReleaseImageTag{},
 		Publishable:              false,
 	}
+}
+
+func formatOptionalTime(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.Format(time.RFC3339)
 }
 
 func toDomainManagedService(model ServiceModel) domain.ManagedService {
@@ -1450,6 +1632,10 @@ func toDomainManagedService(model ServiceModel) domain.ManagedService {
 		ImageSource:              fallbackString(model.ImageSource, "UNKNOWN"),
 		PrivateRegistryHost:      model.PrivateRegistryHost,
 		PrivateRegistryConfirmed: model.PrivateRegistryConfirmed,
+		JenkinsJobName:           model.JenkinsJobName,
+		JenkinsBranch:            model.JenkinsBranch,
+		JenkinsPipelineBound:     strings.TrimSpace(model.JenkinsJobName) != "",
+		PipelineBoundAt:          formatOptionalTime(model.PipelineBoundAt),
 		Replicas:                 model.Replicas,
 		ReadyReplicas:            model.ReadyReplicas,
 		CreatedAt:                model.CreatedAt.Format(time.RFC3339),

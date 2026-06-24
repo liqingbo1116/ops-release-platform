@@ -1,4 +1,5 @@
 import { getData, postData, putData, type PageResult } from './client'
+import type { JenkinsPipeline } from './releases'
 
 export type KubernetesCluster = {
   id: string
@@ -36,6 +37,7 @@ export type JenkinsInstance = {
   probeMessage: string
   views: string[]
   jobs: string[]
+  pipelines: JenkinsPipeline[]
 }
 
 export type IntegrationResource = KubernetesCluster | HarborRegistry | JenkinsInstance
@@ -90,6 +92,7 @@ function normalizeJenkinsInstance(item: JenkinsInstance): JenkinsInstance {
     probeMessage: item.probeMessage ?? '',
     views: item.views ?? [],
     jobs: item.jobs ?? [],
+    pipelines: item.pipelines ?? [],
   }
 }
 

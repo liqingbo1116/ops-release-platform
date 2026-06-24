@@ -50,6 +50,9 @@ type ServiceModel struct {
 	ImageSource              string `gorm:"size:32"`
 	PrivateRegistryHost      string `gorm:"size:256"`
 	PrivateRegistryConfirmed bool
+	JenkinsJobName           string `gorm:"size:256"`
+	JenkinsBranch            string `gorm:"size:128"`
+	PipelineBoundAt          *time.Time
 	Replicas                 int
 	ReadyReplicas            int
 	HealthCheckPath          string    `gorm:"size:256"`
@@ -154,13 +157,14 @@ type JenkinsInstanceModel struct {
 	Token                 string `gorm:"type:text"`
 	CredentialRef         string `gorm:"size:256"`
 	InsecureSkipTLSVerify bool
-	Views                 []string   `gorm:"serializer:json;type:jsonb"`
-	Jobs                  []string   `gorm:"serializer:json;type:jsonb"`
-	ProbeMessage          string     `gorm:"size:512"`
-	Status                string     `gorm:"size:32;index;not null"`
-	LastCheckAt           *time.Time `gorm:"index"`
-	CreatedAt             time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt             time.Time  `gorm:"autoUpdateTime"`
+	Views                 []string                 `gorm:"serializer:json;type:jsonb"`
+	Jobs                  []string                 `gorm:"serializer:json;type:jsonb"`
+	Pipelines             []domain.JenkinsPipeline `gorm:"serializer:json;type:jsonb"`
+	ProbeMessage          string                   `gorm:"size:512"`
+	Status                string                   `gorm:"size:32;index;not null"`
+	LastCheckAt           *time.Time               `gorm:"index"`
+	CreatedAt             time.Time                `gorm:"autoCreateTime"`
+	UpdatedAt             time.Time                `gorm:"autoUpdateTime"`
 }
 
 func (JenkinsInstanceModel) TableName() string {
@@ -413,8 +417,17 @@ type OperationLogModel struct {
 	Action        string    `gorm:"size:64;index;not null"`
 	ResourceType  string    `gorm:"size:64;index;not null"`
 	ResourceID    string    `gorm:"size:128;index;not null"`
+	ResourceName  string    `gorm:"size:256"`
+	ProjectID     string    `gorm:"size:64;index"`
+	ProjectName   string    `gorm:"size:128"`
 	EnvironmentID string    `gorm:"size:64;index"`
+	ProductName   string    `gorm:"size:128"`
 	TaskID        string    `gorm:"size:64;index"`
+	Namespace     string    `gorm:"size:128;index"`
+	WorkloadType  string    `gorm:"size:64;index"`
+	WorkloadName  string    `gorm:"size:256;index"`
+	ContainerName string    `gorm:"size:256"`
+	ContainerType string    `gorm:"size:64"`
 	Result        string    `gorm:"size:32;index;not null"`
 	Detail        string    `gorm:"type:text"`
 	CreatedAt     time.Time `gorm:"autoCreateTime;index"`

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -106,10 +107,10 @@ func (h *Handler) probeJenkinsInstance(c *gin.Context, refresh bool) {
 		NotFound(c, "jenkins instance not found")
 		return
 	}
-	views, jobs, err := checkJenkinsInstance(c.Request.Context(), instance, refresh)
+	views, jobs, pipelines, err := checkJenkinsInstance(c.Request.Context(), instance, refresh)
 	checkedAt := time.Now()
 	status, message := probeResult(err, "jenkins connection ok")
-	item, ok, updateErr := h.repo.UpdateJenkinsInstanceProbe(id, status, message, views, jobs, checkedAt)
+	item, ok, updateErr := h.repo.UpdateJenkinsInstanceProbe(id, status, message, views, jobs, pipelines, checkedAt)
 	if updateErr != nil {
 		BadRequest(c, "update jenkins probe result failed")
 		return
@@ -253,30 +254,23 @@ func collectHarborRegistryFields(value any, output map[string]string) {
 	}
 }
 
-func checkJenkinsInstance(ctx context.Context, instance domain.JenkinsInstance, refresh bool) ([]string, []string, error) {
+func checkJenkinsInstance(ctx context.Context, instance domain.JenkinsInstance, refresh bool) ([]string, []string, []domain.JenkinsPipeline, error) {
 	client := basicAuthClient(instance.InsecureSkipTLSVerify)
 	headers := basicAuthHeaders(instance.Username, instance.Token)
-	tree := "views[name],jobs[name]"
+	tree := "views[name,url],jobs[name,url,property[parameterDefinitions[name,type,description,defaultParameterValue[value]]]]"
 	if !refresh {
 		tree = "mode"
 	}
 	body, err := getJSON(ctx, client, joinURL(instance.URL, "/api/json?tree="+url.QueryEscape(tree)), headers)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if !refresh {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	var response struct {
-		Views []struct {
-			Name string `json:"name"`
-		} `json:"views"`
-		Jobs []struct {
-			Name string `json:"name"`
-		} `json:"jobs"`
-	}
+	var response jenkinsRootResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, nil, fmt.Errorf("parse jenkins views/jobs failed: %w", err)
+		return nil, nil, nil, fmt.Errorf("parse jenkins views/jobs failed: %w", err)
 	}
 	views := make([]string, 0, len(response.Views))
 	for _, item := range response.Views {
@@ -290,7 +284,180 @@ func checkJenkinsInstance(ctx context.Context, instance domain.JenkinsInstance, 
 			jobs = append(jobs, name)
 		}
 	}
-	return compactProbeList(views), compactProbeList(jobs), nil
+	pipelines := make([]domain.JenkinsPipeline, 0, len(response.Jobs))
+	for _, item := range response.Jobs {
+		if pipeline := jenkinsPipelineFromJob(item, "", ""); pipeline.Name != "" {
+			pipelines = append(pipelines, pipeline)
+		}
+	}
+	for _, view := range response.Views {
+		viewName := strings.TrimSpace(view.Name)
+		if viewName == "" {
+			continue
+		}
+		viewJobs, err := fetchJenkinsViewJobs(ctx, client, headers, instance.URL, view)
+		if err != nil {
+			log.Printf("jenkins instance %s view %s pipeline probe failed: %v", instance.ID, viewName, err)
+			continue
+		}
+		for _, item := range viewJobs {
+			if name := strings.TrimSpace(item.Name); name != "" {
+				jobs = append(jobs, name)
+			}
+			if pipeline := jenkinsPipelineFromJob(item, viewName, view.URL); pipeline.Name != "" {
+				pipelines = append(pipelines, pipeline)
+			}
+		}
+	}
+	return compactProbeList(views), compactProbeList(jobs), compactProbePipelines(pipelines), nil
+}
+
+type jenkinsRootResponse struct {
+	Views []jenkinsViewResponse `json:"views"`
+	Jobs  []jenkinsJobResponse  `json:"jobs"`
+}
+
+type jenkinsViewResponse struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+type jenkinsJobResponse struct {
+	Name     string                       `json:"name"`
+	URL      string                       `json:"url"`
+	Property []jenkinsJobPropertyResponse `json:"property"`
+}
+
+type jenkinsJobPropertyResponse struct {
+	ParameterDefinitions []jenkinsParameterDefinitionResponse `json:"parameterDefinitions"`
+}
+
+type jenkinsParameterDefinitionResponse struct {
+	Name                  string `json:"name"`
+	Type                  string `json:"type"`
+	Description           string `json:"description"`
+	DefaultParameterValue struct {
+		Value any `json:"value"`
+	} `json:"defaultParameterValue"`
+}
+
+func fetchJenkinsViewJobs(ctx context.Context, client *http.Client, headers map[string]string, baseURL string, view jenkinsViewResponse) ([]jenkinsJobResponse, error) {
+	tree := "jobs[name,url,property[parameterDefinitions[name,type,description,defaultParameterValue[value]]]]"
+	endpoints := jenkinsViewEndpoints(baseURL, view)
+	var lastErr error
+	for _, endpoint := range endpoints {
+		body, err := getJSON(ctx, client, joinURL(endpoint, "/api/json?tree="+url.QueryEscape(tree)), headers)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var response struct {
+			Jobs []jenkinsJobResponse `json:"jobs"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			return nil, fmt.Errorf("parse jenkins view jobs failed: %w", err)
+		}
+		return response.Jobs, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("jenkins view endpoint is empty")
+}
+
+func jenkinsViewEndpoints(baseURL string, view jenkinsViewResponse) []string {
+	endpoints := make([]string, 0, 2)
+	if endpoint := strings.TrimSpace(view.URL); endpoint != "" {
+		endpoints = append(endpoints, endpoint)
+	}
+	viewName := strings.TrimSpace(view.Name)
+	if viewName != "" {
+		endpoints = append(endpoints, joinURL(baseURL, "/view/"+jenkinsViewPathEscape(viewName)+"/"))
+	}
+	return compactProbeList(endpoints)
+}
+
+func jenkinsViewPathEscape(viewName string) string {
+	parts := strings.Split(viewName, "/")
+	for index, part := range parts {
+		parts[index] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/view/")
+}
+
+func jenkinsPipelineFromJob(job jenkinsJobResponse, view string, viewURL string) domain.JenkinsPipeline {
+	name := strings.TrimSpace(job.Name)
+	if name == "" {
+		return domain.JenkinsPipeline{}
+	}
+	parameters := make([]domain.JenkinsPipelineParameter, 0)
+	for _, property := range job.Property {
+		for _, definition := range property.ParameterDefinitions {
+			parameterName := strings.TrimSpace(definition.Name)
+			if parameterName == "" {
+				continue
+			}
+			parameters = append(parameters, domain.JenkinsPipelineParameter{
+				Name:         parameterName,
+				Type:         strings.TrimSpace(definition.Type),
+				DefaultValue: jenkinsDefaultParameterValue(definition.DefaultParameterValue.Value),
+				Description:  strings.TrimSpace(definition.Description),
+				Required:     definition.DefaultParameterValue.Value == nil,
+			})
+		}
+	}
+	return domain.JenkinsPipeline{
+		Name:       name,
+		View:       strings.TrimSpace(view),
+		ViewURL:    strings.TrimSpace(viewURL),
+		URL:        strings.TrimSpace(job.URL),
+		Parameters: parameters,
+	}
+}
+
+func jenkinsDefaultParameterValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	case float64:
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", typed), "0"), ".")
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func compactProbePipelines(items []domain.JenkinsPipeline) []domain.JenkinsPipeline {
+	seen := map[string]struct{}{}
+	result := make([]domain.JenkinsPipeline, 0, len(items))
+	for _, item := range items {
+		item.Name = strings.TrimSpace(item.Name)
+		item.View = strings.TrimSpace(item.View)
+		item.ViewURL = strings.TrimSpace(item.ViewURL)
+		item.URL = strings.TrimSpace(item.URL)
+		if item.Name == "" {
+			continue
+		}
+		key := item.View + "\x00" + item.ViewURL + "\x00" + item.Name
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, item)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].View == result[j].View {
+			return result[i].Name < result[j].Name
+		}
+		return result[i].View < result[j].View
+	})
+	return result
 }
 
 func getJSON(ctx context.Context, client *http.Client, endpoint string, headers map[string]string) ([]byte, error) {

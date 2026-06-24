@@ -34,6 +34,40 @@ func TestCreateReleaseWithLocalHarborImageUsesRegistry(t *testing.T) {
 	}
 }
 
+func TestCreateReleaseWithLocalJenkinsJobDoesNotEnqueueAgentTask(t *testing.T) {
+	var enqueued bool
+	creator := NewReleaseCreator(integration.NewMockSuite(), mockEnvironmentAgentReader{
+		environment: domain.Environment{
+			ID:          "env-local-prod",
+			NetworkMode: "DIRECT",
+		},
+	}, nil, func(ctx context.Context, id string, taskType string, action string, agentID string, environmentID string) {
+		enqueued = true
+	})
+
+	result, err := creator.CreateRelease(context.Background(), CreateReleaseRequest{
+		Type:                "SERVICE_RELEASE",
+		ReleaseSource:       "JENKINS_JOB",
+		TargetEnvironmentID: "env-local-prod",
+		Jenkins: ReleaseJenkins{
+			JobName: "local-service-release",
+			Branch:  "main",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create release: %v", err)
+	}
+	if result.ExecutionMode != "JENKINS_ONLY" {
+		t.Fatalf("expected JENKINS_ONLY, got %s", result.ExecutionMode)
+	}
+	if result.AgentTaskID != "" {
+		t.Fatalf("expected no agent task id, got %s", result.AgentTaskID)
+	}
+	if enqueued {
+		t.Fatal("expected local Jenkins release not to enqueue agent task")
+	}
+}
+
 func TestCreateDeployTaskUsesKubernetesProbe(t *testing.T) {
 	creator := NewReleaseCreator(integration.NewMockSuite(), newMockAgentReader(), mockDiffReader{
 		result: domain.DiffResult{
@@ -208,6 +242,11 @@ func TestCreateDeployTaskUsesMissingInTargetDiffSelection(t *testing.T) {
 
 type mockAgentReader map[string]string
 
+type mockEnvironmentAgentReader struct {
+	mockAgentReader
+	environment domain.Environment
+}
+
 type mockPermissionReader map[string]bool
 
 type mockDiffReader struct {
@@ -244,6 +283,13 @@ func (m mockAgentReader) GetAgent(id string) (domain.Agent, bool) {
 		EnvironmentID: parts[0],
 		Status:        parts[1],
 	}, true
+}
+
+func (m mockEnvironmentAgentReader) GetEnvironment(id string) (domain.Environment, bool) {
+	if m.environment.ID == id {
+		return m.environment, true
+	}
+	return domain.Environment{}, false
 }
 
 func (m mockPermissionReader) HasEnvironmentAction(environmentID string, action string) bool {

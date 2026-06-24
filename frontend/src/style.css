@@ -125,6 +125,47 @@ body {
   color: #667085;
 }
 
+.top-user-trigger {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 4px;
+  color: #344054;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  height: 30px;
+  max-width: 220px;
+  padding: 0 9px;
+}
+
+.top-user-trigger:hover {
+  background: #eef6ff;
+  border-color: #b9d8ff;
+}
+
+.top-user-name,
+.top-user-role {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-user-name {
+  max-width: 120px;
+  font-weight: 600;
+}
+
+.top-user-role {
+  border-left: 1px solid #d0d5dd;
+  color: #667085;
+  max-width: 70px;
+  padding-left: 6px;
+}
+
 .content {
   overflow: auto;
   padding: 18px;

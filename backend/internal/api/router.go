@@ -38,6 +38,7 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol agent.Protoco
 	api.GET("/roles", handler.ListRoles)
 	api.GET("/permissions", handler.ListPermissions)
 	api.GET("/changelog", handler.ListChangelog)
+	api.GET("/operation-logs", handler.ListOperationLogs)
 
 	api.GET("/projects", handler.ListProjects)
 	api.GET("/projects/:id", handler.GetProject)
@@ -54,6 +55,7 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol agent.Protoco
 	api.POST("/environments/:id/services/adopt", handler.AdoptEnvironmentServices)
 	api.POST("/environments/:id/services/remove", handler.RemoveEnvironmentServices)
 	api.POST("/environments/:id/services/confirm-registry", handler.ConfirmEnvironmentServiceRegistry)
+	api.POST("/environments/:id/services/:serviceId/pipeline", handler.BindEnvironmentServicePipeline)
 	api.GET("/kubernetes-clusters", handler.ListKubernetesClusters)
 	api.POST("/kubernetes-clusters", handler.CreateKubernetesCluster)
 	api.PUT("/kubernetes-clusters/:id", handler.UpdateKubernetesCluster)

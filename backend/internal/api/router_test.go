@@ -478,7 +478,7 @@ func TestEnvironmentVerifiedScopesClearDegradedOnSave(t *testing.T) {
 	if _, _, err := repo.UpdateKubernetesClusterProbe("k8s-local-prod", "HEALTHY", "", []string{"default", "project-x", "namespace-later"}, time.Now()); err != nil {
 		t.Fatalf("update kubernetes probe: %v", err)
 	}
-	if _, _, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z", "project-later"}, []string{"mock-release"}, time.Now()); err != nil {
+	if _, _, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z", "project-later"}, []string{"mock-release"}, nil, time.Now()); err != nil {
 		t.Fatalf("update jenkins probe: %v", err)
 	}
 
@@ -1897,7 +1897,7 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 	if _, ok, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x"}, "", time.Now()); err != nil || !ok {
 		panic("seed harbor probe failed")
 	}
-	if _, ok, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z"}, []string{"mock-release"}, time.Now()); err != nil || !ok {
+	if _, ok, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z"}, []string{"mock-release"}, nil, time.Now()); err != nil || !ok {
 		panic("seed jenkins probe failed")
 	}
 	items := []domain.Environment{

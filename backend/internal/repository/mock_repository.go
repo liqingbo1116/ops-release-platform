@@ -36,6 +36,7 @@ type MockRepository struct {
 	roles           []domain.Role
 	permissions     []domain.EnvironmentPermission
 	changelog       []domain.ChangelogEntry
+	operationLogs   []domain.OperationLog
 }
 
 type mockAgentRegisterToken struct {
@@ -586,7 +587,7 @@ func (r *MockRepository) UpdateJenkinsInstance(id string, input domain.JenkinsIn
 	return domain.JenkinsInstance{}, false, nil
 }
 
-func (r *MockRepository) UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, checkedAt time.Time) (domain.JenkinsInstance, bool, error) {
+func (r *MockRepository) UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, pipelines []domain.JenkinsPipeline, checkedAt time.Time) (domain.JenkinsInstance, bool, error) {
 	for index := range r.jenkins {
 		if r.jenkins[index].ID != id {
 			continue
@@ -598,6 +599,9 @@ func (r *MockRepository) UpdateJenkinsInstanceProbe(id string, status string, me
 		}
 		if jobs != nil {
 			r.jenkins[index].Jobs = append([]string(nil), jobs...)
+		}
+		if pipelines != nil {
+			r.jenkins[index].Pipelines = compactJenkinsPipelines(pipelines)
 		}
 		r.jenkins[index].LastCheckAt = checkedAt.Format(time.RFC3339)
 		return r.jenkins[index], true, nil
@@ -724,6 +728,77 @@ func (r *MockRepository) ClaimAgent(id string, environmentID string) (domain.Age
 		}
 	}
 	return agent, true
+}
+
+func (r *MockRepository) ListOperationLogs(query string, environmentID string, resourceType string) []domain.OperationLog {
+	query = strings.ToLower(strings.TrimSpace(query))
+	environmentID = strings.TrimSpace(environmentID)
+	resourceType = strings.ToUpper(strings.TrimSpace(resourceType))
+	items := make([]domain.OperationLog, 0, len(r.operationLogs))
+	for _, item := range r.operationLogs {
+		if environmentID != "" && item.EnvironmentID != environmentID {
+			continue
+		}
+		if resourceType != "" && strings.ToUpper(item.ResourceType) != resourceType {
+			continue
+		}
+		if query != "" {
+			text := strings.ToLower(strings.Join([]string{
+				item.ID,
+				item.OperatorName,
+				item.Action,
+				item.ResourceType,
+				item.ResourceID,
+				item.ResourceName,
+				item.ProjectName,
+				item.ProductName,
+				item.Namespace,
+				item.WorkloadName,
+				item.ContainerName,
+				item.Result,
+				item.Detail,
+			}, " "))
+			if !strings.Contains(text, query) {
+				continue
+			}
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func (r *MockRepository) CreateOperationLog(input domain.OperationLog) (domain.OperationLog, error) {
+	now := time.Now()
+	item := domain.OperationLog{
+		ID:            strings.TrimSpace(input.ID),
+		OperatorID:    firstNonEmpty(strings.TrimSpace(input.OperatorID), "system"),
+		OperatorName:  firstNonEmpty(strings.TrimSpace(input.OperatorName), "平台"),
+		Action:        strings.ToUpper(strings.TrimSpace(input.Action)),
+		ResourceType:  strings.ToUpper(strings.TrimSpace(input.ResourceType)),
+		ResourceID:    strings.TrimSpace(input.ResourceID),
+		ResourceName:  strings.TrimSpace(input.ResourceName),
+		ProjectID:     strings.TrimSpace(input.ProjectID),
+		ProjectName:   strings.TrimSpace(input.ProjectName),
+		EnvironmentID: strings.TrimSpace(input.EnvironmentID),
+		ProductName:   strings.TrimSpace(input.ProductName),
+		TaskID:        strings.TrimSpace(input.TaskID),
+		Namespace:     strings.TrimSpace(input.Namespace),
+		WorkloadType:  strings.TrimSpace(input.WorkloadType),
+		WorkloadName:  strings.TrimSpace(input.WorkloadName),
+		ContainerName: strings.TrimSpace(input.ContainerName),
+		ContainerType: strings.TrimSpace(input.ContainerType),
+		Result:        strings.ToUpper(firstNonEmpty(strings.TrimSpace(input.Result), "SUCCESS")),
+		Detail:        strings.TrimSpace(input.Detail),
+		CreatedAt:     firstNonEmpty(strings.TrimSpace(input.CreatedAt), now.Format(time.RFC3339)),
+	}
+	if item.ID == "" {
+		item.ID = fmt.Sprintf("oplog-%s", now.Format("20060102150405.000000000"))
+	}
+	if item.Action == "" || item.ResourceType == "" || item.ResourceID == "" {
+		return domain.OperationLog{}, fmt.Errorf("missing required operation log fields")
+	}
+	r.operationLogs = append([]domain.OperationLog{item}, r.operationLogs...)
+	return item, nil
 }
 
 func (r *MockRepository) UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool) {
@@ -897,6 +972,10 @@ func (r *MockRepository) RemoveManagedServices(productID string, serviceIDs []st
 
 func (r *MockRepository) ConfirmManagedServiceRegistry(productID string, registryHost string, harborProjects []string) ([]domain.ManagedService, error) {
 	return []domain.ManagedService{}, nil
+}
+
+func (r *MockRepository) BindManagedServicePipeline(productID string, serviceID string, jobName string, branch string) (domain.ManagedService, bool, error) {
+	return domain.ManagedService{}, false, nil
 }
 
 func (r *MockRepository) CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error) {

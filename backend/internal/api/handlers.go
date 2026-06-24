@@ -100,6 +100,16 @@ func NewHandler(repo repository.Store, queue *agent.Queue, protocol agent.Protoc
 
 func (h *Handler) Login(c *gin.Context) {
 	user := h.repo.GetCurrentUser()
+	h.recordOperationLog(domain.OperationLog{
+		OperatorID:   firstNonEmpty(user.ID, user.Username, "system"),
+		OperatorName: firstNonEmpty(user.DisplayName, user.Username, "平台"),
+		Action:       "USER_LOGIN",
+		ResourceType: "USER",
+		ResourceID:   firstNonEmpty(user.ID, user.Username, "current-user"),
+		ResourceName: firstNonEmpty(user.DisplayName, user.Username, "当前用户"),
+		Result:       "SUCCESS",
+		Detail:       fmt.Sprintf("用户 %s 登录平台。", firstNonEmpty(user.DisplayName, user.Username, "当前用户")),
+	})
 	OK(c, gin.H{
 		"token": "mock-token-admin",
 		"user":  user,
@@ -128,6 +138,68 @@ func (h *Handler) ListPermissions(c *gin.Context) {
 
 func (h *Handler) ListChangelog(c *gin.Context) {
 	OK(c, paginate(h.repo.ListChangelog(c.Query("keyword")), c))
+}
+
+func (h *Handler) ListOperationLogs(c *gin.Context) {
+	OK(c, paginate(h.repo.ListOperationLogs(c.Query("keyword"), c.Query("environmentId"), c.Query("resourceType")), c))
+}
+
+func (h *Handler) recordOperationLog(input domain.OperationLog) {
+	user := h.repo.GetCurrentUser()
+	if strings.TrimSpace(input.OperatorID) == "" {
+		input.OperatorID = firstNonEmpty(user.ID, user.Username, "system")
+	}
+	if strings.TrimSpace(input.OperatorName) == "" {
+		input.OperatorName = firstNonEmpty(user.DisplayName, user.Username, "平台")
+	}
+	if _, err := h.repo.CreateOperationLog(input); err != nil {
+		log.Printf("operation log create failed: action=%s resourceType=%s resourceID=%s err=%v", input.Action, input.ResourceType, input.ResourceID, err)
+	}
+}
+
+func operationLogWithProductContext(input domain.OperationLog, environment domain.Environment) domain.OperationLog {
+	input.EnvironmentID = firstNonEmpty(input.EnvironmentID, environment.ID)
+	input.ProductName = firstNonEmpty(input.ProductName, environment.Name)
+	input.ProjectID = firstNonEmpty(input.ProjectID, environment.ProjectID)
+	input.ProjectName = firstNonEmpty(input.ProjectName, environment.ProjectName)
+	return input
+}
+
+func operationLogWithDiscoveredWorkload(input domain.OperationLog, item domain.DiscoveredService) domain.OperationLog {
+	input.ResourceType = firstNonEmpty(input.ResourceType, "WORKLOAD")
+	input.ResourceID = firstNonEmpty(input.ResourceID, workloadOperationResourceID(item.Namespace, item.WorkloadType, item.WorkloadName, item.ContainerType, item.ContainerName, item.ID))
+	input.ResourceName = firstNonEmpty(input.ResourceName, item.WorkloadName, item.Name)
+	input.Namespace = firstNonEmpty(input.Namespace, item.Namespace)
+	input.WorkloadType = firstNonEmpty(input.WorkloadType, item.WorkloadType)
+	input.WorkloadName = firstNonEmpty(input.WorkloadName, item.WorkloadName)
+	input.ContainerName = firstNonEmpty(input.ContainerName, item.ContainerName)
+	input.ContainerType = firstNonEmpty(input.ContainerType, item.ContainerType)
+	return input
+}
+
+func operationLogWithManagedWorkload(input domain.OperationLog, item domain.ManagedService) domain.OperationLog {
+	input.ResourceType = firstNonEmpty(input.ResourceType, "WORKLOAD")
+	input.ResourceID = firstNonEmpty(input.ResourceID, workloadOperationResourceID(item.Namespace, item.WorkloadType, item.WorkloadName, item.ContainerType, item.ContainerName, item.ID))
+	input.ResourceName = firstNonEmpty(input.ResourceName, item.WorkloadName, item.Name)
+	input.Namespace = firstNonEmpty(input.Namespace, item.Namespace)
+	input.WorkloadType = firstNonEmpty(input.WorkloadType, item.WorkloadType)
+	input.WorkloadName = firstNonEmpty(input.WorkloadName, item.WorkloadName)
+	input.ContainerName = firstNonEmpty(input.ContainerName, item.ContainerName)
+	input.ContainerType = firstNonEmpty(input.ContainerType, item.ContainerType)
+	return input
+}
+
+func workloadOperationResourceID(namespace string, workloadType string, workloadName string, containerType string, containerName string, fallback string) string {
+	parts := make([]string, 0, 5)
+	for _, value := range []string{namespace, workloadType, workloadName, containerType, containerName} {
+		if strings.TrimSpace(value) != "" {
+			parts = append(parts, strings.TrimSpace(value))
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "/")
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func (h *Handler) ListProjects(c *gin.Context) {
@@ -406,6 +478,7 @@ func (h *Handler) ListDiscoveredEnvironmentServices(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
+	services = h.reconcileManagedServicesWithDiscovered(environment.ID, services)
 	OK(c, paginate(services, c))
 }
 
@@ -458,12 +531,21 @@ func (h *Handler) AdoptEnvironmentServices(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
+	for _, item := range selected {
+		logItem := operationLogWithDiscoveredWorkload(domain.OperationLog{
+			Action: "SERVICE_ADOPT",
+			Result: "SUCCESS",
+			Detail: fmt.Sprintf("项目 %s / 产品 %s 的工作负载 %s/%s/%s 容器 %s 已纳管。", firstNonEmpty(environment.ProjectName, "未绑定项目"), environment.Name, item.Namespace, item.WorkloadType, firstNonEmpty(item.WorkloadName, item.Name), firstNonEmpty(item.ContainerName, "-")),
+		}, item)
+		h.recordOperationLog(operationLogWithProductContext(logItem, environment))
+	}
 	OK(c, services)
 }
 
 func (h *Handler) RemoveEnvironmentServices(c *gin.Context) {
 	environmentID := c.Param("id")
-	if _, ok := h.repo.GetEnvironment(environmentID); !ok {
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
 		NotFound(c, "environment not found")
 		return
 	}
@@ -476,10 +558,29 @@ func (h *Handler) RemoveEnvironmentServices(c *gin.Context) {
 		BadRequest(c, "请选择需要移除纳管的服务")
 		return
 	}
+	managedBefore := h.repo.ListManagedServices(environmentID)
+	managedByID := make(map[string]domain.ManagedService, len(managedBefore))
+	for _, item := range managedBefore {
+		managedByID[item.ID] = item
+	}
 	services, err := h.repo.RemoveManagedServices(environmentID, input.ServiceIDs)
 	if err != nil {
 		BadRequest(c, err.Error())
 		return
+	}
+	for _, serviceID := range input.ServiceIDs {
+		item, ok := managedByID[serviceID]
+		logItem := domain.OperationLog{
+			Action:     "SERVICE_UNMANAGE_MANUAL",
+			ResourceID: serviceID,
+			Result:     "SUCCESS",
+			Detail:     fmt.Sprintf("项目 %s / 产品 %s 的工作负载已手动解除纳管；平台不执行实际删除操作。", firstNonEmpty(environment.ProjectName, "未绑定项目"), environment.Name),
+		}
+		if ok {
+			logItem = operationLogWithManagedWorkload(logItem, item)
+			logItem.Detail = fmt.Sprintf("项目 %s / 产品 %s 的工作负载 %s/%s/%s 容器 %s 已手动解除纳管；平台不执行实际删除操作。", firstNonEmpty(environment.ProjectName, "未绑定项目"), environment.Name, item.Namespace, item.WorkloadType, firstNonEmpty(item.WorkloadName, item.Name), firstNonEmpty(item.ContainerName, "-"))
+		}
+		h.recordOperationLog(operationLogWithProductContext(logItem, environment))
 	}
 	OK(c, services)
 }
@@ -543,6 +644,57 @@ func (h *Handler) ConfirmEnvironmentServiceRegistry(c *gin.Context) {
 	OK(c, services)
 }
 
+func (h *Handler) BindEnvironmentServicePipeline(c *gin.Context) {
+	environmentID := c.Param("id")
+	serviceID := c.Param("serviceId")
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	var input domain.BindServicePipelineInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "invalid service pipeline bind request")
+		return
+	}
+	jobName := strings.TrimSpace(input.JenkinsJobName)
+	branch := strings.TrimSpace(input.JenkinsBranch)
+	if branch == "" {
+		branch = "main"
+	}
+	if jobName == "" {
+		BadRequest(c, "请选择 Jenkins Pipeline")
+		return
+	}
+	pipelines := h.jenkinsPipelinesForEnvironment(environment)
+	jobs := jenkinsJobNamesFromPipelines(pipelines)
+	if len(jobs) == 0 {
+		BadRequest(c, "当前产品关联的 Jenkins 尚未发现 Pipeline，请先在基础资源中刷新 Jenkins")
+		return
+	}
+	if !containsTrimmedString(jobs, jobName) {
+		BadRequest(c, "只能绑定当前产品 Jenkins view 下已发现的 Pipeline")
+		return
+	}
+	services := h.repo.ListManagedServices(environmentID)
+	for _, item := range services {
+		if item.ID != serviceID && strings.TrimSpace(item.JenkinsJobName) == jobName {
+			BadRequest(c, fmt.Sprintf("该 Jenkins Pipeline 已绑定到服务 %s，不能重复绑定", item.Name))
+			return
+		}
+	}
+	service, found, err := h.repo.BindManagedServicePipeline(environmentID, serviceID, jobName, branch)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	if !found {
+		NotFound(c, "managed service not found")
+		return
+	}
+	OK(c, service)
+}
+
 func (h *Handler) discoverEnvironmentServices(ctx context.Context, environment domain.Environment) ([]domain.DiscoveredService, error) {
 	workloads, err := h.environmentWorkloads(ctx, environment)
 	if err != nil {
@@ -599,6 +751,59 @@ func (h *Handler) discoverEnvironmentServices(ctx context.Context, environment d
 	return services, nil
 }
 
+func (h *Handler) reconcileManagedServicesWithDiscovered(productID string, discovered []domain.DiscoveredService) []domain.DiscoveredService {
+	managed := h.repo.ListManagedServices(productID)
+	if len(managed) == 0 {
+		return discovered
+	}
+	discoveredIDs := make(map[string]bool, len(discovered))
+	for _, item := range discovered {
+		discoveredIDs[item.ID] = true
+	}
+	staleItems := make([]domain.ManagedService, 0)
+	staleIDs := make([]string, 0)
+	for _, item := range managed {
+		if !discoveredIDs[item.ID] {
+			staleItems = append(staleItems, item)
+			staleIDs = append(staleIDs, item.ID)
+		}
+	}
+	if len(staleIDs) == 0 {
+		return discovered
+	}
+	if _, err := h.repo.RemoveManagedServices(productID, staleIDs); err != nil {
+		log.Printf("environment %s managed service reconcile failed: %v", productID, err)
+		return discovered
+	}
+	environment, hasEnvironment := h.repo.GetEnvironment(productID)
+	for _, item := range staleItems {
+		logItem := operationLogWithManagedWorkload(domain.OperationLog{
+			OperatorID:   "system",
+			OperatorName: "系统自动处理",
+			Action:       "SERVICE_AUTO_UNMANAGE",
+			Result:       "SUCCESS",
+			Detail:       fmt.Sprintf("实际产品中未再发现工作负载 %s/%s/%s 容器 %s，平台已自动解除纳管；平台不执行实际删除操作。", item.Namespace, item.WorkloadType, firstNonEmpty(item.WorkloadName, item.Name), firstNonEmpty(item.ContainerName, "-")),
+		}, item)
+		if hasEnvironment {
+			logItem.Detail = fmt.Sprintf("项目 %s / 产品 %s 中未再发现工作负载 %s/%s/%s 容器 %s，平台已自动解除纳管；平台不执行实际删除操作。", firstNonEmpty(environment.ProjectName, "未绑定项目"), environment.Name, item.Namespace, item.WorkloadType, firstNonEmpty(item.WorkloadName, item.Name), firstNonEmpty(item.ContainerName, "-"))
+			logItem = operationLogWithProductContext(logItem, environment)
+		} else {
+			logItem.EnvironmentID = productID
+		}
+		h.recordOperationLog(logItem)
+	}
+	log.Printf("environment %s managed service reconcile removed stale services: %s", productID, strings.Join(staleIDs, ","))
+	remaining := h.repo.ListManagedServices(productID)
+	remainingIDs := make(map[string]bool, len(remaining))
+	for _, item := range remaining {
+		remainingIDs[item.ID] = true
+	}
+	for index := range discovered {
+		discovered[index].Managed = remainingIDs[discovered[index].ID]
+	}
+	return discovered
+}
+
 func mapKeys(input map[string]bool) []string {
 	keys := make([]string, 0, len(input))
 	for key := range input {
@@ -606,6 +811,263 @@ func mapKeys(input map[string]bool) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func (h *Handler) jenkinsJobsForEnvironment(environment domain.Environment) []string {
+	return jenkinsJobNamesFromPipelines(h.jenkinsPipelinesForEnvironment(environment))
+}
+
+func (h *Handler) jenkinsPipelinesForEnvironment(environment domain.Environment) []domain.JenkinsPipeline {
+	jenkinsIDs := make([]string, 0, 2)
+	if trimmed := strings.TrimSpace(environment.JenkinsID); trimmed != "" {
+		jenkinsIDs = append(jenkinsIDs, trimmed)
+	}
+	viewSet := map[string]string{}
+	if trimmed := strings.TrimSpace(environment.JenkinsView); trimmed != "" {
+		addJenkinsViewKeys(viewSet, trimmed)
+	}
+	for _, binding := range environment.Bindings {
+		if binding.ResourceType != "JENKINS" {
+			continue
+		}
+		if binding.BindingRole != "" && binding.BindingRole != "BUILD_SOURCE" {
+			continue
+		}
+		if trimmed := strings.TrimSpace(binding.ResourceID); trimmed != "" && !containsTrimmedString(jenkinsIDs, trimmed) {
+			jenkinsIDs = append(jenkinsIDs, trimmed)
+		}
+		if binding.ScopeType == "VIEW" {
+			if trimmed := strings.TrimSpace(binding.ScopeValue); trimmed != "" {
+				addJenkinsViewKeys(viewSet, trimmed)
+			}
+		}
+	}
+
+	pipelineMap := make(map[string]domain.JenkinsPipeline)
+	for _, id := range jenkinsIDs {
+		instance, ok := h.repo.GetJenkinsInstance(id)
+		if !ok {
+			continue
+		}
+		matchedPipelineCount := 0
+		for _, pipeline := range instance.Pipelines {
+			pipeline.Name = strings.TrimSpace(pipeline.Name)
+			pipeline.View = strings.TrimSpace(pipeline.View)
+			pipeline.ViewURL = strings.TrimSpace(pipeline.ViewURL)
+			pipeline.URL = strings.TrimSpace(pipeline.URL)
+			if pipeline.Name == "" {
+				continue
+			}
+			if len(viewSet) > 0 && !jenkinsPipelineMatchesView(pipeline, viewSet) {
+				continue
+			}
+			pipelineMap[jenkinsPipelineMapKey(pipeline)] = pipeline
+			matchedPipelineCount++
+		}
+		if len(instance.Pipelines) == 0 || matchedPipelineCount == 0 {
+			appendJenkinsJobPipelines(pipelineMap, instance.Jobs, viewSet)
+		}
+	}
+	pipelines := make([]domain.JenkinsPipeline, 0, len(pipelineMap))
+	for _, pipeline := range pipelineMap {
+		pipelines = append(pipelines, pipeline)
+	}
+	sort.Slice(pipelines, func(i, j int) bool {
+		if pipelines[i].View == pipelines[j].View {
+			return pipelines[i].Name < pipelines[j].Name
+		}
+		return pipelines[i].View < pipelines[j].View
+	})
+	return pipelines
+}
+
+func appendJenkinsJobPipelines(pipelineMap map[string]domain.JenkinsPipeline, jobs []string, viewSet map[string]string) {
+	fallbackView := fallbackJenkinsPipelineView("", viewSet)
+	for _, job := range jobs {
+		if trimmed := strings.TrimSpace(job); trimmed != "" {
+			pipeline := domain.JenkinsPipeline{
+				Name:       trimmed,
+				View:       fallbackView,
+				Parameters: []domain.JenkinsPipelineParameter{},
+			}
+			pipelineMap[jenkinsPipelineMapKey(pipeline)] = pipeline
+		}
+	}
+}
+
+func fallbackJenkinsPipelineView(current string, viewSet map[string]string) string {
+	if trimmed := strings.TrimSpace(current); trimmed != "" {
+		return trimmed
+	}
+	distinctViews := map[string]struct{}{}
+	for _, viewName := range viewSet {
+		if trimmed := strings.TrimSpace(viewName); trimmed != "" {
+			distinctViews[trimmed] = struct{}{}
+		}
+	}
+	if len(distinctViews) != 1 {
+		return ""
+	}
+	for viewName := range distinctViews {
+		return viewName
+	}
+	return ""
+}
+
+func addJenkinsViewKeys(viewSet map[string]string, viewName string) {
+	for _, key := range jenkinsViewKeyCandidates(viewName) {
+		viewSet[key] = viewName
+	}
+}
+
+func normalizedJenkinsViewKey(value string) string {
+	keys := jenkinsViewKeyCandidates(value)
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}
+
+func jenkinsPipelineMatchesView(pipeline domain.JenkinsPipeline, viewSet map[string]string) bool {
+	for _, value := range []string{pipeline.View, pipeline.ViewURL, pipeline.URL} {
+		for _, key := range jenkinsViewKeyCandidates(value) {
+			if _, ok := viewSet[key]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func jenkinsPipelineMapKey(pipeline domain.JenkinsPipeline) string {
+	viewKey := normalizedJenkinsViewKey(pipeline.View)
+	if viewKey == "" {
+		viewKey = normalizedJenkinsViewKey(pipeline.ViewURL)
+	}
+	return viewKey + "\x00" + strings.TrimSpace(pipeline.Name)
+}
+
+func jenkinsViewKeyCandidates(value string) []string {
+	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(value)), "/")
+	if normalized == "" {
+		return nil
+	}
+	keys := []string{normalized}
+	pathValue := normalized
+	if parsed, err := url.Parse(normalized); err == nil && parsed.Path != "" {
+		pathValue = strings.Trim(strings.ToLower(parsed.Path), "/")
+		keys = append(keys, pathValue)
+		keys = append(keys, jenkinsPathSuffixCandidates(parsed.Path)...)
+	}
+	keys = append(keys, extractJenkinsViewPathKeys(pathValue)...)
+	keys = append(keys, decodedPathKeys(pathValue)...)
+	keys = append(keys, jenkinsViewNameCandidates(normalized)...)
+	if decoded, err := url.PathUnescape(normalized); err == nil && decoded != normalized {
+		decoded = strings.Trim(strings.ToLower(strings.TrimSpace(decoded)), "/")
+		keys = append(keys, decoded)
+		keys = append(keys, extractJenkinsViewPathKeys(decoded)...)
+		keys = append(keys, jenkinsPathSuffixCandidates(decoded)...)
+		keys = append(keys, jenkinsViewNameCandidates(decoded)...)
+	}
+	return uniqueStringKeys(keys)
+}
+
+func jenkinsViewNameCandidates(value string) []string {
+	candidates := []string{}
+	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(value)), "/")
+	if normalized == "" {
+		return candidates
+	}
+	for _, separator := range []string{"/", ">", "»", "\\", "|"} {
+		parts := strings.Split(normalized, separator)
+		if len(parts) > 1 {
+			if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+				candidates = append(candidates, last)
+			}
+		}
+	}
+	return candidates
+}
+
+func decodedPathKeys(value string) []string {
+	decoded, err := url.PathUnescape(value)
+	if err != nil || decoded == value {
+		return nil
+	}
+	keys := []string{strings.Trim(strings.ToLower(strings.TrimSpace(decoded)), "/")}
+	keys = append(keys, extractJenkinsViewPathKeys(keys[0])...)
+	keys = append(keys, jenkinsPathSuffixCandidates(keys[0])...)
+	return keys
+}
+
+func extractJenkinsViewPathKeys(value string) []string {
+	keys := []string{}
+	parts := strings.Split(strings.Trim(value, "/"), "/")
+	viewParts := []string{}
+	for index, part := range parts {
+		if part != "view" || index+1 >= len(parts) {
+			continue
+		}
+		viewName := strings.Trim(strings.ToLower(strings.TrimSpace(parts[index+1])), "/")
+		if decoded, err := url.PathUnescape(viewName); err == nil {
+			viewName = strings.Trim(strings.ToLower(strings.TrimSpace(decoded)), "/")
+		}
+		if viewName != "" {
+			keys = append(keys, viewName)
+			viewParts = append(viewParts, viewName)
+		}
+	}
+	if len(viewParts) > 1 {
+		keys = append(keys, strings.Join(viewParts, "/"))
+	}
+	return keys
+}
+
+func jenkinsPathSuffixCandidates(value string) []string {
+	parts := strings.Split(strings.Trim(strings.ToLower(strings.TrimSpace(value)), "/"), "/")
+	if len(parts) == 0 {
+		return nil
+	}
+	for index, part := range parts {
+		if decoded, err := url.PathUnescape(part); err == nil {
+			parts[index] = strings.Trim(strings.ToLower(strings.TrimSpace(decoded)), "/")
+		}
+	}
+	keys := []string{}
+	if last := parts[len(parts)-1]; last != "" {
+		keys = append(keys, last)
+	}
+	for index := len(parts) - 2; index >= 0; index-- {
+		if parts[index] == "view" && index+1 < len(parts) && parts[index+1] != "" {
+			keys = append(keys, parts[index+1])
+			break
+		}
+	}
+	return keys
+}
+
+func uniqueStringKeys(values []string) []string {
+	seen := map[string]bool{}
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		key := strings.Trim(strings.ToLower(strings.TrimSpace(value)), "/")
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func jenkinsJobNamesFromPipelines(pipelines []domain.JenkinsPipeline) []string {
+	jobSet := map[string]bool{}
+	for _, pipeline := range pipelines {
+		if trimmed := strings.TrimSpace(pipeline.Name); trimmed != "" {
+			jobSet[trimmed] = true
+		}
+	}
+	return mapKeys(jobSet)
 }
 
 func (h *Handler) environmentWorkloads(ctx context.Context, environment domain.Environment) ([]integration.Workload, error) {
@@ -1572,6 +2034,13 @@ func (h *Handler) ClaimAgent(c *gin.Context) {
 		BadRequest(c, "agent or environment not found")
 		return
 	}
+	h.recordOperationLog(operationLogWithProductContext(domain.OperationLog{
+		Action:       "AGENT_CLAIM",
+		ResourceType: "AGENT",
+		ResourceID:   agentItem.ID,
+		Result:       "SUCCESS",
+		Detail:       fmt.Sprintf("Agent 已绑定远程产品 %s。", environment.Name),
+	}, environment))
 	OK(c, agentItem)
 }
 
@@ -1611,11 +2080,27 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 		NotFound(c, "agent not found")
 		return
 	}
+	if h.shouldReconcileManagedServicesFromHeartbeat(agentItem, request.RuntimeStatus) {
+		if environment, exists := h.repo.GetEnvironment(agentItem.EnvironmentID); exists {
+			if services, err := h.discoverEnvironmentServices(c.Request.Context(), environment); err != nil {
+				log.Printf("environment %s managed service heartbeat reconcile skipped: %v", environment.ID, err)
+			} else {
+				h.reconcileManagedServicesWithDiscovered(environment.ID, services)
+			}
+		}
+	}
 	OK(c, gin.H{
 		"agent":       agentItem,
 		"serverTime":  time.Now().Format(time.RFC3339),
 		"nextPollSec": 5,
 	})
+}
+
+func (h *Handler) shouldReconcileManagedServicesFromHeartbeat(agentItem domain.Agent, runtimeStatus domain.RuntimeStatus) bool {
+	if agentItem.ClaimStatus != "CLAIMED" || strings.TrimSpace(agentItem.EnvironmentID) == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(runtimeStatus.Kubernetes.Status), "HEALTHY")
 }
 
 func (h *Handler) PullAgentTask(c *gin.Context) {
@@ -1902,11 +2387,6 @@ func (h *Handler) ListReleaseSources(c *gin.Context) {
 		NotFound(c, "environment not found")
 		return
 	}
-	if h.integrations.Registry == nil {
-		BadRequest(c, "registry integration is not configured")
-		return
-	}
-
 	services := h.repo.ListReleaseSourceServices(environmentID, c.Query("keyword"))
 	for index := range services {
 		if services[index].ImageSource != "PRIVATE" {
@@ -1934,6 +2414,12 @@ func (h *Handler) ListReleaseSources(c *gin.Context) {
 			services[index].Message = "镜像仓库路径缺失"
 			continue
 		}
+		if h.integrations.Registry == nil {
+			services[index].Tags = []domain.ReleaseImageTag{}
+			services[index].Publishable = false
+			services[index].Message = "Harbor 集成未配置，暂不能读取镜像 tag"
+			continue
+		}
 		tags, err := h.integrations.Registry.ListImageTags(c.Request.Context(), environment, services[index].ImageRepository)
 		if err != nil {
 			services[index].Tags = []domain.ReleaseImageTag{}
@@ -1949,9 +2435,10 @@ func (h *Handler) ListReleaseSources(c *gin.Context) {
 	}
 
 	OK(c, domain.ReleaseSource{
-		EnvironmentID: environmentID,
-		Services:      services,
-		JenkinsJobs:   []string{},
+		EnvironmentID:    environmentID,
+		Services:         services,
+		JenkinsJobs:      h.jenkinsJobsForEnvironment(environment),
+		JenkinsPipelines: h.jenkinsPipelinesForEnvironment(environment),
 	})
 }
 

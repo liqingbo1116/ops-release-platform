@@ -11,26 +11,14 @@
       </div>
     </div>
 
-    <div class="readiness-grid">
-      <el-alert
-        type="info"
-        :closable="false"
-        title="V1 主线：本地产品绑定本地 K8s、Harbor、Jenkins；远程产品绑定本地 Harbor、Jenkins，并在产品内配置远程 K8s 命名空间和远程 Harbor 项目。"
-      />
-      <el-alert
-        type="info"
-        :closable="false"
-        title="这些资源范围用于后续服务关联：服务会在产品内选择构建来源、镜像来源和部署目标；Agent 配置只负责连接远程环境，不负责指定产品资源映射。"
-      />
-      <el-alert
-        v-if="blockedProjectEnvironmentCount > 0"
-        type="warning"
-        :closable="false"
-        :title="`${blockedProjectEnvironmentCount} 个远程产品 Agent 未就绪，远程发布/部署提交前会被阻断。`"
-      />
+    <div class="product-overview">
+      <span>产品总数 <strong>{{ environments.length }}</strong></span>
+      <span>远程产品 <strong>{{ projectEnvironmentCount }}</strong></span>
+      <span>Agent 未就绪 <strong>{{ blockedProjectEnvironmentCount }}</strong></span>
+      <p>产品引用基础资源并承载服务，后续发版会按项目 / 产品 / 服务进入。</p>
     </div>
 
-    <el-card shadow="never">
+    <section class="product-list-panel">
       <div class="toolbar">
         <div class="toolbar-left">
           <el-input v-model="keyword" placeholder="搜索产品、项目、标识" clearable />
@@ -42,12 +30,11 @@
       </div>
       <el-alert v-if="errorMessage" class="environment-alert" type="warning" :closable="false" :title="errorMessage" />
       <el-table v-loading="loading" :data="filteredRows" class="environment-table">
-        <el-table-column label="产品与状态" min-width="320">
+        <el-table-column label="产品" min-width="320">
           <template #default="{ row }">
             <div class="environment-cell">
               <div class="environment-title">
                 <strong>{{ row.name }}</strong>
-                <StatusTag :status="row.status" />
               </div>
               <div class="environment-meta">
                 <span>{{ row.code }}</span>
@@ -58,6 +45,13 @@
                 <span>{{ environmentTypeLabel(row.type) }}</span>
                 <span>{{ deployTargetTypeLabel(row.deployTargetType) }}</span>
               </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" min-width="230">
+          <template #default="{ row }">
+            <div class="environment-cell">
+              <StatusTag :status="row.status" />
               <div class="environment-problem" :class="{ healthy: problemDiagnostics(row).length === 0 }">
                 <strong>{{ problemSummary(row).title }}</strong>
               </div>
@@ -74,7 +68,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="资源范围" min-width="300">
+        <el-table-column label="资源范围" min-width="360">
           <template #default="{ row }">
             <div class="resource-cell">
               <div v-if="row.type === 'LOCAL'">
@@ -109,15 +103,16 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="120">
+        <el-table-column label="操作" fixed="right" width="156">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
-            <el-button link type="primary" @click="openServicePage(row)">服务</el-button>
-            <el-button link type="primary" @click="openDrawer(row)">详情</el-button>
+            <div class="table-actions">
+              <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
+              <el-button size="small" @click="openDrawer(row)">详情</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </section>
 
     <EnvironmentConfigDrawer
       v-model:visible="drawerVisible"
@@ -266,7 +261,6 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import EnvironmentConfigDrawer from '@/components/EnvironmentConfigDrawer.vue'
 import StatusTag from '@/components/StatusTag.vue'
@@ -297,7 +291,6 @@ import {
 import { listAgents, type AgentInfo, type AgentRuntimeComponentStatus } from '@/api/agents'
 
 const keyword = ref('')
-const router = useRouter()
 const environmentType = ref('')
 const drawerVisible = ref(false)
 const dialogVisible = ref(false)
@@ -343,6 +336,7 @@ const typeOptions = [
 const blockedProjectEnvironmentCount = computed(
   () => environments.value.filter((item) => item.type === 'PROJECT' && item.agentStatus !== 'ONLINE').length,
 )
+const projectEnvironmentCount = computed(() => environments.value.filter((item) => item.type === 'PROJECT').length)
 
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
@@ -754,10 +748,6 @@ function openDrawer(row: EnvironmentInfo) {
   drawerVisible.value = true
 }
 
-function openServicePage(row: EnvironmentInfo) {
-  router.push(`/environments/${row.id}/services`)
-}
-
 function openCreateDialog() {
   dialogMode.value = 'create'
   form.value = emptyEnvironmentForm()
@@ -1125,29 +1115,136 @@ onMounted(loadAll)
 </script>
 
 <style scoped>
-.head-actions,
-.readiness-grid {
+.head-actions {
+  align-items: center;
   display: flex;
   gap: 10px;
 }
 
+.product-overview {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #edf1f6;
+  border-radius: 6px;
+  color: #606a7b;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(96px, auto)) minmax(280px, 1fr);
+  margin-bottom: 6px;
+  padding: 6px 10px;
+}
+
+.product-overview > span {
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  line-height: 16px;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.product-overview p {
+  color: #606a7b;
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+  text-align: right;
+}
+
+.product-overview strong {
+  color: #2f3847;
+  font-size: 13px;
+  line-height: 16px;
+}
+
+.product-list-panel {
+  background: #fff;
+  border: 1px solid #e4e8f0;
+  border-radius: 6px;
+  padding: 6px 6px 8px;
+}
+
+.toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.toolbar-left {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(260px, 360px) minmax(140px, 180px);
+}
+
 .readiness-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.readiness-item {
+  background: #f7f9fc;
+  border: 1px solid #e4e8f0;
+  border-radius: 6px;
+  display: flex;
   flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.readiness-item.warning {
+  background: #fff8ed;
+  border-color: #f3d19e;
+}
+
+.readiness-item strong {
+  color: #2f3847;
+  font-size: 13px;
+}
+
+.readiness-item span {
+  color: #606a7b;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .environment-alert {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .environment-table :deep(.cell) {
   overflow-wrap: anywhere;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.environment-table {
+  --el-table-header-bg-color: #f8fafc;
+  border: 1px solid #edf0f5;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.environment-table :deep(.el-table__header th) {
+  color: #606a7b;
+  font-weight: 600;
+}
+
+.environment-table :deep(.el-table__row) {
+  --el-table-row-hover-bg-color: #f7f9fc;
+}
+
+.environment-table :deep(.el-table__body td) {
+  padding: 7px 0;
 }
 
 .environment-cell,
 .resource-cell {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .environment-title {
@@ -1167,7 +1264,7 @@ onMounted(loadAll)
   color: #7a8294;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 10px;
+  gap: 5px 8px;
   font-size: 12px;
   line-height: 18px;
 }
@@ -1197,10 +1294,20 @@ onMounted(loadAll)
 }
 
 .resource-cell div {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #f0f3f7;
+  border-radius: 0;
   display: grid;
-  gap: 8px;
-  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 6px;
+  grid-template-columns: 72px minmax(0, 1fr);
   line-height: 18px;
+  padding: 2px 0;
+}
+
+.resource-cell div:last-child {
+  border-bottom: 0;
 }
 
 .resource-cell span {
@@ -1226,6 +1333,19 @@ onMounted(loadAll)
   color: #7a8294;
   font-size: 12px;
   line-height: 16px;
+}
+
+.table-actions {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.table-actions .el-button {
+  margin-left: 0;
 }
 
 .form-tip {
@@ -1258,6 +1378,25 @@ onMounted(loadAll)
   color: #606a7b;
   font-size: 12px;
   line-height: 18px;
+}
+
+@media (max-width: 900px) {
+  .product-overview,
+  .toolbar-left {
+    grid-template-columns: 1fr;
+  }
+
+  .product-overview p {
+    text-align: left;
+  }
+
+  .readiness-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table-actions {
+    align-items: flex-start;
+  }
 }
 
 </style>

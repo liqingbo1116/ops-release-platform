@@ -68,6 +68,12 @@ Use this skill to keep project progress explicit and avoid losing the current de
   - bind services to Jenkins Pipelines selected from real Jenkins view/job data
   - create release orders from service-row release actions with V1 flow nodes
   - implement Jenkins execution/log collection, local Harbor image confirmation, local K8s result confirmation, and remote Agent release execution in that order
+- Treat real product runtime as the source of truth for service existence:
+  - platform managed-service records are operational relationships, not service master data
+  - if a managed service disappears from the real local/remote product environment, the platform must auto-unmanage it when latest probe/report data arrives, hide it from the main service list, and prevent release actions
+  - remote product service changes must be processed when Agent reports arrive; do not require a user refresh click before reconciling already-reported Agent data
+  - V1 must not delete real Kubernetes workloads, Harbor images, Jenkins Pipelines, or Git configuration; use “移除纳管/解除纳管” wording only
+  - preserve disappearance/reappearance facts through event logs or change records when this affects user decisions
 - Each phase must use real data before it is considered complete. If Jenkins, Harbor/Registry, Kubernetes, PostgreSQL, Redis, Agent runtime, or another required tool is needed to replace mock and is not ready, stop at that phase and record the blocker.
 
 ## V1 Ordered Path
@@ -78,6 +84,7 @@ Use this skill to keep project progress explicit and avoid losing the current de
 4. 项目管理: real project records such as 项目A and 项目B, used as the top-level business ownership boundary.
 5. 产品管理: real product records such as 数据中台 and 物联中台 under projects; current environment records are the V1 transition implementation for product deployment scope.
 6. 服务与版本来源: real services under products, consuming product deployment-scope namespace/project/view/job ranges and real version source configuration.
+   - Service list must be derived from real platform-direct discovery or Agent reports. Persisted management relationships cannot keep deleted real services visible as active services.
 7. 发布单创建: release orders are created from product service rows, using real projects, products, agents, services, Jenkins Pipeline bindings, version sources, and readiness checks.
 8. 基线管理: real baseline list, detail, source metadata, and service snapshot source.
 9. 部署执行: real platform-direct or Agent execution against the target infrastructure.
@@ -107,6 +114,8 @@ If the user asks “现在到哪一步了” or “下一步做什么”, answer
 - Users should find services through `项目 -> 产品 -> 服务`, then release directly from the service row.
 - Release orders are execution records and flow detail carriers, not the primary UI for finding services.
 - Do not add manual service, image, or Pipeline entry to the release flow. Use platform-direct discovery, Agent-reported data, Harbor data, and Jenkins view/job data.
+- If the real product environment no longer reports a managed service, the platform should auto-unmanage it as soon as latest probe/report data arrives, hide it from the releaseable service list, and record a resource-change event instead of keeping stale service data.
+- Agent-reported service changes must be reconciled by backend ingestion, not deferred until the user clicks refresh.
 - Jenkins execution is observed by the platform through build state and console logs. The platform does not pause inside the Jenkins script.
 - After Jenkins ends, local Harbor image tag confirmation is mandatory for both local and remote products.
 - Remote Agent release execution must not start until the local Harbor image tag is confirmed.

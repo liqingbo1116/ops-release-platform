@@ -7,6 +7,29 @@ type PageResult[T any] struct {
 	Total    int `json:"total"`
 }
 
+type OperationLog struct {
+	ID            string `json:"id"`
+	OperatorID    string `json:"operatorId"`
+	OperatorName  string `json:"operatorName"`
+	Action        string `json:"action"`
+	ResourceType  string `json:"resourceType"`
+	ResourceID    string `json:"resourceId"`
+	ResourceName  string `json:"resourceName,omitempty"`
+	ProjectID     string `json:"projectId,omitempty"`
+	ProjectName   string `json:"projectName,omitempty"`
+	EnvironmentID string `json:"environmentId,omitempty"`
+	ProductName   string `json:"productName,omitempty"`
+	TaskID        string `json:"taskId,omitempty"`
+	Namespace     string `json:"namespace,omitempty"`
+	WorkloadType  string `json:"workloadType,omitempty"`
+	WorkloadName  string `json:"workloadName,omitempty"`
+	ContainerName string `json:"containerName,omitempty"`
+	ContainerType string `json:"containerType,omitempty"`
+	Result        string `json:"result"`
+	Detail        string `json:"detail"`
+	CreatedAt     string `json:"createdAt"`
+}
+
 type Project struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -91,19 +114,36 @@ type HarborRegistry struct {
 }
 
 type JenkinsInstance struct {
-	ID                    string   `json:"id"`
-	Name                  string   `json:"name"`
-	URL                   string   `json:"url"`
-	Username              string   `json:"username"`
-	InsecureSkipTLSVerify bool     `json:"insecureSkipTLSVerify"`
-	Status                string   `json:"status"`
-	LastCheckAt           string   `json:"lastCheckAt"`
-	ProbeMessage          string   `json:"probeMessage"`
-	Views                 []string `json:"views"`
-	Jobs                  []string `json:"jobs"`
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	URL                   string            `json:"url"`
+	Username              string            `json:"username"`
+	InsecureSkipTLSVerify bool              `json:"insecureSkipTLSVerify"`
+	Status                string            `json:"status"`
+	LastCheckAt           string            `json:"lastCheckAt"`
+	ProbeMessage          string            `json:"probeMessage"`
+	Views                 []string          `json:"views"`
+	Jobs                  []string          `json:"jobs"`
+	Pipelines             []JenkinsPipeline `json:"pipelines"`
 
 	CredentialRef string `json:"-"`
 	Token         string `json:"-"`
+}
+
+type JenkinsPipelineParameter struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	DefaultValue string `json:"defaultValue,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Required     bool   `json:"required"`
+}
+
+type JenkinsPipeline struct {
+	Name       string                     `json:"name"`
+	View       string                     `json:"view,omitempty"`
+	ViewURL    string                     `json:"viewUrl,omitempty"`
+	URL        string                     `json:"url,omitempty"`
+	Parameters []JenkinsPipelineParameter `json:"parameters"`
 }
 
 type Agent struct {
@@ -242,6 +282,10 @@ type ReleaseSourceService struct {
 	ImageSource              string            `json:"imageSource"`
 	PrivateRegistryHost      string            `json:"privateRegistryHost,omitempty"`
 	PrivateRegistryConfirmed bool              `json:"privateRegistryConfirmed"`
+	JenkinsJobName           string            `json:"jenkinsJobName,omitempty"`
+	JenkinsBranch            string            `json:"jenkinsBranch,omitempty"`
+	JenkinsPipelineBound     bool              `json:"jenkinsPipelineBound"`
+	PipelineBoundAt          string            `json:"pipelineBoundAt,omitempty"`
 	Tags                     []ReleaseImageTag `json:"tags"`
 	Publishable              bool              `json:"publishable"`
 	Message                  string            `json:"message,omitempty"`
@@ -264,6 +308,10 @@ type ManagedService struct {
 	ImageSource              string `json:"imageSource"`
 	PrivateRegistryHost      string `json:"privateRegistryHost,omitempty"`
 	PrivateRegistryConfirmed bool   `json:"privateRegistryConfirmed"`
+	JenkinsJobName           string `json:"jenkinsJobName,omitempty"`
+	JenkinsBranch            string `json:"jenkinsBranch,omitempty"`
+	JenkinsPipelineBound     bool   `json:"jenkinsPipelineBound"`
+	PipelineBoundAt          string `json:"pipelineBoundAt,omitempty"`
 	Replicas                 int    `json:"replicas"`
 	ReadyReplicas            int    `json:"readyReplicas"`
 	CreatedAt                string `json:"createdAt"`
@@ -304,10 +352,16 @@ type ConfirmServiceRegistryInput struct {
 	PrivateRegistryHost string `json:"privateRegistryHost"`
 }
 
+type BindServicePipelineInput struct {
+	JenkinsJobName string `json:"jenkinsJobName"`
+	JenkinsBranch  string `json:"jenkinsBranch"`
+}
+
 type ReleaseSource struct {
-	EnvironmentID string                 `json:"environmentId"`
-	Services      []ReleaseSourceService `json:"services"`
-	JenkinsJobs   []string               `json:"jenkinsJobs"`
+	EnvironmentID    string                 `json:"environmentId"`
+	Services         []ReleaseSourceService `json:"services"`
+	JenkinsJobs      []string               `json:"jenkinsJobs"`
+	JenkinsPipelines []JenkinsPipeline      `json:"jenkinsPipelines"`
 }
 
 type ReleaseStep struct {

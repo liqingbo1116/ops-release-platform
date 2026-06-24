@@ -187,6 +187,10 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 		if jobName == "" {
 			return CreateReleaseResult{}, ErrJenkinsTrigger
 		}
+		environment, err := c.targetEnvironment(request.TargetEnvironmentID)
+		if err != nil {
+			return CreateReleaseResult{}, err
+		}
 		if c.integrations.Jenkins == nil {
 			return CreateReleaseResult{}, ErrJenkinsTrigger
 		}
@@ -198,29 +202,38 @@ func (c *ReleaseCreator) CreateRelease(ctx context.Context, request CreateReleas
 		if err != nil {
 			return CreateReleaseResult{}, ErrJenkinsTrigger
 		}
+		executionMode := "JENKINS_ONLY"
+		status := "JENKINS_QUEUED"
+		agentTaskID := ""
+		if environment.NetworkMode == "AGENT" {
+			executionMode = "JENKINS_AGENT"
+			agentTaskID = id
+		}
 		order, err := c.createReleaseOrder(domain.CreateReleaseOrderInput{
 			ID:                   id,
 			Type:                 request.Type,
 			ReleaseSource:        releaseSource,
-			ExecutionMode:        "JENKINS_AGENT",
+			ExecutionMode:        executionMode,
 			BuildID:              build.BuildID,
 			BuildStatus:          build.Status,
 			BuildURL:             build.URL,
 			TargetEnvironmentID:  request.TargetEnvironmentID,
 			AgentID:              request.AgentID,
-			Status:               "JENKINS_QUEUED",
+			Status:               status,
 			Progress:             0,
 			SelectedServiceCount: len(request.ServiceIDs),
 		})
 		if err != nil {
 			return CreateReleaseResult{}, err
 		}
-		c.enqueueIfNeeded(ctx, id, "release", "project-agent-sync", request.AgentID, request.TargetEnvironmentID)
+		if environment.NetworkMode == "AGENT" {
+			c.enqueueIfNeeded(ctx, id, "release", "project-agent-sync", request.AgentID, request.TargetEnvironmentID)
+		}
 		return CreateReleaseResult{
 			ID:            order.ID,
 			Status:        order.Status,
 			ExecutionMode: order.ExecutionMode,
-			AgentTaskID:   order.ID,
+			AgentTaskID:   agentTaskID,
 			ReleaseSource: order.ReleaseSource,
 			BuildID:       build.BuildID,
 			BuildStatus:   build.Status,
@@ -299,6 +312,15 @@ func (c *ReleaseCreator) enqueueIfNeeded(ctx context.Context, id string, taskTyp
 func (c *ReleaseCreator) validateAgent(agentID string, environmentID string) error {
 	if c.agents == nil {
 		return nil
+	}
+	if strings.TrimSpace(agentID) == "" {
+		if c.environments != nil {
+			environment, ok := c.environments.GetEnvironment(environmentID)
+			if ok && environment.NetworkMode == "DIRECT" {
+				return nil
+			}
+		}
+		return ErrAgentNotFound
 	}
 	agent, ok := c.agents.GetAgent(agentID)
 	if !ok {

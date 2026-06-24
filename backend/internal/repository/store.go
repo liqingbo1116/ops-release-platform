@@ -30,7 +30,7 @@ type Store interface {
 	GetJenkinsInstance(id string) (domain.JenkinsInstance, bool)
 	CreateJenkinsInstance(input domain.JenkinsInstance) (domain.JenkinsInstance, error)
 	UpdateJenkinsInstance(id string, input domain.JenkinsInstance) (domain.JenkinsInstance, bool, error)
-	UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, checkedAt time.Time) (domain.JenkinsInstance, bool, error)
+	UpdateJenkinsInstanceProbe(id string, status string, message string, views []string, jobs []string, pipelines []domain.JenkinsPipeline, checkedAt time.Time) (domain.JenkinsInstance, bool, error)
 	ListAgents(query string) []domain.Agent
 	GetAgent(id string) (domain.Agent, bool)
 	CreateAgentRegisterToken(tokenHash string, agentID string, environmentID string, expiresAt time.Time) bool
@@ -41,6 +41,8 @@ type Store interface {
 	UpsertAgent(id string, environmentID string, version string, capabilities []string, status string) (domain.Agent, bool)
 	UpdateAgentHeartbeat(id string, environmentID string, version string, capabilities []string, runtimeStatus domain.RuntimeStatus) (domain.Agent, bool)
 	AssignAgentTask(id string, taskID string) (domain.Agent, bool)
+	ListOperationLogs(query string, environmentID string, resourceType string) []domain.OperationLog
+	CreateOperationLog(input domain.OperationLog) (domain.OperationLog, error)
 	GetCurrentUser() domain.CurrentUser
 	ListUsers(query string) []domain.User
 	ListRoles(query string) []domain.Role
@@ -56,6 +58,7 @@ type Store interface {
 	UpsertManagedServices(productID string, services []domain.DiscoveredService) ([]domain.ManagedService, error)
 	RemoveManagedServices(productID string, serviceIDs []string) ([]domain.ManagedService, error)
 	ConfirmManagedServiceRegistry(productID string, registryHost string, harborProjects []string) ([]domain.ManagedService, error)
+	BindManagedServicePipeline(productID string, serviceID string, jobName string, branch string) (domain.ManagedService, bool, error)
 	CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error)
 	ListReleases(query string) []domain.ReleaseOrder
 	GetReleaseDetail(id string) (domain.ReleaseDetail, bool)

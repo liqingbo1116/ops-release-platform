@@ -92,6 +92,10 @@ export type ProductService = {
   imageSource: 'PRIVATE' | 'EXTERNAL' | 'UNMATCHED_PRIVATE' | string
   privateRegistryHost?: string
   privateRegistryConfirmed?: boolean
+  jenkinsJobName?: string
+  jenkinsBranch?: string
+  jenkinsPipelineBound?: boolean
+  pipelineBoundAt?: string
   replicas: number
   readyReplicas: number
   createdAt?: string
@@ -193,4 +197,12 @@ export async function confirmEnvironmentServiceRegistry(
   privateRegistryHost: string,
 ): Promise<ProductService[]> {
   return postData<ProductService[]>(`/api/environments/${id}/services/confirm-registry`, { privateRegistryHost })
+}
+
+export async function bindEnvironmentServicePipeline(
+  id: string,
+  serviceId: string,
+  payload: { jenkinsJobName: string; jenkinsBranch: string },
+): Promise<ProductService> {
+  return postData<ProductService>(`/api/environments/${id}/services/${serviceId}/pipeline`, payload)
 }

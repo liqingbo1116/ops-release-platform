@@ -52,15 +52,36 @@ export type ReleaseSourceService = {
   imageSource: string
   privateRegistryHost?: string
   privateRegistryConfirmed: boolean
+  jenkinsJobName?: string
+  jenkinsBranch?: string
+  jenkinsPipelineBound?: boolean
+  pipelineBoundAt?: string
   tags: ReleaseImageTag[]
   publishable: boolean
   message?: string
+}
+
+export type JenkinsPipelineParameter = {
+  name: string
+  type: string
+  defaultValue?: string
+  description?: string
+  required: boolean
+}
+
+export type JenkinsPipeline = {
+  name: string
+  view?: string
+  viewUrl?: string
+  url?: string
+  parameters: JenkinsPipelineParameter[]
 }
 
 export type ReleaseSource = {
   environmentId: string
   services: ReleaseSourceService[]
   jenkinsJobs: string[]
+  jenkinsPipelines: JenkinsPipeline[]
 }
 
 export type ReleaseActionResult = {
