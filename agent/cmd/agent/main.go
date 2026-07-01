@@ -51,9 +51,6 @@ func main() {
 	}
 	probeExecutor := runtime.NewProbeExecutor(cfg, client)
 	fallbackExecutor := runtime.Executor(runtime.NewUnsupportedExecutor(client))
-	if cfg.Mode == "mock" {
-		fallbackExecutor = runtime.NewMockExecutor(client)
-	}
 	executor := runtime.NewRouterExecutor(probeExecutor, fallbackExecutor)
 	worker := task.NewWorker(cfg, client, executor)
 

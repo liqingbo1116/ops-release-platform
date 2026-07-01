@@ -69,18 +69,27 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MetricCard from '@/components/MetricCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { getBaselineDetail, lockBaseline } from '@/api/baselines'
-import { listEnvironments } from '@/api/environments'
-import { baselineMockData } from '@/api/mockData/baseline'
-import { environmentMockData } from '@/api/mockData/environment'
+import { getBaselineDetail, lockBaseline, type BaselineDetailItem } from '@/api/baselines'
+import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { formatDateTime } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const locking = ref(false)
-const detail = ref({ ...baselineMockData.baselineDetail })
-const environments = ref<typeof environmentMockData.environments>([])
+const emptyBaselineDetail = (): BaselineDetailItem => ({
+  id: '',
+  name: '',
+  sourceEnvironmentName: '',
+  serviceCount: 0,
+  createdBy: '',
+  createdAt: '',
+  status: 'UNKNOWN',
+  purpose: '',
+  items: [],
+})
+const detail = ref<BaselineDetailItem>(emptyBaselineDetail())
+const environments = ref<EnvironmentInfo[]>([])
 const targetEnvironmentId = ref(String(route.query.targetEnvironmentId || ''))
 const healthyCount = computed(() => detail.value.items.filter((item) => item.healthStatus === 'HEALTHY').length)
 const statusLabel = computed(() => detail.value.status === 'LOCKED' ? '已锁定' : detail.value.status)
@@ -88,7 +97,6 @@ const statusDescription = computed(() => detail.value.status === 'LOCKED' ? '已
 const snapshotSource = computed(() => detail.value.snapshotSource || detail.value.sourceEnvironmentName || '未知来源')
 const snapshotCollectedAt = computed(() => detail.value.snapshotCollectedAt ? formatDateTime(detail.value.snapshotCollectedAt) : '未采集')
 const snapshotModeLabel = computed(() => {
-  if (detail.value.snapshotMode === 'MOCK_RUNTIME') return 'Mock 运行态采集'
   if (detail.value.snapshotMode === 'AGENT_K8S') return 'Agent/Kubernetes 采集'
   return detail.value.snapshotMode || '未定义'
 })
@@ -130,7 +138,8 @@ async function loadEnvironments() {
   try {
     environments.value = await listEnvironments()
   } catch {
-    environments.value = [...environmentMockData.environments]
+    ElMessage.error('加载环境列表失败')
+    environments.value = []
   } finally {
     syncTargetEnvironmentId()
   }
@@ -141,8 +150,8 @@ async function loadDetail() {
   try {
     detail.value = await getBaselineDetail(String(route.params.id || detail.value.id))
   } catch {
-    ElMessage.warning('加载基线详情失败，已显示本地示例数据')
-    detail.value = { ...baselineMockData.baselineDetail }
+    ElMessage.error('加载基线详情失败')
+    detail.value = emptyBaselineDetail()
   } finally {
     loading.value = false
   }

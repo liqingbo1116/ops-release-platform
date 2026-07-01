@@ -1,6 +1,6 @@
 # Architecture Reference
 
-Last updated: 2026-06-07
+Last updated: 2026-06-27
 
 This is a compact architecture guide for Codex sessions. Use project docs as source of truth for detailed requirements.
 
@@ -17,9 +17,9 @@ This is a compact architecture guide for Codex sessions. Use project docs as sou
 - `internal/app`: assembly layer. Owns config loading results, DB migration trigger, Redis queue setup, integration suite setup, and router startup.
 - `internal/api`: HTTP boundary. Owns Gin routes, handlers, response envelope, request/response behavior, and API tests.
 - `internal/domain`: DTOs and domain-shaped API structs.
-- `internal/repository`: mock repository, embedded mock data, GORM models, migrations.
-- `internal/agent`: Redis Stream queue and mock Agent worker.
-- `internal/integration`: external-system adapter contracts and mock adapters.
+- `internal/repository`: GORM models, migrations, and persistent store implementations.
+- `internal/agent`: Redis Stream queue and Agent task lease/callback handling.
+- `internal/integration`: external-system adapter contracts and real adapter implementations.
 - `internal/config`: environment variables.
 - `internal/middleware`: cross-cutting HTTP middleware.
 
@@ -27,9 +27,9 @@ Introduce `internal/service` when handlers need to coordinate multiple repositor
 
 ## Agent Module Skeleton
 
-The real project-side Agent source tree is reserved under top-level `agent/`.
+The real project-side Agent source tree lives under top-level `agent/`.
 
-- `agent/cmd/agent`: future Agent process entrypoint.
+- `agent/cmd/agent`: Agent process entrypoint.
 - `agent/internal/config`: Agent config loading.
 - `agent/internal/heartbeat`: heartbeat reporting.
 - `agent/internal/kubernetes`: K8s workload scanning and rollout operations.
@@ -38,11 +38,11 @@ The real project-side Agent source tree is reserved under top-level `agent/`.
 - `agent/internal/runtime`: local runtime and environment discovery.
 - `agent/internal/task`: task pull/execute loop.
 
-Current status: directories only. Do not implement real Agent code until requested.
+Current status: Agent can run as a binary, register, heartbeat, report remote resources, and execute real task handlers as those integrations are implemented.
 
 ## Frontend Layers
 
-- `src/api`: backend API clients and mock fallback access.
+- `src/api`: backend API clients. Do not add runtime mock fallback.
 - `src/stores`: Pinia state containers.
 - `src/router`: route definitions and auth guards.
 - `src/pages`: route-level views.
@@ -55,9 +55,9 @@ Keep page components responsible for interaction composition; move reusable tabl
 
 1. User acts in Vue page.
 2. Pinia store or API module calls backend REST API.
-3. Gin handler reads mock repository or coordinates queue/adapter.
+3. Gin handler reads persistent store data or coordinates queue/adapter.
 4. For release/deploy creation, backend enqueues Redis Stream task when `REDIS_ADDR` is configured.
-5. Mock Agent worker consumes stream, writes task status and logs to Redis keys.
+5. Agent consumes leased tasks through platform APIs and reports task status/logs/results back to the backend.
 6. Frontend can poll task status API when task IDs are available.
 
 ## Environment Management Rules
@@ -89,20 +89,20 @@ Current adapter contracts:
 Rules:
 
 - No direct SDK calls from handlers.
-- No real Jenkins/Harbor/Kubernetes/Nacos/GitLab/ArgoCD calls unless explicitly requested.
+- Jenkins/Harbor/Kubernetes integrations must go through the adapter contracts and use real configured endpoints.
 - Real adapter implementations must preserve interface contracts and must not store credentials in Git.
 
 ## Task Queue Boundary
 
 - Redis Stream is the platform-to-Agent task handoff.
-- Mock worker simulates steps and appends logs.
-- API must degrade cleanly when Redis is not configured.
+- Agent task execution must be performed by a real Agent or fail with a clear blocker.
+- API must degrade cleanly when Redis is not configured for paths that do not require task queueing; task execution paths must report the missing dependency.
 
 ## Database Boundary
 
 - GORM models and migrations live under `backend/internal/repository`.
 - MVP uses PostgreSQL for relational records.
-- Large log bodies can remain mocked or cached for now; do not introduce object storage unless requested.
+- Large log bodies can remain cached or persisted in existing storage for now; do not introduce object storage unless requested.
 
 ## Docker Boundary
 

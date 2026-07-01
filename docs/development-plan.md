@@ -1,8 +1,10 @@
 ﻿# 开发计划
 
-## 阶段 1：前端原型工程化
+## 历史原型阶段（已废弃）
 
-目标：使用 Vue 3 还原 HTML 原型，接入 mock JSON。
+本节只保留早期原型背景，不作为当前 V1 执行顺序。当前 V1 禁止使用模拟数据、模拟仓储、模拟 adapter、模拟 Agent worker 或前端模拟兜底作为研发交付标准。
+
+### 阶段 1：前端原型工程化
 
 交付：
 
@@ -11,26 +13,26 @@
 - Layout、导航、顶部栏
 - 10 个核心页面
 - 登录页、用户权限页、更新日志页
-- mock 数据接入
+- 真实后端 API 接入
 - 基础筛选、勾选、抽屉、日志展示
-- 路由守卫和 mock 登录态
+- 路由守卫和真实后端登录态
 
-## 阶段 2：Go 后端 mock API
+### 阶段 2：Go 后端 API
 
-目标：后端提供稳定 API，前端从 API 获取数据，并提供 mock 登录、权限和更新日志接口。
+目标：后端提供稳定 API，前端从 API 获取数据，并提供真实登录、权限和更新日志接口。
 
 交付：
 
 - Gin 服务
 - REST API 路由
-- mock repository
+- PostgreSQL repository
 - 统一响应格式
 - 基础错误码
-- mock auth API
-- 用户、角色、权限 mock API
-- 更新日志 mock API
+- auth API
+- 用户、角色、权限 API
+- 更新日志 API
 
-## 阶段 3：数据库与任务模型
+### 阶段 3：数据库与任务模型
 
 目标：引入 PostgreSQL 和 Redis，任务状态可持久化。
 
@@ -40,16 +42,16 @@
 - GORM model
 - 用户、角色、权限、更新日志、操作日志模型
 - 发布单、部署任务 CRUD
-- Redis Stream mock Agent worker
+- 真实 Agent 任务租约和状态回传模型
 
-## 阶段 4：真实集成预留
+### 阶段 4：真实集成
 
-目标：为 Jenkins、Harbor、K8s 接入预留 adapter。
+目标：接入 Jenkins、Harbor、K8s 真实 adapter。
 
 交付：
 
 - adapter interface
-- mock adapter
+- real adapter
 - integration config
 - 单元测试
 
@@ -63,7 +65,7 @@
   - Jenkins：可访问地址、测试 Job 或可创建测试 Job 的空间
   - Harbor 或兼容镜像仓库：测试项目、测试镜像、读写凭证准备方式
   - Kubernetes 集群：目标 namespace、测试 workload、基础访问方式
-- 若上述环境暂未准备，本阶段仍可先以 mock adapter 完成页面与后端流程；一旦研发要切到真实联调，必须先确认环境，不在开发到一半时临时倒推准备。
+- 若上述环境暂未准备，本阶段必须标记阻塞并提示需要准备的资源，不能以模拟 adapter 完成页面与后端流程。
 
 交付：
 
@@ -507,7 +509,7 @@ V1 发版流程：
 ### V1 边界与网络前提
 
 - 环境分为本地环境与项目环境，两者的接入方式必须明确区分。
-- 本地环境默认平台侧可以连通，走平台后端 adapter 直连或本地 mock 验证，不需要 Agent，也不能把 Agent 作为本地环境前置条件。
+- 本地环境默认平台侧可以连通，走平台后端 adapter 直连验证，不需要 Agent，也不能把 Agent 作为本地环境前置条件。
 - 项目环境默认平台侧不可连通，必须通过部署在项目环境内或可访问项目环境的 Agent 接入。
 - 平台不能依赖访问项目环境 Agent endpoint，也不能向 Agent 主动推送任务。
 - Agent 只支持出站访问平台 API：主动领取/租约获取任务 payload，并主动上报心跳、服务列表、镜像版本、运行态快照、任务状态、日志和最终结果。
@@ -519,11 +521,11 @@ V1 发版流程：
 
 - 已有可运行的独立 Agent 进程：`agent/cmd/agent`。
 - 已有 Agent 配置读取、健康检查、心跳上报、任务租约领取客户端、步骤/日志/结果回传客户端。
-- 已有 Agent mock executor，可在不依赖 Jenkins、Harbor、Kubernetes 的情况下模拟执行并回传结果。
+- Agent 执行器必须连接真实 Jenkins、Harbor 或 Kubernetes；缺少外部资源时只回传不可用状态和具体错误。
 - 已有 Agent 专用 `Dockerfile`、`docker-compose.yml` 和 `.env.example`。
 - 已有平台侧 `/api/agent-tasks/lease` 出站任务租约接口，创建发布/部署任务时会绑定 `agentId` 与 `environmentId`。
 - 已有任务租约超时回收、同一 Agent 单任务租约约束和重复领取防并发策略。
-- 已有 `agent/README.md` 说明远程 Agent docker-compose 部署、配置和 mock 验证流程。
+- 已有 `agent/README.md` 说明远程 Agent 二进制部署、配置和真实探测流程。
 - 本地验证已通过：
   - `agent`: `go test ./...`
   - `backend`: `go test ./...`
@@ -601,29 +603,29 @@ V1 发版流程：
 
 - 已完成并已推送：
   - 前端原型工程化
-  - 后端 mock API
-  - 登录/权限 mock
+  - 后端 API 原型
+  - 登录/权限原型
   - 更新日志
   - 前后端联调
   - PostgreSQL/GORM 基础
-  - Redis Stream mock Agent worker
-  - mock 集成 adapter 预留
-- 已完成并已推送的 mock-first V1 基础：
-  - 以下内容只作为历史实现背景，不作为当前 Agent 管理与远程探测阶段的完成标准。
+  - Redis Stream Agent 任务模型原型
+  - 集成 adapter 接口预留
+- 已废弃的早期模拟链路：
+  - 以下内容只作为历史实现背景，不作为当前 Agent 管理与远程探测阶段的完成标准，运行态代码不得继续保留。
   - 阶段 A：发布详情/部署详情闭环
   - 已补齐 `agentTaskId` 关联、详情轮询、执行记录、发布报告、失败重试、人工确认、跳过步骤、回滚入口
-  - 阶段 B：Agent 协议 mock 闭环
-  - 已补齐平台侧 Agent mock 协议：心跳、任务状态、步骤状态回传、日志回传、最终结果回传
+  - 阶段 B：Agent 协议原型闭环
+  - 已补齐平台侧 Agent 协议原型：心跳、任务状态、步骤状态回传、日志回传、最终结果回传
   - Agent 管理页已从后端 API 读取 Agent 状态
-  - 阶段 C 前置：运行态快照与基线生成 mock 链路
+  - 阶段 C 前置：运行态快照与基线生成原型链路
   - 已补齐基线快照来源、采集时间、采集模式、快照任务 ID，基线详情页可展示运行态快照元数据
-  - 阶段 D 前置：差异结果到发布/部署任务的端到端 mock 链路
-  - 已验证 `NEED_UPDATE` 创建服务发版、`MISSING_IN_TARGET` 创建服务部署、详情页通过 `agentTaskId` 读取 mock Agent 状态和日志
+  - 阶段 D 前置：差异结果到发布/部署任务的端到端原型链路
+  - 已验证 `NEED_UPDATE` 创建服务发版、`MISSING_IN_TARGET` 创建服务部署、详情页通过 `agentTaskId` 读取 Agent 状态和日志
   - 已完成服务发版/服务部署边界收口：服务发版不再依赖来源基线，支持 Jenkins Job 与本地 Harbor 镜像来源；服务部署继续基于来源基线，只处理目标缺失服务
-  - 已补齐环境管理页与 Agent 管理页的 mock-first 用户视角准备状态；当前研发基线已调整为真实 Agent 注册、二进制启动、长期 token 校验和真实探测，不再用 mock-first 结果作为完成标准
-  - 已补齐失败动作与 Agent 任务状态一致性：发布重试、发布回滚、部署步骤重试/跳过/人工确认都会同步更新 mock Agent task status，详情页轮询可看到对应结果
+  - 已补齐环境管理页与 Agent 管理页的用户视角准备状态；当前研发基线已调整为真实 Agent 注册、二进制启动、长期 token 校验和真实探测
+  - 已补齐失败动作与 Agent 任务状态一致性：发布重试、发布回滚、部署步骤重试/跳过/人工确认都会同步更新 Agent task status，详情页轮询可看到对应结果
 - 当前明确缺口：
-  - 独立 Agent 本地实现、Dockerfile、docker-compose 模板、出站任务租约接口、租约超时回收、单任务租约约束和 Agent mock executor 已完成
+  - 独立 Agent 本地实现、Dockerfile、docker-compose 模板、出站任务租约接口、租约超时回收和单任务租约约束已完成
   - 当前缺口是尚未在真实远程 Linux 主机验证 Agent 二进制启动、真实注册、长期 token 校验、心跳和跨主机出站回传
   - 尚未完成跨主机出站网络下的真实心跳、任务租约领取、远程探测和最终结果回传验收
   - 尚未接入真实 Jenkins、Harbor/Registry、Kubernetes
@@ -727,7 +729,7 @@ V1 发版流程：
 
 - 阶段 A 的远程 Agent 已能启动
 - Agent 可访问平台 API
-- 至少一个可重复提交的 mock 发布/部署任务
+   - 至少一个可重复提交的真实任务样本；外部系统未准备好时应返回阻塞状态
 - 不需要 Jenkins、Harbor、Kubernetes
 
 用户视角交付：
@@ -736,14 +738,14 @@ V1 发版流程：
 - 领取或租约失败时，详情页明确提示失败原因和下一步动作
 - 详情页日志来自远程 Agent 回传，而不是平台进程内 mock
 
-### 阶段 C：远程 Agent mock executor 验证（历史背景）
+### 阶段 C：远程 Agent 真实执行器验证
 
-本阶段只保留为早期 mock-first 研发背景，不再作为当前 V1 Agent 管理与远程探测的完成标准。当前阶段必须以真实 Agent 进程、真实注册、真实心跳、长期 token 校验和真实远程探测为准。
+当前阶段必须以真实 Agent 进程、真实注册、真实心跳、长期 token 校验、真实远程探测和真实外部系统调用为准。外部系统未准备好时，本阶段阻塞。
 
 研发目标：
 
-- 在远程 Agent 内实现 mock executor
-- 模拟 Jenkins 构建、Harbor 同步、Kubernetes 部署/更新、健康检查步骤
+- 在远程 Agent 内实现真实执行器
+- 调用 Jenkins、Harbor、Kubernetes 完成构建、镜像同步、部署/更新、健康检查步骤
 - 每个步骤都通过平台 API 回传状态和日志
 - 支持成功、失败、重试、跳过、人工确认等最小状态
 
@@ -751,12 +753,12 @@ V1 发版流程：
 
 - 阶段 A、B 已完成
 - 远程 Agent 主机稳定运行
-- 不需要 Jenkins、Harbor、Kubernetes
+- 需要待验证动作对应的 Jenkins、Harbor、Kubernetes 访问能力
 
 用户视角交付：
 
 - 用户能从平台提交发布/部署任务
-- 远程 Agent 实际收到任务并模拟执行
+- 远程 Agent 实际收到任务并执行真实动作或回传明确阻塞原因
 - 发布/部署详情页能看到远程 Agent 回传的步骤、日志、失败原因和最终结果
 
 ### 阶段 D：发布/部署详情闭环
@@ -790,10 +792,10 @@ V1 发版流程：
 
 当前状态：
 
-- mock-first 后端协议接口已完成
+- Agent 后端协议接口已完成
 - 创建发布/部署任务时已写入内存协议队列
-- Agent 可通过 mock 协议完成心跳、拉取任务、回传步骤、追加日志、回传结果
-- `GET /api/agent-tasks/{id}/status` 已优先读取 Agent mock 协议状态，未命中时再降级 Redis/mock 静态状态
+- Agent 可通过平台协议完成心跳、拉取任务、回传步骤、追加日志、回传结果
+- `GET /api/agent-tasks/{id}/status` 读取 Agent 协议状态
 - Agent 管理页已使用后端 Agent 列表数据展示在线状态、心跳、当前任务
 - 环境管理页已使用后端环境列表数据展示本地/远程环境类型、Agent 状态、环境阻断提示和真实联调前置条件
 - 真实 Agent 进程、Agent 主动领取任务链路、租约超时回收和单任务租约策略已本地实现
@@ -815,14 +817,14 @@ V1 发版流程：
 
 - 在 Agent 管理页看到 Agent 注册、在线状态、最近心跳
 - 发布/部署任务可以由 Agent 主动领取并执行
-- 详情页中的步骤和日志不再只是 mock 轮询，而是来自实际 Agent 回传
+- 详情页中的步骤和日志来自实际 Agent 回传
 
 下一步需要做什么：
 
-- mock-first 已打通平台侧任务与 Agent 状态展示的最小闭环
+- 平台侧任务与 Agent 状态展示的最小闭环已打通
 - 后续真实验证时，需要先在远程 Linux 主机验证远程 Agent 二进制启动、真实注册和 Agent 主动领取任务链路
-- 运行态快照与基线生成 mock 链路已补齐用户可见元数据
-- 在 Jenkins、Harbor、Kubernetes 准备完成前，只能验证不依赖外部资源的真实 Agent 注册、心跳、token 校验、任务租约和探测阻塞提示，不能用 mock executor 作为完成标准
+- 运行态快照与基线生成链路已补齐用户可见元数据
+- 在 Jenkins、Harbor、Kubernetes 准备完成前，只能验证不依赖外部资源的真实 Agent 注册、心跳、token 校验、任务租约和探测阻塞提示，不能用模拟执行器作为完成标准
 
 ### 阶段 F：真实发布链路联调
 
@@ -835,7 +837,7 @@ V1 发版流程：
 进入本阶段前必须准备：
 
 - 远程 Agent：
-  - 阶段 A、B、C 已完成
+      - 阶段 A、B、C 已完成
   - Agent 可通过二进制方式稳定运行
   - Agent 可主动从平台领取任务
   - Agent 可向平台回传日志和结果
@@ -998,7 +1000,7 @@ V1 发版流程：
   - Jenkins、Harbor、Kubernetes 的连通性
   - 一个可反复执行的测试项目/测试服务
   - 基础账号、权限申请路径和环境准备负责人
-- 如果这些条件未满足，应先停留在 mock / 本地验证，不把“真实项目环境部署与管理达标”标记为完成。
+- 如果这些条件未满足，应记录阻塞并继续本地真实 API/真实持久化验证，不能把“真实项目环境部署与管理达标”标记为完成。
 
 交付：
 

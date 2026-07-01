@@ -9,11 +9,9 @@ import (
 	"ops-release-platform/backend/internal/domain"
 )
 
-var ErrUnsupportedMode = errors.New("unsupported integration mode")
 var ErrMissingRealConfig = errors.New("missing real integration config")
 
 type Config struct {
-	Mode          string
 	Registries    map[string]RegistryConfig
 	Clusters      map[string]ClusterConfig
 	HTTPTimeoutMS string
@@ -35,16 +33,10 @@ type Suite struct {
 	Kubernetes KubernetesAdapter
 }
 
-func (s Suite) IsMock() bool {
-	_, jenkinsMock := s.Jenkins.(MockJenkinsAdapter)
-	_, registryMock := s.Registry.(MockRegistryAdapter)
-	_, kubernetesMock := s.Kubernetes.(MockKubernetesAdapter)
-	return jenkinsMock || registryMock || kubernetesMock
-}
-
 type JenkinsAdapter interface {
 	TriggerBuild(ctx context.Context, req BuildRequest) (BuildResult, error)
-	GetBuildStatus(ctx context.Context, buildID string) (BuildStatus, error)
+	GetBuildStatus(ctx context.Context, req BuildStatusRequest) (BuildStatus, error)
+	GetJobParameters(ctx context.Context, req JobParametersRequest) ([]domain.JenkinsPipelineParameter, error)
 }
 
 type RegistryAdapter interface {
@@ -62,9 +54,15 @@ type KubernetesAdapter interface {
 }
 
 type BuildRequest struct {
-	JobName    string            `json:"jobName"`
-	Branch     string            `json:"branch"`
-	Parameters map[string]string `json:"parameters"`
+	JenkinsURL            string            `json:"jenkinsUrl"`
+	Username              string            `json:"username"`
+	Token                 string            `json:"-"`
+	InsecureSkipTLSVerify bool              `json:"insecureSkipTLSVerify"`
+	JobName               string            `json:"jobName"`
+	JobURL                string            `json:"jobUrl"`
+	Branch                string            `json:"branch"`
+	Parameterized         bool              `json:"parameterized"`
+	Parameters            map[string]string `json:"parameters"`
 }
 
 type BuildResult struct {
@@ -74,11 +72,34 @@ type BuildResult struct {
 }
 
 type BuildStatus struct {
-	BuildID    string `json:"buildId"`
-	Status     string `json:"status"`
-	StartedAt  string `json:"startedAt"`
-	FinishedAt string `json:"finishedAt"`
-	LogURL     string `json:"logUrl"`
+	BuildID    string   `json:"buildId"`
+	Status     string   `json:"status"`
+	StartedAt  string   `json:"startedAt"`
+	FinishedAt string   `json:"finishedAt"`
+	LogURL     string   `json:"logUrl"`
+	URL        string   `json:"url"`
+	Logs       []string `json:"logs"`
+}
+
+type BuildStatusRequest struct {
+	JenkinsURL            string `json:"jenkinsUrl"`
+	Username              string `json:"username"`
+	Token                 string `json:"-"`
+	InsecureSkipTLSVerify bool   `json:"insecureSkipTLSVerify"`
+	JobName               string `json:"jobName"`
+	JobURL                string `json:"jobUrl"`
+	BuildID               string `json:"buildId"`
+	BuildURL              string `json:"buildUrl"`
+	LogLineLimit          int    `json:"logLineLimit"`
+}
+
+type JobParametersRequest struct {
+	JenkinsURL            string `json:"jenkinsUrl"`
+	Username              string `json:"username"`
+	Token                 string `json:"-"`
+	InsecureSkipTLSVerify bool   `json:"insecureSkipTLSVerify"`
+	JobName               string `json:"jobName"`
+	JobURL                string `json:"jobUrl"`
 }
 
 type ImageInfo struct {
@@ -142,18 +163,7 @@ type IntegrationCheck struct {
 }
 
 func NewSuite(cfg Config) (Suite, error) {
-	mode := strings.TrimSpace(cfg.Mode)
-	if mode == "" {
-		mode = "mock"
-	}
-	switch mode {
-	case "mock":
-		return NewMockSuite(), nil
-	case "real":
-		return NewRealSuite(cfg, parseTimeout(cfg.HTTPTimeoutMS))
-	default:
-		return Suite{}, ErrUnsupportedMode
-	}
+	return NewRealSuite(cfg, parseTimeout(cfg.HTTPTimeoutMS))
 }
 
 func parseTimeout(value string) time.Duration {

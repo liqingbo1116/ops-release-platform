@@ -2,6 +2,7 @@ package repository
 
 import (
 	"crypto/sha1"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -16,8 +17,7 @@ import (
 )
 
 type DatabaseStore struct {
-	db   *gorm.DB
-	mock *MockRepository
+	db *gorm.DB
 }
 
 const agentHeartbeatTimeout = 60 * time.Second
@@ -28,8 +28,8 @@ type projectLookupInfo struct {
 	Found  bool
 }
 
-func NewDatabaseStore(db *gorm.DB, mock *MockRepository) *DatabaseStore {
-	return &DatabaseStore{db: db, mock: mock}
+func NewDatabaseStore(db *gorm.DB) *DatabaseStore {
+	return &DatabaseStore{db: db}
 }
 
 func (s *DatabaseStore) ListProjects(query string) []domain.Project {
@@ -923,43 +923,210 @@ func (s *DatabaseStore) CreateOperationLog(input domain.OperationLog) (domain.Op
 }
 
 func (s *DatabaseStore) GetCurrentUser() domain.CurrentUser {
-	return s.mock.GetCurrentUser()
+	return domain.CurrentUser{
+		ID:          "dev-admin",
+		Username:    "admin",
+		DisplayName: "管理员",
+		Roles:       []string{"admin"},
+		Permissions: []string{"*"},
+	}
 }
 
 func (s *DatabaseStore) ListUsers(query string) []domain.User {
-	return s.mock.ListUsers(query)
+	return []domain.User{}
 }
 
 func (s *DatabaseStore) ListRoles(query string) []domain.Role {
-	return s.mock.ListRoles(query)
+	return []domain.Role{}
 }
 
 func (s *DatabaseStore) ListPermissions(query string) []domain.EnvironmentPermission {
-	return s.mock.ListPermissions(query)
+	return []domain.EnvironmentPermission{}
 }
 
 func (s *DatabaseStore) ListChangelog(query string) []domain.ChangelogEntry {
-	return s.mock.ListChangelog(query)
+	return []domain.ChangelogEntry{}
 }
 
 func (s *DatabaseStore) CreateBaseline(sourceEnvironmentID string, name string, purpose string) (domain.BaselineDetail, error) {
-	return s.mock.CreateBaseline(sourceEnvironmentID, name, purpose)
+	sourceEnvironmentID = strings.TrimSpace(sourceEnvironmentID)
+	if sourceEnvironmentID == "" {
+		return domain.BaselineDetail{}, errors.New("source environment id is required")
+	}
+	environment, ok := s.GetEnvironment(sourceEnvironmentID)
+	if !ok {
+		return domain.BaselineDetail{}, errors.New("source environment not found")
+	}
+	var services []ServiceModel
+	if err := s.db.Where("product_id = ?", sourceEnvironmentID).
+		Order("namespace asc, workload_type asc, workload_name asc, container_type asc, container_name asc").
+		Find(&services).Error; err != nil {
+		return domain.BaselineDetail{}, err
+	}
+	now := time.Now()
+	var count int64
+	if err := s.db.Model(&EnvironmentBaselineModel{}).
+		Where("created_at >= ? AND created_at < ?", now.Format("2006-01-02"), now.AddDate(0, 0, 1).Format("2006-01-02")).
+		Count(&count).Error; err != nil {
+		return domain.BaselineDetail{}, err
+	}
+	model := EnvironmentBaselineModel{
+		ID:                  fmt.Sprintf("BL-%s-%04d", now.Format("20060102"), count+1),
+		Name:                fallbackString(strings.TrimSpace(name), environment.Name+" 快照"),
+		SourceEnvironmentID: sourceEnvironmentID,
+		ProductID:           sourceEnvironmentID,
+		ServiceCount:        len(services),
+		Status:              "DRAFT",
+		Purpose:             strings.TrimSpace(purpose),
+		CreatedBy:           "admin",
+		CreatedAt:           now,
+	}
+	items := make([]BaselineServiceItemModel, 0, len(services))
+	for _, service := range services {
+		items = append(items, baselineItemModelFromService(model.ID, service))
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&model).Error; err != nil {
+			return err
+		}
+		if len(items) > 0 {
+			if err := tx.Create(&items).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.BaselineDetail{}, err
+	}
+	detail, ok := s.GetBaselineDetail(model.ID)
+	if !ok {
+		return domain.BaselineDetail{}, errors.New("baseline not found after create")
+	}
+	return detail, nil
 }
 
 func (s *DatabaseStore) ListBaselines(query string) []domain.Baseline {
-	return s.mock.ListBaselines(query)
+	type row struct {
+		EnvironmentBaselineModel
+		SourceEnvironmentName string
+	}
+	var rows []row
+	db := s.db.Table("environment_baselines").
+		Select("environment_baselines.*, environments.name AS source_environment_name").
+		Joins("LEFT JOIN environments ON environments.id = environment_baselines.source_environment_id").
+		Order("environment_baselines.created_at desc")
+	if trimmed := strings.TrimSpace(query); trimmed != "" {
+		like := "%" + trimmed + "%"
+		db = db.Where("environment_baselines.id ILIKE ? OR environment_baselines.name ILIKE ? OR environments.name ILIKE ?", like, like, like)
+	}
+	if err := db.Find(&rows).Error; err != nil {
+		return []domain.Baseline{}
+	}
+	items := make([]domain.Baseline, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toDomainBaseline(row.EnvironmentBaselineModel, row.SourceEnvironmentName))
+	}
+	return items
 }
 
 func (s *DatabaseStore) GetBaselineDetail(id string) (domain.BaselineDetail, bool) {
-	return s.mock.GetBaselineDetail(id)
+	type row struct {
+		EnvironmentBaselineModel
+		SourceEnvironmentName string
+	}
+	var result row
+	err := s.db.Table("environment_baselines").
+		Select("environment_baselines.*, environments.name AS source_environment_name").
+		Joins("LEFT JOIN environments ON environments.id = environment_baselines.source_environment_id").
+		Where("environment_baselines.id = ?", strings.TrimSpace(id)).
+		Take(&result).Error
+	if err != nil {
+		return domain.BaselineDetail{}, false
+	}
+	var itemModels []BaselineServiceItemModel
+	if err := s.db.Where("baseline_id = ?", result.ID).
+		Order("namespace asc, workload_type asc, workload_name asc").
+		Find(&itemModels).Error; err != nil {
+		return domain.BaselineDetail{}, false
+	}
+	return toDomainBaselineDetail(result.EnvironmentBaselineModel, result.SourceEnvironmentName, itemModels), true
 }
 
 func (s *DatabaseStore) LockBaseline(id string) (domain.BaselineDetail, bool) {
-	return s.mock.LockBaseline(id)
+	trimmedID := strings.TrimSpace(id)
+	now := time.Now()
+	result := s.db.Model(&EnvironmentBaselineModel{}).Where("id = ?", trimmedID).Updates(map[string]any{
+		"status":    "LOCKED",
+		"locked_at": &now,
+	})
+	if result.Error != nil || result.RowsAffected == 0 {
+		return domain.BaselineDetail{}, false
+	}
+	return s.GetBaselineDetail(trimmedID)
 }
 
 func (s *DatabaseStore) GetDiffResult(id string, targetEnvironmentID string) (domain.DiffResult, bool) {
-	return s.mock.GetDiffResult(id, targetEnvironmentID)
+	detail, ok := s.GetBaselineDetail(id)
+	if !ok {
+		return domain.DiffResult{}, false
+	}
+	targetEnvironmentID = strings.TrimSpace(targetEnvironmentID)
+	if _, ok := s.GetEnvironment(targetEnvironmentID); !ok {
+		return domain.DiffResult{}, false
+	}
+	targetServices := s.ListManagedServices(targetEnvironmentID)
+	targetByServiceID := make(map[string]domain.ManagedService, len(targetServices))
+	for _, service := range targetServices {
+		targetByServiceID[service.ID] = service
+	}
+	result := domain.DiffResult{
+		SourceBaselineID:    detail.ID,
+		TargetEnvironmentID: targetEnvironmentID,
+		Items:               make([]domain.DiffItem, 0, len(detail.Items)),
+	}
+	for _, item := range detail.Items {
+		diff := domain.DiffItem{
+			ServiceID:   item.ServiceID,
+			ServiceName: item.ServiceName,
+			Namespace:   item.Namespace,
+			SourceTag:   item.Tag,
+		}
+		target, exists := targetByServiceID[item.ServiceID]
+		if !exists {
+			diff.DiffStatus = "MISSING_IN_TARGET"
+			diff.Publishable = true
+			diff.Strategy = "CREATE_OR_DEPLOY"
+			result.Summary.MissingInTarget++
+			result.Summary.Publishable++
+		} else if target.ImageTag != item.Tag {
+			targetTag := target.ImageTag
+			diff.TargetTag = &targetTag
+			diff.DiffStatus = "NEED_UPDATE"
+			diff.Publishable = true
+			diff.Strategy = "ROLLING_UPDATE"
+			result.Summary.NeedUpdate++
+			result.Summary.Publishable++
+		} else {
+			targetTag := target.ImageTag
+			diff.TargetTag = &targetTag
+			diff.DiffStatus = "CONSISTENT"
+			diff.Publishable = false
+			diff.Strategy = "NOOP"
+			result.Summary.Consistent++
+		}
+		result.Items = append(result.Items, diff)
+	}
+	sort.SliceStable(result.Items, func(left int, right int) bool {
+		priority := map[string]int{"NEED_UPDATE": 0, "CONSISTENT": 1, "MISSING_IN_TARGET": 2, "WORKLOAD_ERROR": 3}
+		leftPriority := priority[result.Items[left].DiffStatus]
+		rightPriority := priority[result.Items[right].DiffStatus]
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		return result.Items[left].ServiceID < result.Items[right].ServiceID
+	})
+	return result, true
 }
 
 func (s *DatabaseStore) ListReleaseSourceServices(productID string, query string) []domain.ReleaseSourceService {
@@ -1014,11 +1181,10 @@ func (s *DatabaseStore) UpsertManagedServices(productID string, services []domai
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		for _, model := range models {
 			var existing ServiceModel
-			err := tx.Where("id = ?", model.ID).Take(&existing).Error
+			err := tx.Where("id = ? AND product_id = ?", model.ID, model.ProductID).Take(&existing).Error
 			if err == nil {
 				model.CreatedAt = existing.CreatedAt
 				if err := tx.Model(&existing).Updates(map[string]any{
-					"product_id":                 model.ProductID,
 					"name":                       model.Name,
 					"namespace":                  model.Namespace,
 					"workload_name":              model.WorkloadName,
@@ -1041,6 +1207,13 @@ func (s *DatabaseStore) UpsertManagedServices(productID string, services []domai
 				continue
 			}
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			var conflicting ServiceModel
+			err = tx.Where("id = ?", model.ID).Take(&conflicting).Error
+			if err == nil && conflicting.ProductID != model.ProductID {
+				model.ID = stableServiceID(model.ProductID, model.Namespace, model.WorkloadType, model.WorkloadName, model.ContainerType, model.ContainerName)
+			} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
 			if err := tx.Create(&model).Error; err != nil {
@@ -1136,14 +1309,12 @@ func (s *DatabaseStore) ConfirmManagedServiceRegistry(productID string, registry
 	return s.ListManagedServices(productID), nil
 }
 
-func (s *DatabaseStore) BindManagedServicePipeline(productID string, serviceID string, jobName string, branch string) (domain.ManagedService, bool, error) {
+func (s *DatabaseStore) BindManagedServicePipeline(productID string, serviceID string, jobName string, jobURL string, branch string) (domain.ManagedService, bool, error) {
 	productID = strings.TrimSpace(productID)
 	serviceID = strings.TrimSpace(serviceID)
 	jobName = strings.TrimSpace(jobName)
+	jobURL = strings.TrimSpace(jobURL)
 	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		branch = "main"
-	}
 	if productID == "" || serviceID == "" {
 		return domain.ManagedService{}, false, errors.New("product id and service id are required")
 	}
@@ -1160,12 +1331,14 @@ func (s *DatabaseStore) BindManagedServicePipeline(productID string, serviceID s
 	now := time.Now()
 	if err := s.db.Model(&model).Updates(map[string]any{
 		"jenkins_job_name":  jobName,
+		"jenkins_job_url":   jobURL,
 		"jenkins_branch":    branch,
 		"pipeline_bound_at": now,
 	}).Error; err != nil {
 		return domain.ManagedService{}, false, err
 	}
 	model.JenkinsJobName = jobName
+	model.JenkinsJobURL = jobURL
 	model.JenkinsBranch = branch
 	model.PipelineBoundAt = &now
 	return toDomainManagedService(model), true, nil
@@ -1214,11 +1387,16 @@ func (s *DatabaseStore) CreateReleaseOrder(input domain.CreateReleaseOrderInput)
 		BuildID:              strings.TrimSpace(input.BuildID),
 		BuildStatus:          strings.TrimSpace(input.BuildStatus),
 		BuildURL:             strings.TrimSpace(input.BuildURL),
+		JenkinsID:            strings.TrimSpace(input.JenkinsID),
+		JenkinsJobName:       strings.TrimSpace(input.JenkinsJobName),
+		JenkinsJobURL:        strings.TrimSpace(input.JenkinsJobURL),
 		ImageRepository:      strings.TrimSpace(input.ImageRepository),
 		ImageTag:             strings.TrimSpace(input.ImageTag),
 		ImageDigest:          strings.TrimSpace(input.ImageDigest),
 		TargetEnvironmentID:  strings.TrimSpace(input.TargetEnvironmentID),
 		AgentID:              strings.TrimSpace(input.AgentID),
+		ServiceIDs:           encodeStringSlice(input.ServiceIDs),
+		ServiceNames:         encodeStringSlice(input.ServiceNames),
 		Status:               fallbackString(strings.TrimSpace(input.Status), "PENDING"),
 		Progress:             input.Progress,
 		SelectedServiceCount: input.SelectedServiceCount,
@@ -1263,6 +1441,38 @@ func (s *DatabaseStore) ListReleases(query string) []domain.ReleaseOrder {
 	return items
 }
 
+func (s *DatabaseStore) ListServiceReleases(productID string, serviceID string) []domain.ReleaseOrder {
+	trimmedProductID := strings.TrimSpace(productID)
+	trimmedServiceID := strings.TrimSpace(serviceID)
+	if trimmedProductID == "" || trimmedServiceID == "" {
+		return []domain.ReleaseOrder{}
+	}
+	type row struct {
+		ReleaseOrderModel
+		TargetEnvironmentName string
+		AgentName             string
+	}
+	var rows []row
+	err := s.db.Table("release_orders").
+		Select("release_orders.*, environments.name AS target_environment_name, agents.name AS agent_name").
+		Joins("LEFT JOIN environments ON environments.id = release_orders.target_environment_id").
+		Joins("LEFT JOIN agents ON agents.id = release_orders.agent_id").
+		Where("release_orders.target_environment_id = ?", trimmedProductID).
+		Order("release_orders.created_at desc").
+		Find(&rows).Error
+	if err != nil {
+		return []domain.ReleaseOrder{}
+	}
+	items := make([]domain.ReleaseOrder, 0, len(rows))
+	for _, item := range rows {
+		order := toDomainReleaseOrder(item.ReleaseOrderModel, item.TargetEnvironmentName, item.AgentName)
+		if stringSliceContains(order.ServiceIDs, trimmedServiceID) {
+			items = append(items, order)
+		}
+	}
+	return items
+}
+
 func (s *DatabaseStore) GetReleaseDetail(id string) (domain.ReleaseDetail, bool) {
 	order, ok := s.releaseOrderByID(id)
 	if !ok {
@@ -1277,14 +1487,20 @@ func (s *DatabaseStore) GetReleaseDetail(id string) (domain.ReleaseDetail, bool)
 		BuildID:               order.BuildID,
 		BuildStatus:           order.BuildStatus,
 		BuildURL:              order.BuildURL,
+		JenkinsID:             order.JenkinsID,
+		JenkinsJobName:        order.JenkinsJobName,
+		JenkinsJobURL:         order.JenkinsJobURL,
 		ImageRepository:       order.ImageRepository,
 		ImageTag:              order.ImageTag,
 		ImageDigest:           order.ImageDigest,
+		TargetEnvironmentID:   order.TargetEnvironmentID,
 		TargetEnvironmentName: order.TargetEnvironmentName,
 		Status:                order.Status,
 		Progress:              order.Progress,
 		AgentName:             order.AgentName,
 		AgentTaskID:           order.ID,
+		ServiceIDs:            order.ServiceIDs,
+		ServiceNames:          order.ServiceNames,
 		Steps:                 []domain.ReleaseStep{},
 		Failures:              []domain.ReleaseFailure{},
 		ActionRecords:         []domain.ActionRecord{},
@@ -1292,16 +1508,79 @@ func (s *DatabaseStore) GetReleaseDetail(id string) (domain.ReleaseDetail, bool)
 	}, true
 }
 
+func (s *DatabaseStore) UpdateReleaseBuildStatus(id string, buildID string, buildStatus string, buildURL string, status string, progress int) (domain.ReleaseOrder, bool, error) {
+	trimmedID := strings.TrimSpace(id)
+	if trimmedID == "" {
+		return domain.ReleaseOrder{}, false, nil
+	}
+	updates := map[string]any{}
+	if value := strings.TrimSpace(buildID); value != "" {
+		updates["build_id"] = value
+	}
+	if value := strings.TrimSpace(buildStatus); value != "" {
+		updates["build_status"] = value
+	}
+	if value := strings.TrimSpace(buildURL); value != "" {
+		updates["build_url"] = value
+	}
+	if value := strings.TrimSpace(status); value != "" {
+		updates["status"] = value
+	}
+	if progress >= 0 {
+		updates["progress"] = progress
+	}
+	if len(updates) == 0 {
+		order, ok := s.releaseOrderByID(trimmedID)
+		return order, ok, nil
+	}
+	result := s.db.Model(&ReleaseOrderModel{}).Where("id = ?", trimmedID).Updates(updates)
+	if result.Error != nil {
+		return domain.ReleaseOrder{}, false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domain.ReleaseOrder{}, false, nil
+	}
+	order, ok := s.releaseOrderByID(trimmedID)
+	return order, ok, nil
+}
+
+func (s *DatabaseStore) UpdateReleaseImage(id string, imageRepository string, imageTag string) (domain.ReleaseOrder, bool, error) {
+	trimmedID := strings.TrimSpace(id)
+	if trimmedID == "" {
+		return domain.ReleaseOrder{}, false, nil
+	}
+	updates := map[string]any{}
+	if value := strings.TrimSpace(imageRepository); value != "" {
+		updates["image_repository"] = value
+	}
+	if value := strings.TrimSpace(imageTag); value != "" {
+		updates["image_tag"] = value
+	}
+	if len(updates) == 0 {
+		order, ok := s.releaseOrderByID(trimmedID)
+		return order, ok, nil
+	}
+	result := s.db.Model(&ReleaseOrderModel{}).Where("id = ?", trimmedID).Updates(updates)
+	if result.Error != nil {
+		return domain.ReleaseOrder{}, false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domain.ReleaseOrder{}, false, nil
+	}
+	order, ok := s.releaseOrderByID(trimmedID)
+	return order, ok, nil
+}
+
 func (s *DatabaseStore) ListDeployTasks(query string) []domain.DeployTask {
-	return s.mock.ListDeployTasks(query)
+	return []domain.DeployTask{}
 }
 
 func (s *DatabaseStore) GetDeployDetail(id string) (domain.DeployDetail, bool) {
-	return s.mock.GetDeployDetail(id)
+	return domain.DeployDetail{}, false
 }
 
 func (s *DatabaseStore) HasEnvironmentAction(environmentID string, action string) bool {
-	return s.mock.HasEnvironmentAction(environmentID, action)
+	return true
 }
 
 func toDomainProject(model ProjectModel, productCount int) domain.Project {
@@ -1599,6 +1878,7 @@ func toDomainReleaseSourceService(model ServiceModel) domain.ReleaseSourceServic
 		PrivateRegistryHost:      model.PrivateRegistryHost,
 		PrivateRegistryConfirmed: model.PrivateRegistryConfirmed,
 		JenkinsJobName:           model.JenkinsJobName,
+		JenkinsJobURL:            model.JenkinsJobURL,
 		JenkinsBranch:            model.JenkinsBranch,
 		JenkinsPipelineBound:     strings.TrimSpace(model.JenkinsJobName) != "",
 		PipelineBoundAt:          formatOptionalTime(model.PipelineBoundAt),
@@ -1633,6 +1913,7 @@ func toDomainManagedService(model ServiceModel) domain.ManagedService {
 		PrivateRegistryHost:      model.PrivateRegistryHost,
 		PrivateRegistryConfirmed: model.PrivateRegistryConfirmed,
 		JenkinsJobName:           model.JenkinsJobName,
+		JenkinsJobURL:            model.JenkinsJobURL,
 		JenkinsBranch:            model.JenkinsBranch,
 		JenkinsPipelineBound:     strings.TrimSpace(model.JenkinsJobName) != "",
 		PipelineBoundAt:          formatOptionalTime(model.PipelineBoundAt),
@@ -1640,6 +1921,91 @@ func toDomainManagedService(model ServiceModel) domain.ManagedService {
 		ReadyReplicas:            model.ReadyReplicas,
 		CreatedAt:                model.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:                model.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func baselineItemModelFromService(baselineID string, service ServiceModel) BaselineServiceItemModel {
+	return BaselineServiceItemModel{
+		BaselineID:    baselineID,
+		ServiceID:     service.ID,
+		ServiceName:   fallbackString(service.Name, service.WorkloadName),
+		Namespace:     service.Namespace,
+		WorkloadName:  service.WorkloadName,
+		WorkloadType:  service.WorkloadType,
+		Image:         service.Image,
+		Tag:           service.ImageTag,
+		Replicas:      service.Replicas,
+		ReadyReplicas: service.ReadyReplicas,
+		HealthStatus:  serviceHealthStatus(service),
+	}
+}
+
+func serviceHealthStatus(service ServiceModel) string {
+	if service.Replicas > 0 && service.ReadyReplicas < service.Replicas {
+		return "DEGRADED"
+	}
+	return "HEALTHY"
+}
+
+func toDomainBaseline(model EnvironmentBaselineModel, sourceEnvironmentName string) domain.Baseline {
+	lockedAt := ""
+	if model.LockedAt != nil {
+		lockedAt = model.LockedAt.Format(time.RFC3339)
+	}
+	return domain.Baseline{
+		ID:                    model.ID,
+		Name:                  model.Name,
+		SourceEnvironmentID:   model.SourceEnvironmentID,
+		SourceEnvironmentName: sourceEnvironmentName,
+		ServiceCount:          model.ServiceCount,
+		CreatedBy:             model.CreatedBy,
+		CreatedAt:             model.CreatedAt.Format(time.RFC3339),
+		Status:                model.Status,
+		Purpose:               model.Purpose,
+		LockedAt:              lockedAt,
+		SnapshotSource:        model.SourceEnvironmentID,
+		SnapshotCollectedAt:   model.CreatedAt.Format(time.RFC3339),
+		SnapshotMode:          "REAL_RUNTIME",
+	}
+}
+
+func toDomainBaselineDetail(model EnvironmentBaselineModel, sourceEnvironmentName string, itemModels []BaselineServiceItemModel) domain.BaselineDetail {
+	baseline := toDomainBaseline(model, sourceEnvironmentName)
+	items := make([]domain.BaselineItem, 0, len(itemModels))
+	for _, item := range itemModels {
+		items = append(items, toDomainBaselineItem(item))
+	}
+	return domain.BaselineDetail{
+		ID:                    baseline.ID,
+		Name:                  baseline.Name,
+		SourceEnvironmentID:   baseline.SourceEnvironmentID,
+		SourceEnvironmentName: baseline.SourceEnvironmentName,
+		ServiceCount:          baseline.ServiceCount,
+		Status:                baseline.Status,
+		CreatedBy:             baseline.CreatedBy,
+		CreatedAt:             baseline.CreatedAt,
+		Purpose:               baseline.Purpose,
+		LockedAt:              baseline.LockedAt,
+		SnapshotSource:        baseline.SnapshotSource,
+		SnapshotCollectedAt:   baseline.SnapshotCollectedAt,
+		SnapshotMode:          baseline.SnapshotMode,
+		SnapshotTaskID:        baseline.ID,
+		Items:                 items,
+	}
+}
+
+func toDomainBaselineItem(model BaselineServiceItemModel) domain.BaselineItem {
+	return domain.BaselineItem{
+		ServiceID:     model.ServiceID,
+		ServiceName:   model.ServiceName,
+		Namespace:     model.Namespace,
+		WorkloadName:  model.WorkloadName,
+		WorkloadType:  model.WorkloadType,
+		Tag:           model.Tag,
+		Digest:        model.Digest,
+		Replicas:      model.Replicas,
+		ReadyReplicas: model.ReadyReplicas,
+		HealthStatus:  model.HealthStatus,
 	}
 }
 
@@ -1711,13 +2077,19 @@ func toDomainReleaseOrder(model ReleaseOrderModel, environmentName string, agent
 		BuildID:               model.BuildID,
 		BuildStatus:           model.BuildStatus,
 		BuildURL:              model.BuildURL,
+		JenkinsID:             model.JenkinsID,
+		JenkinsJobName:        model.JenkinsJobName,
+		JenkinsJobURL:         model.JenkinsJobURL,
 		ImageRepository:       model.ImageRepository,
 		ImageTag:              model.ImageTag,
 		ImageDigest:           model.ImageDigest,
+		TargetEnvironmentID:   model.TargetEnvironmentID,
 		TargetEnvironmentName: fallbackString(environmentName, model.TargetEnvironmentID),
 		Status:                model.Status,
 		Progress:              model.Progress,
 		AgentName:             fallbackString(agentName, model.AgentID),
+		ServiceIDs:            decodeStringSlice(model.ServiceIDs),
+		ServiceNames:          decodeStringSlice(model.ServiceNames),
 	}
 }
 
@@ -1745,6 +2117,55 @@ func fallbackString(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func encodeStringSlice(values []string) string {
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			normalized = append(normalized, trimmed)
+		}
+	}
+	if len(normalized) == 0 {
+		return ""
+	}
+	content, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	return string(content)
+}
+
+func decodeStringSlice(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []string{}
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(trimmed), &values); err != nil {
+		return []string{}
+	}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		if cleaned := strings.TrimSpace(value); cleaned != "" {
+			normalized = append(normalized, cleaned)
+		}
+	}
+	return normalized
+}
+
+func stringSliceContains(values []string, target string) bool {
+	trimmedTarget := strings.TrimSpace(target)
+	if trimmedTarget == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == trimmedTarget {
+			return true
+		}
+	}
+	return false
 }
 
 func shortHash(value string) string {
@@ -2242,4 +2663,13 @@ func (s *DatabaseStore) getAgentStatus(agentID string) string {
 		return "OFFLINE"
 	}
 	return effectiveAgentStatus(agent.Status, agent.LastHeartbeatAt)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

@@ -108,7 +108,7 @@ import ReleaseRiskPanel from '@/components/ReleaseRiskPanel.vue'
 import ServiceDiffTable from '@/components/ServiceDiffTable.vue'
 import { listAgents } from '@/api/agents'
 import { createDeployTask } from '@/api/deployTasks'
-import { getBaselineCompare, getBaselineDetail } from '@/api/baselines'
+import { getBaselineCompare, getBaselineDetail, type BaselineDiffItem, type BaselineDiffResult } from '@/api/baselines'
 import { listEnvironments } from '@/api/environments'
 import { createRelease, listReleaseSources, type ReleaseSource, type ReleaseSourceService } from '@/api/releases'
 import type { AgentInfo } from '@/api/agents'
@@ -163,6 +163,27 @@ type ServiceTableItem = {
   diffStatus: string
   publishable: boolean
   strategy: string
+}
+
+function toServiceTableItem(item: BaselineDiffItem): ServiceTableItem {
+  return {
+    serviceId: item.serviceId,
+    serviceName: item.serviceName,
+    namespace: item.namespace,
+    sourceTag: item.sourceTag ?? '',
+    targetTag: item.targetTag ?? null,
+    diffStatus: item.diffStatus,
+    publishable: item.publishable,
+    strategy: typeof item.strategy === 'string' ? item.strategy : '',
+  }
+}
+
+function toDiffResult(result: BaselineDiffResult): { sourceBaselineId: string; targetEnvironmentId: string; items: ServiceTableItem[] } {
+  return {
+    sourceBaselineId: result.sourceBaselineId ?? result.baselineId,
+    targetEnvironmentId: result.targetEnvironmentId,
+    items: result.items.map(toServiceTableItem),
+  }
 }
 
 const releaseSourceItems = computed<ServiceTableItem[]>(() => {
@@ -410,7 +431,7 @@ async function submitRelease() {
       } : undefined,
       jenkins: releaseSource.value === 'JENKINS_JOB' ? {
         jobName: jenkinsJob.value,
-        branch: 'main',
+        branch: '',
         parameters: {
           SERVICE_COUNT: String(selectedIds.value.length),
           TARGET_ENV: targetEnvironmentId.value,
@@ -487,8 +508,8 @@ async function loadDiffResult() {
       getBaselineCompare(baselineId, routeTargetEnvironmentId),
     ])
     baselineDetail.value = detail
-    diffResult.value = result
-    sourceBaselineId.value = result.sourceBaselineId
+    diffResult.value = toDiffResult(result)
+    sourceBaselineId.value = diffResult.value.sourceBaselineId
     syncTargetEnvironmentId()
     syncSelectedIds()
     if (selectedIds.value.length === 0) {

@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia'
-import { deployMockData } from '@/api/mockData/deploy'
+import type { DeployDetail, DeployTask } from '@/api/deployTasks'
 
 export const useDeployStore = defineStore('deploy', {
   state: () => ({
-    items: deployMockData.deployTasks,
-    detail: deployMockData.deployDetail,
+    items: [] as DeployTask[],
+    detail: null as DeployDetail | null,
   }),
 })

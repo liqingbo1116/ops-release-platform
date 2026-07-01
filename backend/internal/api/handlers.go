@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -111,7 +112,7 @@ func (h *Handler) Login(c *gin.Context) {
 		Detail:       fmt.Sprintf("用户 %s 登录平台。", firstNonEmpty(user.DisplayName, user.Username, "当前用户")),
 	})
 	OK(c, gin.H{
-		"token": "mock-token-admin",
+		"token": "dev-token-admin",
 		"user":  user,
 	})
 }
@@ -375,10 +376,6 @@ func (h *Handler) CheckEnvironment(c *gin.Context) {
 		NotFound(c, "environment not found")
 		return
 	}
-	if h.integrations.IsMock() {
-		h.checkEnvironmentByCachedScopes(c, environment)
-		return
-	}
 	if environment.Type != "LOCAL" {
 		h.checkEnvironmentByCachedScopes(c, environment)
 		return
@@ -464,6 +461,20 @@ func (h *Handler) ListEnvironmentServices(c *gin.Context) {
 		return
 	}
 	OK(c, paginate(h.repo.ListManagedServices(environmentID), c))
+}
+
+func (h *Handler) SyncEnvironmentServicesFromRuntime(c *gin.Context) {
+	environmentID := c.Param("id")
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
+		NotFound(c, "environment not found")
+		return
+	}
+	if _, err := h.syncManagedServicesFromRuntime(c.Request.Context(), environment, nil); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	OK(c, h.repo.ListManagedServices(environmentID))
 }
 
 func (h *Handler) ListDiscoveredEnvironmentServices(c *gin.Context) {
@@ -658,32 +669,34 @@ func (h *Handler) BindEnvironmentServicePipeline(c *gin.Context) {
 		return
 	}
 	jobName := strings.TrimSpace(input.JenkinsJobName)
+	jobURL := strings.TrimSpace(input.JenkinsJobURL)
 	branch := strings.TrimSpace(input.JenkinsBranch)
-	if branch == "" {
-		branch = "main"
-	}
 	if jobName == "" {
 		BadRequest(c, "请选择 Jenkins Pipeline")
 		return
 	}
 	pipelines := h.jenkinsPipelinesForEnvironment(environment)
-	jobs := jenkinsJobNamesFromPipelines(pipelines)
-	if len(jobs) == 0 {
+	if len(pipelines) == 0 {
 		BadRequest(c, "当前产品关联的 Jenkins 尚未发现 Pipeline，请先在基础资源中刷新 Jenkins")
 		return
 	}
-	if !containsTrimmedString(jobs, jobName) {
+	pipeline, ok := findJenkinsPipelineByNameAndURL(pipelines, jobName, jobURL)
+	if !ok {
 		BadRequest(c, "只能绑定当前产品 Jenkins view 下已发现的 Pipeline")
 		return
 	}
+	jobURL = strings.TrimSpace(pipeline.URL)
 	services := h.repo.ListManagedServices(environmentID)
 	for _, item := range services {
-		if item.ID != serviceID && strings.TrimSpace(item.JenkinsJobName) == jobName {
+		if item.ID == serviceID {
+			continue
+		}
+		if sameJenkinsPipelineBinding(item.JenkinsJobName, item.JenkinsJobURL, jobName, jobURL) {
 			BadRequest(c, fmt.Sprintf("该 Jenkins Pipeline 已绑定到服务 %s，不能重复绑定", item.Name))
 			return
 		}
 	}
-	service, found, err := h.repo.BindManagedServicePipeline(environmentID, serviceID, jobName, branch)
+	service, found, err := h.repo.BindManagedServicePipeline(environmentID, serviceID, jobName, jobURL, branch)
 	if err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -693,6 +706,51 @@ func (h *Handler) BindEnvironmentServicePipeline(c *gin.Context) {
 		return
 	}
 	OK(c, service)
+}
+
+func findJenkinsPipelineByNameAndURL(pipelines []domain.JenkinsPipeline, jobName string, jobURL string) (domain.JenkinsPipeline, bool) {
+	trimmedName := strings.TrimSpace(jobName)
+	normalizedURL := normalizeJenkinsPipelineURL(jobURL)
+	if trimmedName == "" {
+		return domain.JenkinsPipeline{}, false
+	}
+	for _, pipeline := range pipelines {
+		if strings.TrimSpace(pipeline.Name) != trimmedName {
+			continue
+		}
+		if normalizedURL == "" || sameJenkinsPipelineURL(pipeline.URL, normalizedURL) {
+			return pipeline, true
+		}
+	}
+	return domain.JenkinsPipeline{}, false
+}
+
+func sameJenkinsPipelineBinding(leftName string, leftURL string, rightName string, rightURL string) bool {
+	if strings.TrimSpace(leftName) != strings.TrimSpace(rightName) {
+		return false
+	}
+	normalizedLeft := normalizeJenkinsPipelineURL(leftURL)
+	normalizedRight := normalizeJenkinsPipelineURL(rightURL)
+	if normalizedLeft != "" || normalizedRight != "" {
+		return normalizedLeft == normalizedRight
+	}
+	return true
+}
+
+func sameJenkinsPipelineURL(left string, right string) bool {
+	return normalizeJenkinsPipelineURL(left) == normalizeJenkinsPipelineURL(right)
+}
+
+func normalizeJenkinsPipelineURL(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.TrimRight(trimmed, "/")
+	if decoded, err := url.PathUnescape(trimmed); err == nil && decoded != "" {
+		return strings.TrimRight(decoded, "/")
+	}
+	return trimmed
 }
 
 func (h *Handler) discoverEnvironmentServices(ctx context.Context, environment domain.Environment) ([]domain.DiscoveredService, error) {
@@ -757,13 +815,25 @@ func (h *Handler) reconcileManagedServicesWithDiscovered(productID string, disco
 		return discovered
 	}
 	discoveredIDs := make(map[string]bool, len(discovered))
-	for _, item := range discovered {
+	discoveredIdentityKeys := make(map[string]bool, len(discovered))
+	for index, item := range discovered {
 		discoveredIDs[item.ID] = true
+		identityKey := discoveredServiceRuntimeIdentityKey(item)
+		if identityKey != "" {
+			discoveredIdentityKeys[identityKey] = true
+		}
+		for _, managedItem := range managed {
+			if item.ID == managedItem.ID || (identityKey != "" && identityKey == managedServiceRuntimeIdentityKey(managedItem)) {
+				discovered[index].Managed = true
+				break
+			}
+		}
 	}
 	staleItems := make([]domain.ManagedService, 0)
 	staleIDs := make([]string, 0)
 	for _, item := range managed {
-		if !discoveredIDs[item.ID] {
+		identityKey := managedServiceRuntimeIdentityKey(item)
+		if !discoveredIDs[item.ID] && (identityKey == "" || !discoveredIdentityKeys[identityKey]) {
 			staleItems = append(staleItems, item)
 			staleIDs = append(staleIDs, item.ID)
 		}
@@ -804,6 +874,66 @@ func (h *Handler) reconcileManagedServicesWithDiscovered(productID string, disco
 	return discovered
 }
 
+func (h *Handler) syncManagedServicesFromRuntime(ctx context.Context, environment domain.Environment, serviceIDs []string) (int, error) {
+	managed := h.repo.ListManagedServices(environment.ID)
+	if len(managed) == 0 {
+		return 0, nil
+	}
+	targetIDs := normalizeReleaseServiceIDs(serviceIDs)
+	if len(targetIDs) == 0 {
+		targetIDs = make([]string, 0, len(managed))
+		for _, item := range managed {
+			targetIDs = append(targetIDs, item.ID)
+		}
+	}
+	targetSet := make(map[string]bool, len(targetIDs))
+	for _, id := range targetIDs {
+		targetSet[id] = true
+	}
+	discovered, err := h.discoverEnvironmentServices(ctx, environment)
+	if err != nil {
+		return 0, err
+	}
+	discovered = h.reconcileManagedServicesWithDiscovered(environment.ID, discovered)
+	if len(discovered) == 0 {
+		return 0, nil
+	}
+	discoveredByID := make(map[string]domain.DiscoveredService, len(discovered))
+	discoveredByIdentity := make(map[string]domain.DiscoveredService, len(discovered))
+	for _, item := range discovered {
+		discoveredByID[item.ID] = item
+		if identityKey := discoveredServiceRuntimeIdentityKey(item); identityKey != "" {
+			discoveredByIdentity[identityKey] = item
+		}
+	}
+	selected := make([]domain.DiscoveredService, 0, len(targetSet))
+	for _, item := range managed {
+		if !targetSet[item.ID] {
+			continue
+		}
+		discoveredItem, ok := discoveredByID[item.ID]
+		if !ok {
+			identityKey := managedServiceRuntimeIdentityKey(item)
+			if identityKey == "" {
+				continue
+			}
+			discoveredItem, ok = discoveredByIdentity[identityKey]
+			if !ok {
+				continue
+			}
+			discoveredItem.ID = item.ID
+		}
+		selected = append(selected, discoveredItem)
+	}
+	if len(selected) == 0 {
+		return 0, nil
+	}
+	if _, err := h.repo.UpsertManagedServices(environment.ID, selected); err != nil {
+		return 0, err
+	}
+	return len(selected), nil
+}
+
 func mapKeys(input map[string]bool) []string {
 	keys := make([]string, 0, len(input))
 	for key := range input {
@@ -818,6 +948,10 @@ func (h *Handler) jenkinsJobsForEnvironment(environment domain.Environment) []st
 }
 
 func (h *Handler) jenkinsPipelinesForEnvironment(environment domain.Environment) []domain.JenkinsPipeline {
+	return h.jenkinsPipelinesForEnvironmentWithRefresh(context.Background(), environment, true)
+}
+
+func (h *Handler) jenkinsPipelinesForEnvironmentWithRefresh(ctx context.Context, environment domain.Environment, allowRefresh bool) []domain.JenkinsPipeline {
 	jenkinsIDs := make([]string, 0, 2)
 	if trimmed := strings.TrimSpace(environment.JenkinsID); trimmed != "" {
 		jenkinsIDs = append(jenkinsIDs, trimmed)
@@ -864,8 +998,22 @@ func (h *Handler) jenkinsPipelinesForEnvironment(environment domain.Environment)
 			pipelineMap[jenkinsPipelineMapKey(pipeline)] = pipeline
 			matchedPipelineCount++
 		}
-		if len(instance.Pipelines) == 0 || matchedPipelineCount == 0 {
-			appendJenkinsJobPipelines(pipelineMap, instance.Jobs, viewSet)
+		if len(viewSet) == 0 && (len(instance.Pipelines) == 0 || matchedPipelineCount == 0) {
+			appendJenkinsJobPipelines(pipelineMap, instance.URL, instance.Jobs, viewSet)
+		}
+		if allowRefresh && len(viewSet) > 0 && matchedPipelineCount == 0 {
+			if refreshed, ok := h.refreshJenkinsPipelinesForView(ctx, instance.ID); ok {
+				for _, pipeline := range refreshed.Pipelines {
+					pipeline.Name = strings.TrimSpace(pipeline.Name)
+					pipeline.View = strings.TrimSpace(pipeline.View)
+					pipeline.ViewURL = strings.TrimSpace(pipeline.ViewURL)
+					pipeline.URL = strings.TrimSpace(pipeline.URL)
+					if pipeline.Name == "" || !jenkinsPipelineMatchesView(pipeline, viewSet) {
+						continue
+					}
+					pipelineMap[jenkinsPipelineMapKey(pipeline)] = pipeline
+				}
+			}
 		}
 	}
 	pipelines := make([]domain.JenkinsPipeline, 0, len(pipelineMap))
@@ -881,18 +1029,140 @@ func (h *Handler) jenkinsPipelinesForEnvironment(environment domain.Environment)
 	return pipelines
 }
 
-func appendJenkinsJobPipelines(pipelineMap map[string]domain.JenkinsPipeline, jobs []string, viewSet map[string]string) {
+func (h *Handler) refreshJenkinsPipelinesForView(ctx context.Context, jenkinsID string) (domain.JenkinsInstance, bool) {
+	instance, ok := h.repo.GetJenkinsInstance(jenkinsID)
+	if !ok {
+		return domain.JenkinsInstance{}, false
+	}
+	views, jobs, pipelines, err := checkJenkinsInstance(ctx, instance, true)
+	checkedAt := time.Now()
+	status, message := probeResult(err, "jenkins connection ok")
+	updated, ok, updateErr := h.repo.UpdateJenkinsInstanceProbe(jenkinsID, status, message, views, jobs, pipelines, checkedAt)
+	if updateErr != nil {
+		log.Printf("jenkins instance %s pipeline refresh update failed: %v", jenkinsID, updateErr)
+		return domain.JenkinsInstance{}, false
+	}
+	if !ok {
+		return domain.JenkinsInstance{}, false
+	}
+	if err != nil {
+		log.Printf("jenkins instance %s pipeline refresh failed: %v", jenkinsID, err)
+		return updated, false
+	}
+	return updated, true
+}
+
+func (h *Handler) enrichJenkinsPipelineParameters(ctx context.Context, environment domain.Environment, pipelines []domain.JenkinsPipeline) []domain.JenkinsPipeline {
+	if h.integrations.Jenkins == nil || len(pipelines) == 0 {
+		return pipelines
+	}
+	jenkins, ok := h.primaryJenkinsForEnvironment(environment)
+	if !ok {
+		return pipelines
+	}
+	enriched := make([]domain.JenkinsPipeline, len(pipelines))
+	copy(enriched, pipelines)
+	for index := range enriched {
+		parameters, err := h.integrations.Jenkins.GetJobParameters(ctx, integration.JobParametersRequest{
+			JenkinsURL:            jenkins.URL,
+			Username:              jenkins.Username,
+			Token:                 jenkins.Token,
+			InsecureSkipTLSVerify: jenkins.InsecureSkipTLSVerify,
+			JobName:               enriched[index].Name,
+			JobURL:                enriched[index].URL,
+		})
+		if err != nil {
+			log.Printf("jenkins pipeline parameter probe failed: product=%s jenkins=%s job=%s reason=%s", environment.ID, jenkins.ID, enriched[index].Name, err.Error())
+			enriched[index].Parameters = nil
+			continue
+		}
+		enriched[index].Parameters = parameters
+	}
+	return enriched
+}
+
+func (h *Handler) primaryJenkinsForEnvironment(environment domain.Environment) (domain.JenkinsInstance, bool) {
+	jenkinsID := strings.TrimSpace(environment.JenkinsID)
+	if jenkinsID == "" {
+		for _, binding := range environment.Bindings {
+			if binding.ResourceType != "JENKINS" {
+				continue
+			}
+			if binding.BindingRole != "" && binding.BindingRole != "BUILD_SOURCE" {
+				continue
+			}
+			jenkinsID = strings.TrimSpace(binding.ResourceID)
+			if jenkinsID != "" {
+				break
+			}
+		}
+	}
+	if jenkinsID == "" {
+		return domain.JenkinsInstance{}, false
+	}
+	return h.repo.GetJenkinsInstance(jenkinsID)
+}
+
+func appendJenkinsJobPipelines(pipelineMap map[string]domain.JenkinsPipeline, jenkinsURL string, jobs []string, viewSet map[string]string) {
 	fallbackView := fallbackJenkinsPipelineView("", viewSet)
+	fallbackViewURL := fallbackJenkinsPipelineViewURL(jenkinsURL, fallbackView, viewSet)
 	for _, job := range jobs {
 		if trimmed := strings.TrimSpace(job); trimmed != "" {
 			pipeline := domain.JenkinsPipeline{
 				Name:       trimmed,
 				View:       fallbackView,
+				ViewURL:    fallbackViewURL,
+				URL:        fallbackJenkinsPipelineJobURL(fallbackViewURL, trimmed),
 				Parameters: []domain.JenkinsPipelineParameter{},
 			}
 			pipelineMap[jenkinsPipelineMapKey(pipeline)] = pipeline
 		}
 	}
+}
+
+func fallbackJenkinsPipelineViewURL(jenkinsURL string, viewName string, viewSet map[string]string) string {
+	distinctURLs := map[string]struct{}{}
+	for key, boundViewName := range viewSet {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" || !strings.Contains(trimmedKey, "/view/") {
+			continue
+		}
+		if strings.Trim(strings.ToLower(strings.TrimSpace(boundViewName)), "/") == trimmedKey {
+			continue
+		}
+		distinctURLs[trimmedKey] = struct{}{}
+	}
+	if len(distinctURLs) == 1 {
+		for viewURL := range distinctURLs {
+			return viewURL
+		}
+	}
+	base := strings.TrimRight(strings.TrimSpace(jenkinsURL), "/")
+	view := strings.TrimSpace(viewName)
+	if base != "" && view != "" {
+		return base + "/view/" + jenkinsNestedPathEscape(view, "view") + "/"
+	}
+	return ""
+}
+
+func fallbackJenkinsPipelineJobURL(viewURL string, jobName string) string {
+	base := strings.TrimRight(strings.TrimSpace(viewURL), "/")
+	job := strings.TrimSpace(jobName)
+	if base == "" || job == "" {
+		return ""
+	}
+	return base + "/job/" + jenkinsNestedPathEscape(job, "job") + "/"
+}
+
+func jenkinsNestedPathEscape(value string, marker string) string {
+	parts := strings.Split(value, "/")
+	escaped := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			escaped = append(escaped, url.PathEscape(trimmed))
+		}
+	}
+	return strings.Join(escaped, "/"+marker+"/")
 }
 
 func fallbackJenkinsPipelineView(current string, viewSet map[string]string) string {
@@ -929,7 +1199,7 @@ func normalizedJenkinsViewKey(value string) string {
 }
 
 func jenkinsPipelineMatchesView(pipeline domain.JenkinsPipeline, viewSet map[string]string) bool {
-	for _, value := range []string{pipeline.View, pipeline.ViewURL, pipeline.URL} {
+	for _, value := range []string{pipeline.View, pipeline.ViewURL} {
 		for _, key := range jenkinsViewKeyCandidates(value) {
 			if _, ok := viewSet[key]; ok {
 				return true
@@ -1365,10 +1635,14 @@ func parseContainerImage(image string) parsedContainerImage {
 	if len(repositoryParts) > 1 {
 		project = repositoryParts[0]
 	}
+	repository := strings.Join(repositoryParts, "/")
+	if registry != "" && !strings.EqualFold(registry, "docker.io") {
+		repository = registry + "/" + repository
+	}
 	return parsedContainerImage{
 		Registry:   registry,
 		Project:    project,
-		Repository: strings.Join(repositoryParts, "/"),
+		Repository: repository,
 		Tag:        tag,
 	}
 }
@@ -1485,6 +1759,30 @@ func stableDiscoveredServiceID(parts ...string) string {
 	key := strings.Join(parts, "\x00")
 	sum := sha1.Sum([]byte(key))
 	return "svc-" + hex.EncodeToString(sum[:8])
+}
+
+func discoveredServiceRuntimeIdentityKey(item domain.DiscoveredService) string {
+	return runtimeServiceIdentityKey(item.Namespace, item.WorkloadType, item.WorkloadName, item.ContainerType, item.ContainerName)
+}
+
+func managedServiceRuntimeIdentityKey(item domain.ManagedService) string {
+	return runtimeServiceIdentityKey(item.Namespace, item.WorkloadType, item.WorkloadName, item.ContainerType, item.ContainerName)
+}
+
+func runtimeServiceIdentityKey(namespace string, workloadType string, workloadName string, containerType string, containerName string) string {
+	parts := []string{
+		strings.TrimSpace(namespace),
+		strings.ToLower(strings.TrimSpace(workloadType)),
+		strings.TrimSpace(workloadName),
+		strings.ToUpper(firstNonEmpty(strings.TrimSpace(containerType), "APP")),
+		strings.TrimSpace(containerName),
+	}
+	for _, part := range parts {
+		if part == "" {
+			return ""
+		}
+	}
+	return strings.Join(parts, "\x00")
 }
 
 func firstNonEmpty(values ...string) string {
@@ -2082,10 +2380,10 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 	}
 	if h.shouldReconcileManagedServicesFromHeartbeat(agentItem, request.RuntimeStatus) {
 		if environment, exists := h.repo.GetEnvironment(agentItem.EnvironmentID); exists {
-			if services, err := h.discoverEnvironmentServices(c.Request.Context(), environment); err != nil {
-				log.Printf("environment %s managed service heartbeat reconcile skipped: %v", environment.ID, err)
-			} else {
-				h.reconcileManagedServicesWithDiscovered(environment.ID, services)
+			if count, err := h.syncManagedServicesFromRuntime(c.Request.Context(), environment, nil); err != nil {
+				log.Printf("environment %s managed service heartbeat sync skipped: %v", environment.ID, err)
+			} else if count > 0 {
+				h.syncSuccessfulReleaseImagesForProduct(environment.ID)
 			}
 		}
 	}
@@ -2373,7 +2671,30 @@ func (h *Handler) CompareBaseline(c *gin.Context) {
 }
 
 func (h *Handler) ListReleases(c *gin.Context) {
-	OK(c, paginate(h.repo.ListReleases(c.Query("keyword")), c))
+	releases := h.repo.ListReleases(c.Query("keyword"))
+	for index := range releases {
+		h.enrichReleaseOrderWithCurrentServiceImage(&releases[index], false)
+	}
+	OK(c, paginate(releases, c))
+}
+
+func (h *Handler) ListEnvironmentServiceReleases(c *gin.Context) {
+	environmentID := strings.TrimSpace(c.Param("id"))
+	serviceID := strings.TrimSpace(c.Param("serviceId"))
+	if environmentID == "" || serviceID == "" {
+		BadRequest(c, "product and service are required")
+		return
+	}
+	if environment, ok := h.repo.GetEnvironment(environmentID); ok {
+		if _, err := h.syncManagedServicesFromRuntime(c.Request.Context(), environment, []string{serviceID}); err != nil {
+			log.Printf("environment %s service %s release history refresh skipped: %v", environment.ID, serviceID, err)
+		}
+	}
+	releases := h.repo.ListServiceReleases(environmentID, serviceID)
+	for index := range releases {
+		h.enrichReleaseOrderWithCurrentServiceImage(&releases[index], shouldRefreshReleaseImageFromRuntime(releases[index]))
+	}
+	OK(c, paginate(releases, c))
 }
 
 func (h *Handler) ListReleaseSources(c *gin.Context) {
@@ -2387,8 +2708,33 @@ func (h *Handler) ListReleaseSources(c *gin.Context) {
 		NotFound(c, "environment not found")
 		return
 	}
+	includeTags := true
+	if rawIncludeTags := strings.TrimSpace(c.Query("includeTags")); rawIncludeTags != "" {
+		parsedIncludeTags, err := strconv.ParseBool(rawIncludeTags)
+		if err != nil {
+			BadRequest(c, "includeTags must be a boolean")
+			return
+		}
+		includeTags = parsedIncludeTags
+	}
+	serviceID := strings.TrimSpace(c.Query("serviceId"))
 	services := h.repo.ListReleaseSourceServices(environmentID, c.Query("keyword"))
+	if serviceID != "" {
+		filteredServices := make([]domain.ReleaseSourceService, 0, len(services))
+		for _, item := range services {
+			if item.ServiceID == serviceID {
+				filteredServices = append(filteredServices, item)
+			}
+		}
+		services = filteredServices
+	}
 	for index := range services {
+		if !includeTags {
+			services[index].Tags = []domain.ReleaseImageTag{}
+			services[index].Publishable = false
+			services[index].Message = ""
+			continue
+		}
 		if services[index].ImageSource != "PRIVATE" {
 			services[index].Tags = []domain.ReleaseImageTag{}
 			services[index].Publishable = false
@@ -2424,7 +2770,7 @@ func (h *Handler) ListReleaseSources(c *gin.Context) {
 		if err != nil {
 			services[index].Tags = []domain.ReleaseImageTag{}
 			services[index].Publishable = false
-			services[index].Message = "Harbor 镜像 tag 读取失败"
+			services[index].Message = fmt.Sprintf("Harbor 镜像 tag 读取失败：%s", compactIntegrationError(err))
 			continue
 		}
 		services[index].Tags = toReleaseImageTags(tags)
@@ -2434,12 +2780,26 @@ func (h *Handler) ListReleaseSources(c *gin.Context) {
 		}
 	}
 
+	jenkinsPipelines := h.enrichJenkinsPipelineParameters(c.Request.Context(), environment, h.jenkinsPipelinesForEnvironmentWithRefresh(c.Request.Context(), environment, true))
 	OK(c, domain.ReleaseSource{
 		EnvironmentID:    environmentID,
 		Services:         services,
-		JenkinsJobs:      h.jenkinsJobsForEnvironment(environment),
-		JenkinsPipelines: h.jenkinsPipelinesForEnvironment(environment),
+		JenkinsJobs:      jenkinsJobNamesFromPipelines(jenkinsPipelines),
+		JenkinsPipelines: jenkinsPipelines,
 	})
+}
+
+func compactIntegrationError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.Join(strings.Fields(err.Error()), " ")
+	const maxLength = 160
+	if len([]rune(message)) <= maxLength {
+		return message
+	}
+	runes := []rune(message)
+	return string(runes[:maxLength]) + "..."
 }
 
 func (h *Handler) CreateRelease(c *gin.Context) {
@@ -2450,36 +2810,43 @@ func (h *Handler) CreateRelease(c *gin.Context) {
 	}
 	result, err := h.service.CreateRelease(c.Request.Context(), request)
 	if err != nil {
-		switch err {
-		case service.ErrInvalidReleaseType:
+		var jenkinsErr service.JenkinsTriggerError
+		switch {
+		case errors.Is(err, service.ErrInvalidReleaseType):
 			BadRequest(c, "release type must be SERVICE_RELEASE")
-		case service.ErrAgentNotFound:
+		case errors.Is(err, service.ErrAgentNotFound):
 			BadRequest(c, "agent not found")
-		case service.ErrAgentOffline:
+		case errors.Is(err, service.ErrAgentOffline):
 			BadRequest(c, "agent must be ONLINE")
-		case service.ErrAgentEnvironment:
+		case errors.Is(err, service.ErrAgentEnvironment):
 			BadRequest(c, "agent does not belong to target environment")
-		case service.ErrEnvironmentPermission:
+		case errors.Is(err, service.ErrEnvironmentPermission):
 			Forbidden(c, "environment permission denied")
-		case service.ErrInvalidReleaseSource:
+		case errors.Is(err, service.ErrInvalidReleaseSource):
 			BadRequest(c, "release source must be LOCAL_HARBOR_IMAGE or JENKINS_JOB")
-		case service.ErrEnvironmentNotFound:
+		case errors.Is(err, service.ErrEnvironmentNotFound):
 			BadRequest(c, "environment not found")
-		case service.ErrReleaseOrderCreate:
+		case errors.Is(err, service.ErrReleaseOrderCreate):
 			BadRequest(c, "release order create failed")
-		case service.ErrJenkinsTrigger:
+		case errors.As(err, &jenkinsErr):
+			reason := strings.TrimSpace(jenkinsErr.Reason)
+			if reason == "" {
+				reason = "请检查产品绑定的 Jenkins、view、Pipeline、账号 Token 与参数"
+			}
+			BadRequest(c, "Jenkins 触发失败："+reason)
+		case errors.Is(err, service.ErrJenkinsTrigger):
 			BadRequest(c, "jenkins trigger failed")
-		case service.ErrRegistryImageCheck:
+		case errors.Is(err, service.ErrRegistryImageCheck):
 			BadRequest(c, "registry image check failed")
-		case service.ErrRegistryImageSync:
+		case errors.Is(err, service.ErrRegistryImageSync):
 			BadRequest(c, "registry image sync failed")
-		case service.ErrImageNotFound:
+		case errors.Is(err, service.ErrImageNotFound):
 			BadRequest(c, "release image not found")
-		case service.ErrReleaseBaselineUnsupported:
+		case errors.Is(err, service.ErrReleaseBaselineUnsupported):
 			BadRequest(c, "service release must not include source baseline")
-		case service.ErrBaselineNotFound:
+		case errors.Is(err, service.ErrBaselineNotFound):
 			BadRequest(c, "baseline not found")
-		case service.ErrInvalidServiceSelection:
+		case errors.Is(err, service.ErrInvalidServiceSelection):
 			BadRequest(c, "release services must come from NEED_UPDATE diff items")
 		default:
 			BadRequest(c, "invalid release request")
@@ -2495,7 +2862,313 @@ func (h *Handler) GetRelease(c *gin.Context) {
 		NotFound(c, "release not found")
 		return
 	}
+	h.enrichReleaseDetailWithJenkins(c.Request.Context(), &detail)
+	h.enrichReleaseDetailWithCurrentServiceImage(&detail, false)
 	OK(c, detail)
+}
+
+func (h *Handler) enrichReleaseOrderWithCurrentServiceImage(order *domain.ReleaseOrder, overwrite bool) {
+	if order == nil {
+		return
+	}
+	if !overwrite && (strings.TrimSpace(order.ImageRepository) != "" || strings.TrimSpace(order.ImageTag) != "") {
+		return
+	}
+	service := h.currentReleaseService(order.TargetEnvironmentID, order.ServiceIDs)
+	if service == nil {
+		return
+	}
+	order.ImageRepository = firstNonEmpty(service.ImageRepository, imageRepositoryFromFullImage(service.Image, service.ImageTag))
+	order.ImageTag = firstNonEmpty(service.ImageTag, imageTagFromFullImage(service.Image))
+	if overwrite && (strings.TrimSpace(order.ImageRepository) != "" || strings.TrimSpace(order.ImageTag) != "") {
+		if _, ok, err := h.repo.UpdateReleaseImage(order.ID, order.ImageRepository, order.ImageTag); !ok || err != nil {
+			log.Printf("release %s image update failed from release list: ok=%t err=%v", order.ID, ok, err)
+		}
+	}
+}
+
+func shouldRefreshReleaseImageFromRuntime(order domain.ReleaseOrder) bool {
+	if !strings.EqualFold(strings.TrimSpace(order.ReleaseSource), "JENKINS_JOB") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(order.BuildStatus), "SUCCESS") ||
+		strings.EqualFold(strings.TrimSpace(order.Status), "SUCCESS")
+}
+
+func (h *Handler) enrichReleaseDetailWithCurrentServiceImage(detail *domain.ReleaseDetail, overwrite bool) {
+	if detail == nil {
+		return
+	}
+	if !overwrite && (strings.TrimSpace(detail.ImageRepository) != "" || strings.TrimSpace(detail.ImageTag) != "") {
+		return
+	}
+	service := h.currentReleaseService(detail.TargetEnvironmentID, detail.ServiceIDs)
+	if service == nil {
+		return
+	}
+	detail.ImageRepository = firstNonEmpty(service.ImageRepository, imageRepositoryFromFullImage(service.Image, service.ImageTag))
+	detail.ImageTag = firstNonEmpty(service.ImageTag, imageTagFromFullImage(service.Image))
+}
+
+func (h *Handler) currentReleaseService(productID string, serviceIDs []string) *domain.ManagedService {
+	trimmedProductID := strings.TrimSpace(productID)
+	normalizedServiceIDs := normalizeReleaseServiceIDs(serviceIDs)
+	if trimmedProductID == "" || len(normalizedServiceIDs) != 1 {
+		return nil
+	}
+	serviceByID := h.currentReleaseServicesByID(trimmedProductID)
+	targetServiceID := normalizedServiceIDs[0]
+	if service, ok := serviceByID[targetServiceID]; ok {
+		result := service
+		return &result
+	}
+	return nil
+}
+
+func (h *Handler) currentReleaseServicesByID(productID string) map[string]domain.ManagedService {
+	services := h.repo.ListManagedServices(strings.TrimSpace(productID))
+	serviceByID := make(map[string]domain.ManagedService, len(services))
+	serviceByIdentity := make(map[string]domain.ManagedService, len(services))
+	for _, item := range services {
+		serviceByID[item.ID] = item
+		if identityKey := managedServiceRuntimeIdentityKey(item); identityKey != "" {
+			serviceByIdentity[identityKey] = item
+		}
+	}
+	for _, item := range services {
+		identityKey := managedServiceRuntimeIdentityKey(item)
+		if identityKey == "" {
+			continue
+		}
+		if service, ok := serviceByIdentity[identityKey]; ok {
+			serviceByID[item.ID] = service
+		}
+	}
+	return serviceByID
+}
+
+func normalizeReleaseServiceIDs(serviceIDs []string) []string {
+	seen := map[string]bool{}
+	normalized := []string{}
+	for _, serviceID := range serviceIDs {
+		trimmed := strings.TrimSpace(serviceID)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
+func imageRepositoryFromFullImage(image string, imageTag string) string {
+	trimmed := strings.TrimSpace(image)
+	if trimmed == "" {
+		return ""
+	}
+	if tag := strings.TrimSpace(imageTag); tag != "" && strings.HasSuffix(trimmed, ":"+tag) {
+		return strings.TrimSuffix(trimmed, ":"+tag)
+	}
+	if index := strings.LastIndex(trimmed, ":"); index > strings.LastIndex(trimmed, "/") {
+		return trimmed[:index]
+	}
+	return trimmed
+}
+
+func imageTagFromFullImage(image string) string {
+	trimmed := strings.TrimSpace(image)
+	if trimmed == "" {
+		return ""
+	}
+	if index := strings.LastIndex(trimmed, ":"); index > strings.LastIndex(trimmed, "/") {
+		return trimmed[index+1:]
+	}
+	return ""
+}
+
+func (h *Handler) enrichReleaseDetailWithJenkins(ctx context.Context, detail *domain.ReleaseDetail) {
+	if detail == nil || h.integrations.Jenkins == nil || strings.TrimSpace(detail.ReleaseSource) != "JENKINS_JOB" {
+		return
+	}
+	if strings.TrimSpace(detail.BuildID) == "" && strings.TrimSpace(detail.BuildURL) == "" {
+		if strings.EqualFold(strings.TrimSpace(detail.BuildStatus), "TRIGGER_FAILED") || strings.EqualFold(strings.TrimSpace(detail.Status), "FAILED") {
+			detail.Logs = append(detail.Logs, "Jenkins 触发失败，请检查 Jenkins 账号权限、Token、Pipeline 地址和参数配置")
+			return
+		}
+		detail.Logs = append(detail.Logs, "Jenkins 正在触发，生成构建任务后会自动刷新日志")
+		return
+	}
+	jenkins, ok := h.releaseDetailJenkinsInstance(*detail)
+	if !ok || strings.TrimSpace(jenkins.URL) == "" {
+		detail.Logs = append(detail.Logs, "未找到发版单关联的 Jenkins 实例，无法读取构建状态和日志")
+		return
+	}
+	build, err := h.integrations.Jenkins.GetBuildStatus(ctx, integration.BuildStatusRequest{
+		JenkinsURL:            jenkins.URL,
+		Username:              jenkins.Username,
+		Token:                 jenkins.Token,
+		InsecureSkipTLSVerify: jenkins.InsecureSkipTLSVerify,
+		JobName:               detail.JenkinsJobName,
+		JobURL:                detail.JenkinsJobURL,
+		BuildID:               detail.BuildID,
+		BuildURL:              detail.BuildURL,
+		LogLineLimit:          300,
+	})
+	if err != nil {
+		detail.Logs = append(detail.Logs, "读取 Jenkins 构建状态失败："+err.Error())
+		return
+	}
+	detail.BuildID = firstNonEmpty(build.BuildID, detail.BuildID)
+	detail.BuildStatus = firstNonEmpty(build.Status, detail.BuildStatus)
+	detail.BuildURL = firstNonEmpty(build.URL, detail.BuildURL)
+	detail.Logs = build.Logs
+	if status := releaseStatusFromJenkins(build.Status); status != "" {
+		detail.Status = status
+	}
+	detail.Progress = releaseProgressFromStatus(detail.Status, detail.Progress)
+	if _, ok, updateErr := h.repo.UpdateReleaseBuildStatus(detail.ID, detail.BuildID, detail.BuildStatus, detail.BuildURL, detail.Status, detail.Progress); !ok || updateErr != nil {
+		detail.Logs = append(detail.Logs, "Jenkins 状态已读取，但发版历史状态同步失败")
+	}
+	if strings.EqualFold(strings.TrimSpace(detail.Status), "SUCCESS") {
+		h.syncReleaseServiceImagesFromRuntime(ctx, detail)
+		h.enrichReleaseDetailWithCurrentServiceImage(detail, true)
+	}
+}
+
+func (h *Handler) syncReleaseServiceImagesFromRuntime(ctx context.Context, detail *domain.ReleaseDetail) {
+	if detail == nil {
+		return
+	}
+	environmentID := strings.TrimSpace(detail.TargetEnvironmentID)
+	if environmentID == "" {
+		return
+	}
+	environment, ok := h.repo.GetEnvironment(environmentID)
+	if !ok {
+		return
+	}
+	count, err := h.syncManagedServicesFromRuntime(ctx, environment, detail.ServiceIDs)
+	if err != nil {
+		message := fmt.Sprintf("Jenkins 已成功，等待实际环境同步服务镜像：%s", compactIntegrationError(err))
+		detail.Logs = append(detail.Logs, message)
+		log.Printf("release %s managed service image sync skipped: product=%s reason=%v", detail.ID, environment.ID, err)
+		return
+	}
+	if count == 0 {
+		detail.Logs = append(detail.Logs, "Jenkins 已成功，实际环境暂未发现本次发版服务的新运行状态；服务列表会继续按实际环境刷新")
+		return
+	}
+	h.persistReleaseImageFromCurrentService(detail)
+	detail.Logs = append(detail.Logs, fmt.Sprintf("Jenkins 已成功，已尝试从实际环境刷新 %d 个服务镜像状态；如 ArgoCD 尚未同步，服务列表会继续按实际环境刷新", count))
+}
+
+func (h *Handler) syncSuccessfulReleaseImagesForProduct(productID string) {
+	trimmedProductID := strings.TrimSpace(productID)
+	if trimmedProductID == "" {
+		return
+	}
+	serviceByID := h.currentReleaseServicesByID(trimmedProductID)
+	if len(serviceByID) == 0 {
+		return
+	}
+	for _, release := range h.repo.ListReleases("") {
+		if release.TargetEnvironmentID != trimmedProductID || !shouldRefreshReleaseImageFromRuntime(release) {
+			continue
+		}
+		serviceIDs := normalizeReleaseServiceIDs(release.ServiceIDs)
+		if len(serviceIDs) != 1 {
+			continue
+		}
+		service, ok := serviceByID[serviceIDs[0]]
+		if !ok {
+			continue
+		}
+		imageRepository := firstNonEmpty(service.ImageRepository, imageRepositoryFromFullImage(service.Image, service.ImageTag))
+		imageTag := firstNonEmpty(service.ImageTag, imageTagFromFullImage(service.Image))
+		if strings.TrimSpace(imageRepository) == "" && strings.TrimSpace(imageTag) == "" {
+			continue
+		}
+		if release.ImageRepository == imageRepository && release.ImageTag == imageTag {
+			continue
+		}
+		if _, ok, err := h.repo.UpdateReleaseImage(release.ID, imageRepository, imageTag); !ok || err != nil {
+			log.Printf("release %s image update failed from product runtime sync: ok=%t err=%v", release.ID, ok, err)
+		}
+	}
+}
+
+func (h *Handler) persistReleaseImageFromCurrentService(detail *domain.ReleaseDetail) {
+	service := h.currentReleaseService(detail.TargetEnvironmentID, detail.ServiceIDs)
+	if service == nil {
+		return
+	}
+	imageRepository := firstNonEmpty(service.ImageRepository, imageRepositoryFromFullImage(service.Image, service.ImageTag))
+	imageTag := firstNonEmpty(service.ImageTag, imageTagFromFullImage(service.Image))
+	if strings.TrimSpace(imageRepository) == "" && strings.TrimSpace(imageTag) == "" {
+		return
+	}
+	if _, ok, err := h.repo.UpdateReleaseImage(detail.ID, imageRepository, imageTag); !ok || err != nil {
+		detail.Logs = append(detail.Logs, "服务镜像已刷新，但发版历史镜像版本同步失败")
+		log.Printf("release %s image update failed: ok=%t err=%v", detail.ID, ok, err)
+		return
+	}
+	detail.ImageRepository = imageRepository
+	detail.ImageTag = imageTag
+}
+
+func (h *Handler) releaseDetailJenkinsInstance(detail domain.ReleaseDetail) (domain.JenkinsInstance, bool) {
+	if id := strings.TrimSpace(detail.JenkinsID); id != "" {
+		return h.repo.GetJenkinsInstance(id)
+	}
+	if productID := strings.TrimSpace(detail.TargetEnvironmentID); productID != "" {
+		environment, ok := h.repo.GetEnvironment(productID)
+		if ok && strings.TrimSpace(environment.JenkinsID) != "" {
+			return h.repo.GetJenkinsInstance(environment.JenkinsID)
+		}
+		for _, binding := range environment.Bindings {
+			if binding.ResourceType == "JENKINS" && (binding.BindingRole == "" || binding.BindingRole == "BUILD_SOURCE") {
+				return h.repo.GetJenkinsInstance(binding.ResourceID)
+			}
+		}
+	}
+	return domain.JenkinsInstance{}, false
+}
+
+func releaseStatusFromJenkins(status string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "SUCCESS":
+		return "SUCCESS"
+	case "FAILURE", "ABORTED", "UNSTABLE", "NOT_BUILT":
+		return "FAILED"
+	case "BUILDING":
+		return "RUNNING"
+	case "QUEUED":
+		return "JENKINS_QUEUED"
+	case "TRIGGERING":
+		return "JENKINS_TRIGGERING"
+	default:
+		return ""
+	}
+}
+
+func releaseProgressFromStatus(status string, current int) int {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "SUCCESS", "FAILED":
+		return 100
+	case "RUNNING":
+		if current < 60 {
+			return 60
+		}
+	case "JENKINS_TRIGGERING":
+		if current < 5 {
+			return 5
+		}
+	case "JENKINS_QUEUED":
+		if current < 10 {
+			return 10
+		}
+	}
+	return current
 }
 
 func (h *Handler) RetryRelease(c *gin.Context) {

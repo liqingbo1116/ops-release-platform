@@ -336,7 +336,7 @@ type jenkinsParameterDefinitionResponse struct {
 	Name                  string `json:"name"`
 	Type                  string `json:"type"`
 	Description           string `json:"description"`
-	DefaultParameterValue struct {
+	DefaultParameterValue *struct {
 		Value any `json:"value"`
 	} `json:"defaultParameterValue"`
 }
@@ -397,12 +397,16 @@ func jenkinsPipelineFromJob(job jenkinsJobResponse, view string, viewURL string)
 			if parameterName == "" {
 				continue
 			}
+			defaultValue := ""
+			if definition.DefaultParameterValue != nil {
+				defaultValue = jenkinsDefaultParameterValue(definition.DefaultParameterValue.Value)
+			}
 			parameters = append(parameters, domain.JenkinsPipelineParameter{
 				Name:         parameterName,
 				Type:         strings.TrimSpace(definition.Type),
-				DefaultValue: jenkinsDefaultParameterValue(definition.DefaultParameterValue.Value),
+				DefaultValue: defaultValue,
 				Description:  strings.TrimSpace(definition.Description),
-				Required:     definition.DefaultParameterValue.Value == nil,
+				Required:     definition.DefaultParameterValue == nil,
 			})
 		}
 	}

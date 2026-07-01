@@ -1,5 +1,4 @@
-import { releaseMockData } from './mockData/release'
-import { getData, getDataWithParams, postData, type PageResult, useMockApi } from './client'
+import { getData, getDataWithParams, postData, type PageResult } from './client'
 
 export type CreateReleaseRequest = {
   type: string
@@ -15,7 +14,8 @@ export type CreateReleaseRequest = {
   }
   jenkins?: {
     jobName: string
-    branch: string
+    jobUrl?: string
+    branch?: string
     parameters?: Record<string, string>
   }
   options: Record<string, boolean>
@@ -31,6 +31,100 @@ export type CreateReleaseResult = {
   buildStatus?: string
   buildUrl?: string
   createdAt: string
+}
+
+export type ReleaseOrder = {
+  id: string
+  type: string
+  sourceBaselineId?: string
+  releaseSource?: 'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE' | string
+  executionMode?: string
+  buildId?: string
+  buildStatus?: string
+  buildUrl?: string
+  imageRepository?: string
+  imageTag?: string
+  imageDigest?: string
+  targetEnvironmentName: string
+  status: string
+  progress: number
+  agentName: string
+  serviceIds?: string[]
+  serviceNames?: string[]
+  createdAt?: string
+}
+
+export type ReleaseStep = {
+  name: string
+  status: string
+  message?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+export type ReleaseFailure = {
+  serviceId?: string
+  serviceName: string
+  reason: string
+  suggestion: string
+}
+
+export type ReleaseActionRecord = {
+  occurredAt: string
+  action: string
+  operator: string
+  status: string
+  message?: string
+}
+
+export type ReleaseReport = {
+  generatedAt: string
+  operator: string
+  successServiceCount: number
+  failedServiceCount: number
+  manualConfirmCount: number
+  rollbackRecommended: boolean
+  summary: string
+}
+
+export type ReleaseAuditSummary = {
+  operator?: string
+  targetEnvironmentName?: string
+  affectedServices?: string[]
+  result?: string
+  failedStep?: string
+  lastAction?: string
+  lastActionAt?: string
+}
+
+export type ReleaseDetail = {
+  id: string
+  type: string
+  sourceBaselineId?: string
+  releaseSource?: 'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE' | string
+  executionMode?: string
+  buildId?: string
+  buildStatus?: string
+  buildUrl?: string
+  imageRepository?: string
+  imageTag?: string
+  imageDigest?: string
+  targetEnvironmentName: string
+  status: string
+  progress: number
+  agentName: string
+  agentTaskId?: string
+  steps: ReleaseStep[]
+  failures: ReleaseFailure[]
+  actionRecords?: ReleaseActionRecord[]
+  report?: ReleaseReport
+  auditSummary?: ReleaseAuditSummary
+  serviceIds?: string[]
+  serviceNames?: string[]
+  jenkinsId?: string
+  jenkinsJobName?: string
+  jenkinsJobUrl?: string
+  logs?: string[]
 }
 
 export type ReleaseImageTag = {
@@ -53,6 +147,7 @@ export type ReleaseSourceService = {
   privateRegistryHost?: string
   privateRegistryConfirmed: boolean
   jenkinsJobName?: string
+  jenkinsJobUrl?: string
   jenkinsBranch?: string
   jenkinsPipelineBound?: boolean
   pipelineBoundAt?: string
@@ -74,7 +169,7 @@ export type JenkinsPipeline = {
   view?: string
   viewUrl?: string
   url?: string
-  parameters: JenkinsPipelineParameter[]
+  parameters?: JenkinsPipelineParameter[]
 }
 
 export type ReleaseSource = {
@@ -92,63 +187,47 @@ export type ReleaseActionResult = {
   updatedAt?: string
 }
 
-export function listReleaseSources(environmentId: string, keyword = '') {
-  return getDataWithParams<ReleaseSource>('/api/release-sources', { environmentId, keyword })
+export type ListReleaseSourceOptions = {
+  keyword?: string
+  serviceId?: string
+  includeTags?: boolean
 }
 
-export function listReleases() {
-  if (!useMockApi) {
-    return getData<PageResult<typeof releaseMockData.releases[number]>>('/api/releases').then((result) => result.items)
-  }
-  return Promise.resolve(releaseMockData.releases)
+export function listReleaseSources(environmentId: string, options: string | ListReleaseSourceOptions = '') {
+  const params =
+    typeof options === 'string'
+      ? { environmentId, keyword: options }
+      : {
+          environmentId,
+          keyword: options.keyword ?? '',
+          serviceId: options.serviceId ?? '',
+          includeTags: options.includeTags,
+        }
+  return getDataWithParams<ReleaseSource>('/api/release-sources', params)
 }
 
-export function getReleaseDetail(id = 'REL-20260607-031') {
-  if (!useMockApi) {
-    return getData<typeof releaseMockData.releaseDetail>(`/api/releases/${id}`)
-  }
-  return Promise.resolve(releaseMockData.releaseDetail)
+export function listReleases(): Promise<ReleaseOrder[]> {
+  return getData<PageResult<ReleaseOrder>>('/api/releases').then((result) => result.items)
+}
+
+export function listServiceReleases(productId: string, serviceId: string) {
+  return getData<PageResult<ReleaseOrder>>(`/api/environments/${productId}/services/${serviceId}/releases`).then(
+    (result) => result.items,
+  )
+}
+
+export function getReleaseDetail(id: string) {
+  return getData<ReleaseDetail>(`/api/releases/${id}`)
 }
 
 export function createRelease(body: CreateReleaseRequest) {
-  if (!useMockApi) {
-    return postData<CreateReleaseResult>('/api/releases', body)
-  }
-  return Promise.resolve<CreateReleaseResult>({
-    id: 'REL-20260607-MOCK',
-    status: body.releaseSource === 'LOCAL_HARBOR_IMAGE' ? 'PENDING_IMAGE_SYNC' : 'JENKINS_QUEUED',
-    executionMode: body.releaseSource === 'LOCAL_HARBOR_IMAGE' ? 'AGENT_IMAGE_SYNC' : 'JENKINS_AGENT',
-    agentTaskId: 'REL-20260607-MOCK',
-    releaseSource: body.releaseSource,
-    buildId: body.releaseSource === 'LOCAL_HARBOR_IMAGE' ? 'SYNC-MOCK-20260607' : 'BUILD-MOCK-20260607',
-    buildStatus: body.releaseSource === 'LOCAL_HARBOR_IMAGE' ? 'SUCCESS' : 'QUEUED',
-    buildUrl: body.releaseSource === 'JENKINS_JOB' ? 'https://jenkins.local/job/mock-service-release/1' : undefined,
-    createdAt: new Date().toISOString(),
-  })
+  return postData<CreateReleaseResult>('/api/releases', body)
 }
 
 export function retryRelease(id: string) {
-  if (!useMockApi) {
-    return postData<ReleaseActionResult>(`/api/releases/${id}/retry`)
-  }
-  return Promise.resolve<ReleaseActionResult>({
-    releaseId: id,
-    action: 'retry',
-    status: 'RUNNING',
-    message: '已提交失败重试',
-    updatedAt: new Date().toISOString(),
-  })
+  return postData<ReleaseActionResult>(`/api/releases/${id}/retry`)
 }
 
 export function rollbackRelease(id: string) {
-  if (!useMockApi) {
-    return postData<ReleaseActionResult>(`/api/releases/${id}/rollback`)
-  }
-  return Promise.resolve<ReleaseActionResult>({
-    releaseId: id,
-    action: 'rollback',
-    status: 'RUNNING',
-    message: '已提交回滚任务',
-    updatedAt: new Date().toISOString(),
-  })
+  return postData<ReleaseActionResult>(`/api/releases/${id}/rollback`)
 }

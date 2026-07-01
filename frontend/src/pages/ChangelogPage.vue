@@ -20,30 +20,52 @@
           </el-select>
         </div>
       </div>
-      <ChangelogTimeline :items="filteredItems" />
+      <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" />
+      <ChangelogTimeline v-loading="loading" :items="filteredItems" />
     </el-card>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { listChangelog } from '@/api/changelog'
 import ChangelogTimeline from '@/components/ChangelogTimeline.vue'
 import PermissionButton from '@/components/PermissionButton.vue'
-import { changelogMockData } from '@/api/mockData/changelog'
+import { useChangelogStore } from '@/stores/changelogStore'
 
+const changelogStore = useChangelogStore()
 const keyword = ref('')
 const typeFilter = ref('')
+const loading = ref(false)
+const errorMessage = ref('')
 
 const filteredItems = computed(() => {
   const q = keyword.value.trim().toLowerCase()
-  return changelogMockData.changelog.filter((item) => {
+  return changelogStore.items.filter((item) => {
     const typeMatched = !typeFilter.value || item.type === typeFilter.value
     const keywordMatched =
       !q ||
-      `${item.version} ${item.title} ${item.operator} ${item.features.join(' ')} ${item.fixes.join(' ')} ${item.knownIssues.join(' ')}`
+      `${item.title} ${item.description ?? ''} ${item.author ?? ''} ${(item.tags ?? []).join(' ')}`
         .toLowerCase()
         .includes(q)
     return typeMatched && keywordMatched
   })
 })
+
+async function loadData() {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    changelogStore.items = await listChangelog()
+  } catch (error) {
+    changelogStore.items = []
+    errorMessage.value = error instanceof Error ? error.message : '更新日志加载失败'
+    ElMessage.error(errorMessage.value)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(loadData)
 </script>

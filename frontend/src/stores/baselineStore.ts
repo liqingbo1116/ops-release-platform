@@ -1,10 +1,10 @@
 import { defineStore } from 'pinia'
-import { baselineMockData } from '@/api/mockData/baseline'
+import type { BaselineDetailItem, BaselineDiffResult, BaselineListItem } from '@/api/baselines'
 
 export const useBaselineStore = defineStore('baseline', {
   state: () => ({
-    items: baselineMockData.baselines,
-    detail: baselineMockData.baselineDetail,
-    diff: baselineMockData.diffResult,
+    items: [] as BaselineListItem[],
+    detail: null as BaselineDetailItem | null,
+    diff: null as BaselineDiffResult | null,
   }),
 })

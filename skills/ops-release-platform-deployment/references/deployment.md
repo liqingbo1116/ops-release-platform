@@ -188,7 +188,6 @@ The env file should provide:
 - `APP_PORT`
 - `DATABASE_DSN`
 - `REDIS_ADDR`
-- `INTEGRATION_MODE=mock`
 
 `DATABASE_DSN` and `REDIS_ADDR` in this file are the repository's fixed remote development endpoints. Keep them in `.secrets/local-dev-env.ps1` only and do not copy them into tracked files.
 

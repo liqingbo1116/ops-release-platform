@@ -85,12 +85,22 @@ import LogTerminal from '@/components/LogTerminal.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { getAgentTaskStatus, type AgentTaskStatus } from '@/api/agentTasks'
-import { confirmDeployStep, getDeployTaskDetail, retryDeployStep, skipDeployStep } from '@/api/deployTasks'
-import { deployMockData } from '@/api/mockData/deploy'
+import { confirmDeployStep, getDeployTaskDetail, retryDeployStep, skipDeployStep, type DeployDetail } from '@/api/deployTasks'
 
 const route = useRoute()
 const loading = ref(false)
-const deploy = ref({ ...deployMockData.deployDetail })
+const emptyDeployDetail = (id: string): DeployDetail => ({
+  id,
+  productName: '',
+  targetEnvironmentName: '',
+  source: '',
+  status: 'UNKNOWN',
+  progress: 0,
+  steps: [],
+  logs: [],
+  actionRecords: [],
+})
+const deploy = ref<DeployDetail>(emptyDeployDetail(String(route.params.id || '')))
 const agentStatus = ref<AgentTaskStatus | null>(null)
 const retryingStep = ref(false)
 const skippingStep = ref(false)
@@ -141,7 +151,7 @@ const agentStep = computed(() => {
 })
 const agentLogs = computed(() => {
   const logs = agentStatus.value?.logs ?? []
-  return logs.length > 0 ? logs : deploy.value.logs
+  return logs.length > 0 ? logs : (deploy.value.logs ?? [])
 })
 const agentBadge = computed(() => agentStatus.value?.status?.status ?? (agentStatus.value?.enabled === false ? 'disabled' : 'retry #1'))
 const scriptStepCount = computed(() => deploy.value.steps.filter((item) => ['SHELL', 'SQL'].includes(item.type)).length)
@@ -242,8 +252,8 @@ async function loadDeployTask() {
   try {
     deploy.value = await getDeployTaskDetail(deployTaskId.value)
   } catch {
-    ElMessage.warning('加载部署任务详情失败，已显示本地示例数据')
-    deploy.value = { ...deployMockData.deployDetail }
+    ElMessage.error('加载部署任务详情失败，请检查任务是否存在或后端接口是否正常')
+    deploy.value = emptyDeployDetail(deployTaskId.value)
   } finally {
     loading.value = false
   }

@@ -25,10 +25,9 @@ APP_ENV=local
 DATABASE_URL=postgres://ops:ops@postgres:5432/ops_release?sslmode=disable
 REDIS_ADDR=redis:6379
 CREDENTIAL_MASTER_KEY=local-dev-only-change-me
-MOCK_INTEGRATIONS=true
 ```
 
-开发阶段可以先只提交 compose 文件和空服务，等前后端工程生成后再补 Dockerfile。
+开发阶段启动平台服务时也必须连接真实数据库和真实集成配置；缺少外部资源时对应功能应明确不可用。
 
 ## 远程 Agent docker-compose
 
@@ -49,11 +48,11 @@ V1 项目环境 Agent 不跟随平台主 `docker-compose.yml` 部署。Agent 独
 - `agent/.env.example`
 - `agent/README.md`
 
-真实 Jenkins、Harbor/Registry、Kubernetes 准备好之前，Agent 使用 mock executor 验证心跳、任务领取、步骤日志和最终结果回传。
+真实 Jenkins、Harbor/Registry、Kubernetes 准备好之前，Agent 只能完成注册、心跳和配置错误上报，不能以模拟执行结果替代验收。
 
 V1 约束：
 
-- `AGENT_MODE=mock`
+- `AGENT_MODE=remote-probe`
 - `AGENT_MAX_TASKS=1`
 - 同一 Agent 同一时间只执行一个租约任务
 - 租约过期后平台可重新下发任务，避免 Agent 重启或网络中断后任务永久卡住

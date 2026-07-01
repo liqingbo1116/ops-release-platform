@@ -1,16 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 
 	"ops-release-platform/backend/internal/agent"
 	"ops-release-platform/backend/internal/domain"
@@ -18,9 +21,109 @@ import (
 	"ops-release-platform/backend/internal/repository"
 )
 
-var testAgentTokens sync.Map
+type apiRecordingJenkinsAdapter struct{}
 
-func TestCoreMockAPIs(t *testing.T) {
+func (apiRecordingJenkinsAdapter) TriggerBuild(ctx context.Context, req integration.BuildRequest) (integration.BuildResult, error) {
+	if err := ctx.Err(); err != nil {
+		return integration.BuildResult{}, err
+	}
+	return integration.BuildResult{
+		BuildID: "api-test-build",
+		Status:  "QUEUED",
+		URL:     strings.TrimRight(req.JobURL, "/") + "/api-test-build",
+	}, nil
+}
+
+func (apiRecordingJenkinsAdapter) GetBuildStatus(ctx context.Context, req integration.BuildStatusRequest) (integration.BuildStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return integration.BuildStatus{}, err
+	}
+	return integration.BuildStatus{
+		BuildID: req.BuildID,
+		Status:  "SUCCESS",
+		URL:     req.BuildURL,
+	}, nil
+}
+
+func (apiRecordingJenkinsAdapter) GetJobParameters(ctx context.Context, req integration.JobParametersRequest) ([]domain.JenkinsPipelineParameter, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+type apiTestRegistryAdapter struct{}
+
+func (apiTestRegistryAdapter) CheckConnection(ctx context.Context, environment domain.Environment) (integration.IntegrationCheck, error) {
+	if err := ctx.Err(); err != nil {
+		return integration.IntegrationCheck{}, err
+	}
+	return integration.IntegrationCheck{Component: "registry", Status: "HEALTHY", Message: environment.RegistryProject, CheckedAt: time.Now().Format(time.RFC3339)}, nil
+}
+
+func (apiTestRegistryAdapter) ListImageTags(ctx context.Context, environment domain.Environment, repository string) ([]integration.ImageInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []integration.ImageInfo{
+		{Image: repository, Tag: "20260607-a1b2c3", Exists: true},
+		{Image: repository, Tag: "20260627-test", Exists: true},
+	}, nil
+}
+
+func (apiTestRegistryAdapter) GetImage(ctx context.Context, image string, tag string) (integration.ImageInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return integration.ImageInfo{}, err
+	}
+	return integration.ImageInfo{Image: image, Tag: tag, Exists: true}, nil
+}
+
+func (apiTestRegistryAdapter) SyncImage(ctx context.Context, req integration.SyncImageRequest) (integration.SyncImageResult, error) {
+	if err := ctx.Err(); err != nil {
+		return integration.SyncImageResult{}, err
+	}
+	return integration.SyncImageResult{TaskID: "api-test-sync", Status: "SUCCESS", Digest: "sha256:api-test"}, nil
+}
+
+type apiTestKubernetesAdapter struct{}
+
+func (apiTestKubernetesAdapter) CheckConnection(ctx context.Context, environment domain.Environment) (integration.IntegrationCheck, error) {
+	if err := ctx.Err(); err != nil {
+		return integration.IntegrationCheck{}, err
+	}
+	return integration.IntegrationCheck{Component: "kubernetes", Status: "HEALTHY", Message: environment.Namespace, CheckedAt: time.Now().Format(time.RFC3339)}, nil
+}
+
+func (apiTestKubernetesAdapter) ListWorkloads(ctx context.Context, environment domain.Environment) ([]integration.Workload, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []integration.Workload{{
+		Namespace:     environment.Namespace,
+		Name:          "user-service",
+		Type:          "Deployment",
+		Replicas:      1,
+		ReadyReplicas: 1,
+		Containers: []integration.WorkloadContainer{{
+			Name:  "app",
+			Type:  "container",
+			Image: "harbor.local/project-x/user-service:20260627-test",
+		}},
+	}}, nil
+}
+
+func (apiTestKubernetesAdapter) SetImage(ctx context.Context, environmentID string, req integration.SetImageRequest) error {
+	return ctx.Err()
+}
+
+func (apiTestKubernetesAdapter) GetRolloutStatus(ctx context.Context, environmentID string, workload string) (integration.RolloutStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return integration.RolloutStatus{}, err
+	}
+	return integration.RolloutStatus{Workload: workload, Status: "SUCCESS", Replicas: 1, ReadyReplicas: 1}, nil
+}
+
+func TestCoreAPIs(t *testing.T) {
 	router := newTestRouter()
 	tests := []struct {
 		name       string
@@ -32,20 +135,11 @@ func TestCoreMockAPIs(t *testing.T) {
 		{name: "health", method: http.MethodGet, path: "/api/healthz", statusCode: http.StatusOK},
 		{name: "environments", method: http.MethodGet, path: "/api/environments", statusCode: http.StatusOK},
 		{name: "agents", method: http.MethodGet, path: "/api/agents", statusCode: http.StatusOK},
-		{name: "baselines", method: http.MethodGet, path: "/api/baselines", statusCode: http.StatusOK},
-		{name: "create baseline", method: http.MethodPost, path: "/api/baselines", body: `{"sourceEnvironmentId":"env-project-x-prod","name":"project-x-prod-20260608-2200","purpose":"远程部署前快照"}`, statusCode: http.StatusCreated},
-		{name: "baseline detail", method: http.MethodGet, path: "/api/baselines/BL-20260607-0001", statusCode: http.StatusOK},
-		{name: "lock baseline", method: http.MethodPost, path: "/api/baselines/BL-20260607-0002/lock", body: `{}`, statusCode: http.StatusOK},
-		{name: "baseline compare", method: http.MethodPost, path: "/api/baselines/BL-20260607-0001/compare", body: `{"targetEnvironmentId":"env-project-x-prod"}`, statusCode: http.StatusOK},
 		{name: "release list", method: http.MethodGet, path: "/api/releases", statusCode: http.StatusOK},
-		{name: "create release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
-		{name: "create service release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`, statusCode: http.StatusCreated},
+		{name: "create release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"release-pipeline","branch":"main"}}`, statusCode: http.StatusCreated},
+		{name: "create service release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"release-pipeline","branch":"main"}}`, statusCode: http.StatusCreated},
 		{name: "create image release", method: http.MethodPost, path: "/api/releases", body: `{"type":"SERVICE_RELEASE","releaseSource":"LOCAL_HARBOR_IMAGE","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","image":{"repository":"harbor.local/project-x/user-service","tag":"20260607-a1b2c3"}}`, statusCode: http.StatusCreated},
-		{name: "deploy tasks", method: http.MethodGet, path: "/api/deploy-tasks", statusCode: http.StatusOK},
-		{name: "create deploy task", method: http.MethodPost, path: "/api/deploy-tasks", body: `{"type":"SERVICE_DEPLOYMENT","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x"}`, statusCode: http.StatusCreated},
-		{name: "deploy detail", method: http.MethodGet, path: "/api/deploy-tasks/DEP-20260607-009", statusCode: http.StatusOK},
-		{name: "created deploy detail", method: http.MethodGet, path: "/api/deploy-tasks/DEP-20260607-MOCK", statusCode: http.StatusOK},
-		{name: "auth login", method: http.MethodPost, path: "/api/auth/login", body: `{"username":"admin","password":"mock"}`, statusCode: http.StatusOK},
+		{name: "auth login", method: http.MethodPost, path: "/api/auth/login", body: `{"username":"admin","password":"test-password"}`, statusCode: http.StatusOK},
 		{name: "users", method: http.MethodGet, path: "/api/users", statusCode: http.StatusOK},
 		{name: "roles", method: http.MethodGet, path: "/api/roles", statusCode: http.StatusOK},
 		{name: "permissions", method: http.MethodGet, path: "/api/permissions", statusCode: http.StatusOK},
@@ -100,13 +194,139 @@ func TestReleaseDetailUsesCreatedOrderOnly(t *testing.T) {
 	}
 	assertOKResponse(t, detailRecorder.Body.Bytes())
 
-	missingRequest := httptest.NewRequest(http.MethodGet, "/api/releases/REL-20260607-MOCK", nil)
+	missingRequest := httptest.NewRequest(http.MethodGet, "/api/releases/REL-20260607-MISSING", nil)
 	missingRecorder := httptest.NewRecorder()
 	router.ServeHTTP(missingRecorder, missingRequest)
 	if missingRecorder.Code != http.StatusNotFound {
 		t.Fatalf("expected missing release detail status 404, got %d: %s", missingRecorder.Code, missingRecorder.Body.String())
 	}
 	assertErrorResponse(t, missingRecorder.Body.Bytes(), "NOT_FOUND", "release not found")
+}
+
+func TestJenkinsReleaseRefreshesServiceImageFromAgentRuntime(t *testing.T) {
+	router := newTestRouter()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","serviceIds":["svc-user"],"jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected release create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var createPayload struct {
+		Data struct {
+			ID         string   `json:"id"`
+			ServiceIDs []string `json:"serviceIds"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createPayload.Data.ID == "" {
+		t.Fatal("expected release id")
+	}
+	if len(createPayload.Data.ServiceIDs) != 1 || createPayload.Data.ServiceIDs[0] != "svc-user" {
+		t.Fatalf("expected release to keep service binding, got %+v", createPayload.Data.ServiceIDs)
+	}
+	waitForAPITestReleaseBuildStatus(t, router, createPayload.Data.ID, "SUCCESS")
+
+	agentToken := registerAndClaimTestAgent(t, router, "agent-project-x", "env-project-x-prod")
+	heartbeatBody := `{
+		"version":"v1-test",
+		"capabilities":["remote-probe","image-sync","http-check"],
+		"runtimeStatus":{
+			"kubernetes":{
+				"status":"HEALTHY",
+				"workloads":[{
+					"namespace":"project-x",
+					"name":"user-service",
+					"type":"Deployment",
+					"replicas":2,
+					"readyReplicas":2,
+					"containers":[{
+						"name":"user-service",
+						"type":"APP",
+						"image":"harbor.local/project-x/user-service:20260627-test"
+					}]
+				}]
+			}
+		}
+	}`
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(heartbeatBody))
+	heartbeatRequest.Header.Set("Content-Type", "application/json")
+	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentToken)
+	heartbeatRecorder := httptest.NewRecorder()
+	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
+	if heartbeatRecorder.Code != http.StatusOK {
+		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	}
+
+	detailRequest := httptest.NewRequest(http.MethodGet, "/api/releases/"+createPayload.Data.ID, nil)
+	detailRecorder := httptest.NewRecorder()
+	router.ServeHTTP(detailRecorder, detailRequest)
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("expected release detail status 200, got %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	var detailPayload struct {
+		Data domain.ReleaseDetail `json:"data"`
+	}
+	if err := json.Unmarshal(detailRecorder.Body.Bytes(), &detailPayload); err != nil {
+		t.Fatalf("decode release detail response: %v", err)
+	}
+	if detailPayload.Data.ImageRepository != "harbor.local/project-x/user-service" || detailPayload.Data.ImageTag != "20260627-test" {
+		t.Fatalf("expected release image refreshed from agent runtime, got repository=%q tag=%q", detailPayload.Data.ImageRepository, detailPayload.Data.ImageTag)
+	}
+
+	servicesRequest := httptest.NewRequest(http.MethodGet, "/api/environments/env-project-x-prod/services", nil)
+	servicesRecorder := httptest.NewRecorder()
+	router.ServeHTTP(servicesRecorder, servicesRequest)
+	if servicesRecorder.Code != http.StatusOK {
+		t.Fatalf("expected service list status 200, got %d: %s", servicesRecorder.Code, servicesRecorder.Body.String())
+	}
+	var servicesPayload struct {
+		Data struct {
+			Items []domain.ManagedService `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(servicesRecorder.Body.Bytes(), &servicesPayload); err != nil {
+		t.Fatalf("decode service list response: %v", err)
+	}
+	for _, item := range servicesPayload.Data.Items {
+		if item.ID == "svc-user" {
+			if item.ImageRepository != "harbor.local/project-x/user-service" || item.ImageTag != "20260627-test" {
+				t.Fatalf("expected managed service image refreshed from agent runtime, got repository=%q tag=%q", item.ImageRepository, item.ImageTag)
+			}
+			return
+		}
+	}
+	t.Fatal("expected svc-user in managed service list")
+}
+
+func waitForAPITestReleaseBuildStatus(t *testing.T, router http.Handler, releaseID string, status string) domain.ReleaseDetail {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var lastDetail domain.ReleaseDetail
+	for time.Now().Before(deadline) {
+		request := httptest.NewRequest(http.MethodGet, "/api/releases/"+releaseID, nil)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected release detail status 200, got %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var payload struct {
+			Data domain.ReleaseDetail `json:"data"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode release detail response: %v", err)
+		}
+		lastDetail = payload.Data
+		if strings.EqualFold(payload.Data.BuildStatus, status) || strings.EqualFold(payload.Data.Status, status) {
+			return payload.Data
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("expected release %s to reach %s, last status=%s buildStatus=%s", releaseID, status, lastDetail.Status, lastDetail.BuildStatus)
+	return domain.ReleaseDetail{}
 }
 
 func TestAgentTaskStatusWithoutRedis(t *testing.T) {
@@ -128,10 +348,10 @@ func TestAgentTaskStatusWithoutRedis(t *testing.T) {
 	}
 }
 
-func TestAgentProtocolMockFlow(t *testing.T) {
+func TestAgentProtocolFlow(t *testing.T) {
 	router := newTestRouter()
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -150,7 +370,7 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 		t.Fatal("expected agent task id")
 	}
 
-	agentToken := registerTestAgent(t, router, "agent-project-x", "env-project-x-prod")
+	agentToken := registerAndClaimTestAgent(t, router, "agent-project-x", "env-project-x-prod")
 	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"version":"1.3.3","capabilities":["image-sync","kubectl","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
 	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentToken)
@@ -193,7 +413,7 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 		t.Fatalf("expected step status 200, got %d: %s", stepRecorder.Code, stepRecorder.Body.String())
 	}
 
-	logRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/logs", strings.NewReader(`{"line":"sync image mock log"}`))
+	logRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/logs", strings.NewReader(`{"line":"sync image test log"}`))
 	logRequest.Header.Set("Content-Type", "application/json")
 	logRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	logRecorder := httptest.NewRecorder()
@@ -202,7 +422,7 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 		t.Fatalf("expected log status 200, got %d: %s", logRecorder.Code, logRecorder.Body.String())
 	}
 
-	resultRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/result", strings.NewReader(`{"status":"SUCCESS","message":"release mock flow finished"}`))
+	resultRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/"+createPayload.Data.AgentTaskID+"/result", strings.NewReader(`{"status":"SUCCESS","message":"release flow finished"}`))
 	resultRequest.Header.Set("Content-Type", "application/json")
 	resultRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	resultRecorder := httptest.NewRecorder()
@@ -237,7 +457,7 @@ func TestAgentProtocolMockFlow(t *testing.T) {
 func TestAgentTaskLeaseFlow(t *testing.T) {
 	router := newTestRouter()
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -256,8 +476,8 @@ func TestAgentTaskLeaseFlow(t *testing.T) {
 		t.Fatal("expected agent task id")
 	}
 
-	agentToken := registerTestAgent(t, router, "agent-project-x", "env-project-x-prod")
-	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"version":"v1-mock","capabilities":["mock-executor","image-sync","kubectl","http-check"]}`))
+	agentToken := registerAndClaimTestAgent(t, router, "agent-project-x", "env-project-x-prod")
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"version":"v1-test","capabilities":["remote-probe","image-sync","kubectl","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
 	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentToken)
 	heartbeatRecorder := httptest.NewRecorder()
@@ -336,8 +556,8 @@ func TestAgentTaskLeaseReturnsEmptyWhenAgentAlreadyRunningTask(t *testing.T) {
 func TestAgentTaskLeaseRejectsInvalidAgentState(t *testing.T) {
 	router := newTestRouter()
 	_ = createReleaseAgentTask(t, router)
-	projectXToken := registerTestAgent(t, router, "agent-project-x", "env-project-x-prod")
-	projectZToken := "agent-project-z-test-token"
+	projectXToken := registerAndClaimTestAgent(t, router, "agent-project-x", "env-project-x-prod")
+	projectZToken := registerTestAgent(t, router, "agent-project-z", "env-project-z-prod")
 
 	offlineRequest := httptest.NewRequest(http.MethodPost, "/api/agent-tasks/lease", strings.NewReader(`{"agentId":"agent-project-z","environmentId":"env-project-z-prod","maxTasks":1,"leaseSeconds":300}`))
 	offlineRequest.Header.Set("Content-Type", "application/json")
@@ -478,7 +698,7 @@ func TestEnvironmentVerifiedScopesClearDegradedOnSave(t *testing.T) {
 	if _, _, err := repo.UpdateKubernetesClusterProbe("k8s-local-prod", "HEALTHY", "", []string{"default", "project-x", "namespace-later"}, time.Now()); err != nil {
 		t.Fatalf("update kubernetes probe: %v", err)
 	}
-	if _, _, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z", "project-later"}, []string{"mock-release"}, nil, time.Now()); err != nil {
+	if _, _, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z", "project-later"}, []string{"release-pipeline"}, nil, time.Now()); err != nil {
 		t.Fatalf("update jenkins probe: %v", err)
 	}
 
@@ -674,6 +894,9 @@ func TestInferHarborScopeRegistryHost(t *testing.T) {
 	if source := classifyImageSource(image, got); source != "PRIVATE" {
 		t.Fatalf("expected private image after registry inference, got %q", source)
 	}
+	if image.Repository != "reg.example.org:5000/project-x/app" || image.Tag != "v1" {
+		t.Fatalf("expected full image repository without tag, got repository=%q tag=%q", image.Repository, image.Tag)
+	}
 }
 
 func TestResourceRefreshFailureKeepsPreviousCache(t *testing.T) {
@@ -740,7 +963,7 @@ func TestResourceRefreshFailureKeepsPreviousCache(t *testing.T) {
 func TestAgentHeartbeatRejectsUnknownEnvironment(t *testing.T) {
 	router := newTestRouter()
 	agentToken := registerTestAgent(t, router, "agent-new", "")
-	request := httptest.NewRequest(http.MethodPost, "/api/agents/agent-new/heartbeat", strings.NewReader(`{"environmentId":"env-missing","version":"v1-mock","capabilities":["mock-executor"]}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/agents/agent-new/heartbeat", strings.NewReader(`{"environmentId":"env-missing","version":"v1-test","capabilities":["remote-probe"]}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+agentToken)
 	recorder := httptest.NewRecorder()
@@ -762,7 +985,7 @@ func TestAgentHeartbeatRejectsEnvironmentRebind(t *testing.T) {
 		t.Fatalf("expected create environment status 201, got %d: %s", createEnvironmentRecorder.Code, createEnvironmentRecorder.Body.String())
 	}
 
-	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"environmentId":"env-remote-agent-rebind-test","version":"v1-mock","capabilities":["mock-executor","http-check"]}`))
+	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-project-x/heartbeat", strings.NewReader(`{"environmentId":"env-remote-agent-rebind-test","version":"v1-test","capabilities":["remote-probe","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
 	heartbeatRequest.Header.Set("Authorization", "Bearer "+agentTokenForTest(t, router, "agent-project-x", "env-project-x-prod"))
 	heartbeatRecorder := httptest.NewRecorder()
@@ -899,7 +1122,7 @@ func TestAgentRegisterClaimHeartbeatAndLeaseFlow(t *testing.T) {
 		t.Fatalf("expected heartbeat to return claimed environment, got %+v", heartbeatPayload.Data.Agent)
 	}
 
-	createReleaseRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"`+environmentID+`","agentId":"`+agentID+`","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	createReleaseRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"`+environmentID+`","agentId":"`+agentID+`","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	createReleaseRequest.Header.Set("Content-Type", "application/json")
 	createReleaseRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createReleaseRecorder, createReleaseRequest)
@@ -969,7 +1192,7 @@ func TestEnvironmentRemoteProbeRequiresClaimedOnlineAgent(t *testing.T) {
 func TestEnvironmentRemoteProbeEnqueuesTaskForClaimedOnlineAgent(t *testing.T) {
 	router := newTestRouter()
 	createProjectProbeEnvironment(t, router, "env-probe-task", "probe-task", "project-x")
-	agentToken := registerTestAgent(t, router, "agent-probe-x", "env-probe-task")
+	agentToken := registerAndClaimTestAgent(t, router, "agent-probe-x", "env-probe-task")
 
 	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-probe-x/heartbeat", strings.NewReader(`{"version":"v1-remote-probe","capabilities":["remote-probe","kubectl","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
@@ -978,14 +1201,6 @@ func TestEnvironmentRemoteProbeEnqueuesTaskForClaimedOnlineAgent(t *testing.T) {
 	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
 	if heartbeatRecorder.Code != http.StatusOK {
 		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
-	}
-
-	claimRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-probe-x/claim", strings.NewReader(`{"environmentId":"env-probe-task"}`))
-	claimRequest.Header.Set("Content-Type", "application/json")
-	claimRecorder := httptest.NewRecorder()
-	router.ServeHTTP(claimRecorder, claimRequest)
-	if claimRecorder.Code != http.StatusOK {
-		t.Fatalf("expected claim status 200, got %d: %s", claimRecorder.Code, claimRecorder.Body.String())
 	}
 
 	probeRequest := httptest.NewRequest(http.MethodPost, "/api/environments/env-probe-task/remote-probe", nil)
@@ -1030,7 +1245,7 @@ func TestEnvironmentRemoteProbeEnqueuesTaskForClaimedOnlineAgent(t *testing.T) {
 func TestEnvironmentRemoteProbeResultUpdatesEnvironmentStatus(t *testing.T) {
 	router := newTestRouter()
 	createProjectProbeEnvironment(t, router, "env-probe-result", "probe-result", "project-x")
-	agentToken := registerTestAgent(t, router, "agent-probe-result-x", "env-probe-result")
+	agentToken := registerAndClaimTestAgent(t, router, "agent-probe-result-x", "env-probe-result")
 
 	heartbeatRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-probe-result-x/heartbeat", strings.NewReader(`{"version":"v1-remote-probe","capabilities":["remote-probe","kubectl","http-check"]}`))
 	heartbeatRequest.Header.Set("Content-Type", "application/json")
@@ -1039,14 +1254,6 @@ func TestEnvironmentRemoteProbeResultUpdatesEnvironmentStatus(t *testing.T) {
 	router.ServeHTTP(heartbeatRecorder, heartbeatRequest)
 	if heartbeatRecorder.Code != http.StatusOK {
 		t.Fatalf("expected heartbeat status 200, got %d: %s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
-	}
-
-	claimRequest := httptest.NewRequest(http.MethodPost, "/api/agents/agent-probe-result-x/claim", strings.NewReader(`{"environmentId":"env-probe-result"}`))
-	claimRequest.Header.Set("Content-Type", "application/json")
-	claimRecorder := httptest.NewRecorder()
-	router.ServeHTTP(claimRecorder, claimRequest)
-	if claimRecorder.Code != http.StatusOK {
-		t.Fatalf("expected claim status 200, got %d: %s", claimRecorder.Code, claimRecorder.Body.String())
 	}
 
 	probeRequest := httptest.NewRequest(http.MethodPost, "/api/environments/env-probe-result/remote-probe", nil)
@@ -1120,7 +1327,7 @@ func TestEnvironmentRemoteProbeResultUpdatesEnvironmentStatus(t *testing.T) {
 func TestReleaseFailureActionsUpdateAgentTaskStatus(t *testing.T) {
 	router := newTestRouter()
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRecorder := httptest.NewRecorder()
 	router.ServeHTTP(createRecorder, createRequest)
@@ -1194,7 +1401,7 @@ func TestDeployStepActionsUpdateAgentTaskStatus(t *testing.T) {
 	}
 }
 
-func TestEnvironmentCheckUsesCachedScopesWithMockIntegrations(t *testing.T) {
+func TestEnvironmentCheckUsesCachedScopesWithRealIntegrationAdapters(t *testing.T) {
 	router := newTestRouter()
 	request := httptest.NewRequest(http.MethodPost, "/api/environments/env-local-prod/check", nil)
 	recorder := httptest.NewRecorder()
@@ -1307,7 +1514,7 @@ func TestLocalEnvironmentMissingNamespaceIsListedAsDegraded(t *testing.T) {
 
 func TestCreateReleaseReturnsAgentTaskID(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -1502,7 +1709,7 @@ func TestCreateBaselineReturnsRuntimeSnapshot(t *testing.T) {
 	if payload.Data.ID == "" || payload.Data.ServiceCount == 0 {
 		t.Fatalf("expected generated baseline snapshot, got %+v", payload.Data)
 	}
-	if payload.Data.SnapshotSource == "" || payload.Data.SnapshotCollectedAt == "" || payload.Data.SnapshotMode != "MOCK_RUNTIME" || payload.Data.SnapshotTaskID == "" {
+	if payload.Data.SnapshotSource == "" || payload.Data.SnapshotCollectedAt == "" || payload.Data.SnapshotMode != "REAL_RUNTIME" || payload.Data.SnapshotTaskID == "" {
 		t.Fatalf("expected runtime snapshot metadata, got %+v", payload.Data)
 	}
 }
@@ -1536,7 +1743,7 @@ func TestLockBaselineUpdatesStatus(t *testing.T) {
 
 func TestCreateReleaseRejectsOfflineAgent(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-z-prod","agentId":"agent-project-z","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-z-prod","agentId":"agent-project-z","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -1549,7 +1756,7 @@ func TestCreateReleaseRejectsOfflineAgent(t *testing.T) {
 
 func TestCreateReleaseRejectsAgentEnvironmentMismatch(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-y","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-y","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -1588,7 +1795,7 @@ func TestCreateDeployTaskRejectsAgentEnvironmentMismatch(t *testing.T) {
 
 func TestCreateReleaseRejectsSourceBaseline(t *testing.T) {
 	router := newTestRouter()
-	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","serviceIds":["svc-user"],"jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","sourceBaselineId":"BL-20260607-0001","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","serviceIds":["svc-user"],"jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -1633,7 +1840,7 @@ func TestCreateReleaseReturnsForbiddenWithoutEnvironmentPermission(t *testing.T)
 		Roles:       []string{"VIEWER"},
 		Permissions: []string{},
 	})
-	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -1697,7 +1904,7 @@ type leaseResponsePayload struct {
 
 func createReleaseAgentTask(t *testing.T, router http.Handler) string {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"mock-release","branch":"main"}}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/releases", strings.NewReader(`{"type":"SERVICE_RELEASE","releaseSource":"JENKINS_JOB","targetEnvironmentId":"env-project-x-prod","agentId":"agent-project-x","jenkins":{"jobName":"release-pipeline","branch":"main"}}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
@@ -1721,7 +1928,7 @@ func createReleaseAgentTask(t *testing.T, router http.Handler) string {
 func heartbeatAgent(t *testing.T, router http.Handler, agentID string) {
 	t.Helper()
 	agentToken := agentTokenForTest(t, router, agentID, "env-project-x-prod")
-	request := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/heartbeat", strings.NewReader(`{"version":"v1-mock","capabilities":["mock-executor","image-sync","kubectl","http-check"]}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/heartbeat", strings.NewReader(`{"version":"v1-test","capabilities":["remote-probe","image-sync","kubectl","http-check"]}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+agentToken)
 	recorder := httptest.NewRecorder()
@@ -1762,17 +1969,11 @@ func agentTokenForLeaseBody(t *testing.T, router http.Handler, body string) stri
 
 func agentTokenForTest(t *testing.T, router http.Handler, agentID string, environmentID string) string {
 	t.Helper()
-	if value, ok := testAgentTokens.Load(agentID); ok {
-		return value.(string)
-	}
-	return registerTestAgent(t, router, agentID, environmentID)
+	return registerAndClaimTestAgent(t, router, agentID, environmentID)
 }
 
 func registerTestAgent(t *testing.T, router http.Handler, agentID string, environmentID string) string {
 	t.Helper()
-	if value, ok := testAgentTokens.Load(agentID); ok {
-		return value.(string)
-	}
 	createTokenRequest := httptest.NewRequest(http.MethodPost, "/api/agents/register-token", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","ttlMinutes":10}`))
 	createTokenRequest.Header.Set("Content-Type", "application/json")
 	createTokenRecorder := httptest.NewRecorder()
@@ -1792,7 +1993,7 @@ func registerTestAgent(t *testing.T, router http.Handler, agentID string, enviro
 		t.Fatal("expected register token")
 	}
 
-	registerRequest := httptest.NewRequest(http.MethodPost, "/api/agents/register", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","registerToken":"`+tokenPayload.Data.Token+`","version":"v1-test","capabilities":["mock-executor","image-sync","kubectl","http-check"]}`))
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/agents/register", strings.NewReader(`{"agentId":"`+agentID+`","environmentId":"`+environmentID+`","registerToken":"`+tokenPayload.Data.Token+`","version":"v1-test","capabilities":["remote-probe","image-sync","kubectl","http-check"]}`))
 	registerRequest.Header.Set("Content-Type", "application/json")
 	registerRecorder := httptest.NewRecorder()
 	router.ServeHTTP(registerRecorder, registerRequest)
@@ -1810,8 +2011,23 @@ func registerTestAgent(t *testing.T, router http.Handler, agentID string, enviro
 	if registerPayload.Data.AgentToken == "" {
 		t.Fatal("expected agent runtime token")
 	}
-	testAgentTokens.Store(agentID, registerPayload.Data.AgentToken)
 	return registerPayload.Data.AgentToken
+}
+
+func registerAndClaimTestAgent(t *testing.T, router http.Handler, agentID string, environmentID string) string {
+	t.Helper()
+	agentToken := registerTestAgent(t, router, agentID, environmentID)
+	if strings.TrimSpace(environmentID) == "" {
+		return agentToken
+	}
+	claimRequest := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/claim", strings.NewReader(`{"environmentId":"`+environmentID+`"}`))
+	claimRequest.Header.Set("Content-Type", "application/json")
+	claimRecorder := httptest.NewRecorder()
+	router.ServeHTTP(claimRecorder, claimRequest)
+	if claimRecorder.Code != http.StatusOK {
+		t.Fatalf("expected claim status 200, got %d: %s", claimRecorder.Code, claimRecorder.Body.String())
+	}
+	return agentToken
 }
 
 func createProjectProbeEnvironment(t *testing.T, router http.Handler, id string, code string, scope string) {
@@ -1830,46 +2046,57 @@ func newTestRouter() http.Handler {
 	return newTestRouterWithRepository(newTestRepository())
 }
 
-func newTestRepository() *repository.MockRepository {
-	repo, err := repository.NewMockRepository()
+func newTestRepository() repository.Store {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:ops-release-api-test-%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
 	if err != nil {
 		panic(err)
 	}
+	if err := repository.AutoMigrate(db); err != nil {
+		panic(err)
+	}
+	repo := repository.NewDatabaseStore(db)
 	seedTestEnvironments(repo)
-	seedTestAgentTokens()
 	return repo
 }
 
-func seedTestAgentTokens() {
-	testAgentTokens.Range(func(key any, _ any) bool {
-		testAgentTokens.Delete(key)
-		return true
-	})
-	testAgentTokens.Store("agent-project-x", "agent-project-x-test-token")
-	testAgentTokens.Store("agent-project-y", "agent-project-y-test-token")
-	testAgentTokens.Store("agent-project-z", "agent-project-z-test-token")
+func newTestRouterWithRepository(repo repository.Store) http.Handler {
+	integrations := integration.Suite{
+		Jenkins:    apiRecordingJenkinsAdapter{},
+		Registry:   apiTestRegistryAdapter{},
+		Kubernetes: apiTestKubernetesAdapter{},
+	}
+	return NewRouter(repo, nil, agent.NewProtocolStore(), integrations)
 }
 
-func newTestRouterWithRepository(repo repository.Store) http.Handler {
-	return NewRouter(repo, nil, agent.NewProtocolStore(), integration.NewMockSuite())
+type permissionTestStore struct {
+	repository.Store
+	user domain.CurrentUser
+}
+
+func (s permissionTestStore) GetCurrentUser() domain.CurrentUser {
+	return s.user
+}
+
+func (s permissionTestStore) HasEnvironmentAction(environmentID string, action string) bool {
+	return false
 }
 
 func newPermissionTestRouter(t *testing.T, user domain.CurrentUser) http.Handler {
 	t.Helper()
-	repo, err := repository.NewMockRepository()
-	if err != nil {
-		t.Fatalf("load mock repository: %v", err)
+	repo := newTestRepository()
+	integrations := integration.Suite{
+		Jenkins:    apiRecordingJenkinsAdapter{},
+		Registry:   apiTestRegistryAdapter{},
+		Kubernetes: apiTestKubernetesAdapter{},
 	}
-	seedTestEnvironments(repo)
-	repo.SetCurrentUserForTest(user)
-	handler := NewHandler(repo, nil, agent.NewProtocolStore(), integration.NewMockSuite())
+	handler := NewHandler(permissionTestStore{Store: repo, user: user}, nil, agent.NewProtocolStore(), integrations)
 	router := gin.New()
 	router.POST("/api/releases", handler.CreateRelease)
 	router.POST("/api/deploy-tasks", handler.CreateDeployTask)
 	return router
 }
 
-func seedTestEnvironments(repo *repository.MockRepository) {
+func seedTestEnvironments(repo repository.Store) {
 	if _, err := repo.CreateKubernetesCluster(domain.KubernetesCluster{
 		ID:        "k8s-local-prod",
 		Name:      "本地生产 K8s",
@@ -1897,7 +2124,19 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 	if _, ok, err := repo.UpdateHarborRegistryProbe("harbor-local-prod", "HEALTHY", "", []string{"project-x"}, "", time.Now()); err != nil || !ok {
 		panic("seed harbor probe failed")
 	}
-	if _, ok, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z"}, []string{"mock-release"}, nil, time.Now()); err != nil || !ok {
+	pipelines := []domain.JenkinsPipeline{
+		{
+			Name: "release-pipeline",
+			URL:  "https://jenkins.local/job/project-x/job/release-pipeline",
+			View: "project-x",
+		},
+		{
+			Name: "release-pipeline",
+			URL:  "https://jenkins.local/job/project-z/job/release-pipeline",
+			View: "project-z",
+		},
+	}
+	if _, ok, err := repo.UpdateJenkinsInstanceProbe("jenkins-local-prod", "HEALTHY", "", []string{"project-x", "project-z"}, []string{"release-pipeline"}, pipelines, time.Now()); err != nil || !ok {
 		panic("seed jenkins probe failed")
 	}
 	items := []domain.Environment{
@@ -1948,6 +2187,120 @@ func seedTestEnvironments(repo *repository.MockRepository) {
 		if _, err := repo.CreateEnvironment(item); err != nil {
 			panic(err)
 		}
+	}
+	if _, ok := repo.UpsertAgent("agent-project-x", "env-project-x-prod", "v1-test", []string{"remote-probe", "image-sync", "http-check"}, "ONLINE"); !ok {
+		panic("seed agent project x failed")
+	}
+	if _, ok := repo.UpsertAgent("agent-project-y", "", "v1-test", []string{"remote-probe"}, "ONLINE"); !ok {
+		panic("seed agent project y failed")
+	}
+	if _, ok := repo.UpsertAgent("agent-project-z", "env-project-z-prod", "v1-test", []string{"remote-probe"}, "OFFLINE"); !ok {
+		panic("seed agent project z failed")
+	}
+	seedTestServices(repo)
+	if _, err := repo.CreateBaseline("env-project-x-prod", "project-x-prod-20260607-0001", "api test baseline"); err != nil {
+		panic(err)
+	}
+	if _, err := repo.CreateBaseline("env-project-x-prod", "project-x-prod-20260607-0002", "api test baseline for lock"); err != nil {
+		panic(err)
+	}
+}
+
+func seedTestServices(repo repository.Store) {
+	source := []domain.DiscoveredService{
+		{
+			ID:              "svc-user",
+			Name:            "用户服务",
+			Namespace:       "project-x",
+			WorkloadName:    "user-service",
+			WorkloadType:    "Deployment",
+			ContainerName:   "user-service",
+			ContainerType:   "APP",
+			Image:           "harbor.local/project-x/user-service:20260607-a1b2c3",
+			ImageRegistry:   "harbor.local",
+			ImageProject:    "project-x",
+			ImageRepository: "harbor.local/project-x/user-service",
+			ImageTag:        "20260607-a1b2c3",
+			ImageSource:     "PRIVATE",
+			Replicas:        2,
+			ReadyReplicas:   2,
+		},
+		{
+			ID:              "svc-order",
+			Name:            "订单服务",
+			Namespace:       "project-x",
+			WorkloadName:    "order-service",
+			WorkloadType:    "StatefulSet",
+			ContainerName:   "order-service",
+			ContainerType:   "APP",
+			Image:           "harbor.local/project-x/order-service:20260607-a1b2c3",
+			ImageRegistry:   "harbor.local",
+			ImageProject:    "project-x",
+			ImageRepository: "harbor.local/project-x/order-service",
+			ImageTag:        "20260607-a1b2c3",
+			ImageSource:     "PRIVATE",
+			Replicas:        1,
+			ReadyReplicas:   1,
+		},
+		{
+			ID:              "svc-web",
+			Name:            "前端服务",
+			Namespace:       "project-x",
+			WorkloadName:    "web",
+			WorkloadType:    "Deployment",
+			ContainerName:   "web",
+			ContainerType:   "APP",
+			Image:           "harbor.local/project-x/web:20260607-a1b2c3",
+			ImageRegistry:   "harbor.local",
+			ImageProject:    "project-x",
+			ImageRepository: "harbor.local/project-x/web",
+			ImageTag:        "20260607-a1b2c3",
+			ImageSource:     "PRIVATE",
+			Replicas:        1,
+			ReadyReplicas:   1,
+		},
+	}
+	target := []domain.DiscoveredService{
+		{
+			ID:              "svc-z-user",
+			Name:            "用户服务",
+			Namespace:       "project-z",
+			WorkloadName:    "user-service",
+			WorkloadType:    "Deployment",
+			ContainerName:   "user-service",
+			ContainerType:   "APP",
+			Image:           "harbor.local/project-z/user-service:20260606-old",
+			ImageRegistry:   "harbor.local",
+			ImageProject:    "project-z",
+			ImageRepository: "harbor.local/project-z/user-service",
+			ImageTag:        "20260606-old",
+			ImageSource:     "PRIVATE",
+			Replicas:        2,
+			ReadyReplicas:   2,
+		},
+		{
+			ID:              "svc-z-order",
+			Name:            "订单服务",
+			Namespace:       "project-z",
+			WorkloadName:    "order-service",
+			WorkloadType:    "StatefulSet",
+			ContainerName:   "order-service",
+			ContainerType:   "APP",
+			Image:           "harbor.local/project-z/order-service:20260607-a1b2c3",
+			ImageRegistry:   "harbor.local",
+			ImageProject:    "project-z",
+			ImageRepository: "harbor.local/project-z/order-service",
+			ImageTag:        "20260607-a1b2c3",
+			ImageSource:     "PRIVATE",
+			Replicas:        1,
+			ReadyReplicas:   1,
+		},
+	}
+	if _, err := repo.UpsertManagedServices("env-project-x-prod", source); err != nil {
+		panic(err)
+	}
+	if _, err := repo.UpsertManagedServices("env-project-z-prod", target); err != nil {
+		panic(err)
 	}
 }
 

@@ -1,10 +1,10 @@
 import { defineStore } from 'pinia'
-import { userMockData } from '@/api/mockData/user'
+import type { EnvironmentPermission, RoleInfo, UserInfo } from '@/api/users'
 
 export const useUserStore = defineStore('user', {
   state: () => ({
-    users: userMockData.users,
-    roles: userMockData.roles,
-    permissions: userMockData.permissions,
+    users: [] as UserInfo[],
+    roles: [] as RoleInfo[],
+    permissions: [] as EnvironmentPermission[],
   }),
 })

@@ -1,16 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
-import { getCurrentUser, login as loginApi, logout as logoutApi } from '@/api/auth'
-import { authMockData } from '@/api/mockData/auth'
-
-type CurrentUser = typeof authMockData.currentUser
+import { getCurrentUser, login as loginApi, logout as logoutApi, type CurrentUser } from '@/api/auth'
 
 const tokenKey = 'ops-release-token'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem(tokenKey) ?? '')
-  const user = ref<CurrentUser | null>(token.value ? authMockData.currentUser : null)
+  const user = ref<CurrentUser | null>(null)
   const isAuthenticated = computed(() => Boolean(token.value))
 
   async function login(username: string, password: string) {

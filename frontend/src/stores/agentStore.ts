@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
-import { agentMockData } from '@/api/mockData/agent'
+import type { AgentInfo } from '@/api/agents'
 
 export const useAgentStore = defineStore('agent', {
   state: () => ({
-    items: agentMockData.agents,
+    items: [] as AgentInfo[],
   }),
 })

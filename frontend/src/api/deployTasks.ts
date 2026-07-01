@@ -1,12 +1,59 @@
-import { deployMockData } from './mockData/deploy'
-import { getData, postData, type PageResult, useMockApi } from './client'
+import { getData, postData, type PageResult } from './client'
+
+export type DeployTask = {
+  id: string
+  type?: string
+  releaseId?: string
+  productName?: string
+  targetEnvironmentName: string
+  sourceBaselineId?: string
+  source?: string
+  status: string
+  progress: number
+  serviceNames?: string[]
+  missingServices?: string[]
+  missingServiceCount?: number
+  currentStep?: string
+  agentName?: string
+  agentTaskId?: string
+  nextAction?: string
+  createdAt?: string
+}
+
+export type DeployDetail = DeployTask & {
+  agentTaskId?: string
+  steps: Array<{
+    id?: string
+    order?: number
+    name: string
+    type: string
+    status: string
+    message?: string
+    startedAt?: string
+    finishedAt?: string
+  }>
+  logs?: string[]
+  actionRecords?: Array<{
+    occurredAt: string
+    action: string
+    operator: string
+    status: string
+    message?: string
+  }>
+  auditSummary?: {
+    operator?: string
+    targetEnvironmentName?: string
+    affectedServices?: string[]
+    result?: string
+    failedStep?: string
+    lastAction?: string
+    lastActionAt?: string
+  }
+}
 
 export async function listDeployTasks() {
-  if (!useMockApi) {
-    const result = await getData<PageResult<typeof deployMockData.deployTasks[number]>>('/api/deploy-tasks')
-    return result.items
-  }
-  return Promise.resolve(deployMockData.deployTasks)
+  const result = await getData<PageResult<DeployTask>>('/api/deploy-tasks')
+  return result.items
 }
 
 export type CreateDeployTaskResult = {
@@ -26,64 +73,22 @@ export type DeployStepActionResult = {
   updatedAt?: string
 }
 
-export function getDeployTaskDetail(id = 'DEP-20260607-009') {
-  if (!useMockApi) {
-    return getData<typeof deployMockData.deployDetail>(`/api/deploy-tasks/${id}`)
-  }
-  return Promise.resolve(deployMockData.deployDetail)
+export function getDeployTaskDetail(id: string) {
+  return getData<DeployDetail>(`/api/deploy-tasks/${id}`)
 }
 
 export function createDeployTask(body: unknown = {}) {
-  if (!useMockApi) {
-    return postData<CreateDeployTaskResult>('/api/deploy-tasks', body)
-  }
-  return Promise.resolve<CreateDeployTaskResult>({
-    id: 'DEP-20260607-MOCK',
-    status: 'PENDING',
-    executionMode: 'AGENT',
-    agentTaskId: 'DEP-20260607-MOCK',
-    createdAt: new Date().toISOString(),
-  })
+  return postData<CreateDeployTaskResult>('/api/deploy-tasks', body)
 }
 
 export function retryDeployStep(taskId: string, stepId: string) {
-  if (!useMockApi) {
-    return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/retry`)
-  }
-  return Promise.resolve<DeployStepActionResult>({
-    taskId,
-    stepId,
-    action: 'retry',
-    status: 'RUNNING',
-    message: '已提交步骤重试',
-    updatedAt: new Date().toISOString(),
-  })
+  return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/retry`)
 }
 
 export function skipDeployStep(taskId: string, stepId: string) {
-  if (!useMockApi) {
-    return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/skip`)
-  }
-  return Promise.resolve<DeployStepActionResult>({
-    taskId,
-    stepId,
-    action: 'skip',
-    status: 'RUNNING',
-    message: '已提交步骤跳过',
-    updatedAt: new Date().toISOString(),
-  })
+  return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/skip`)
 }
 
 export function confirmDeployStep(taskId: string, stepId: string) {
-  if (!useMockApi) {
-    return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/confirm`)
-  }
-  return Promise.resolve<DeployStepActionResult>({
-    taskId,
-    stepId,
-    action: 'confirm',
-    status: 'RUNNING',
-    message: '已提交人工确认',
-    updatedAt: new Date().toISOString(),
-  })
+  return postData<DeployStepActionResult>(`/api/deploy-tasks/${taskId}/steps/${stepId}/confirm`)
 }

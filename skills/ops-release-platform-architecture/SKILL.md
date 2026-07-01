@@ -26,8 +26,8 @@ Use this skill before changing project structure, module boundaries, or third-pa
 
 - Handlers should stay thin as orchestration grows; introduce `internal/service` when business workflow becomes non-trivial.
 - Third-party calls must go through `backend/internal/integration` interfaces.
-- Mock adapters are the default; real adapters require explicit user instruction.
-- Redis Stream remains the task queue boundary for mock Agent behavior.
+- Runtime mock adapters are forbidden on the V1 mainline; third-party integration must use real adapters or return an explicit blocker.
+- Redis Stream remains the task queue boundary for platform-to-Agent task handoff.
 - PostgreSQL/GORM models belong in `backend/internal/repository`.
 - Do not put real infrastructure credentials in source, docs, or skills.
 - For TODO selection, use `ops-release-platform-todo`.

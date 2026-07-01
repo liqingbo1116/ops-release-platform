@@ -9,8 +9,8 @@
     </div>
 
     <el-card shadow="never">
-      <el-table :data="userMockData.roles" class="wide-table">
-        <el-table-column prop="code" label="角色编码" min-width="160" />
+      <el-table v-loading="loading" :data="rows" class="wide-table">
+        <el-table-column prop="id" label="角色编码" min-width="160" />
         <el-table-column prop="name" label="角色名称" min-width="140" />
         <el-table-column prop="description" label="说明" min-width="280" />
         <el-table-column label="权限" min-width="260">
@@ -22,6 +22,25 @@
 </template>
 
 <script setup lang="ts">
+import { ElMessage } from 'element-plus'
+import { onMounted, ref } from 'vue'
+import { listRoles, type RoleInfo } from '@/api/users'
 import PermissionButton from '@/components/PermissionButton.vue'
-import { userMockData } from '@/api/mockData/user'
+
+const loading = ref(false)
+const rows = ref<RoleInfo[]>([])
+
+async function loadRows() {
+  loading.value = true
+  try {
+    rows.value = await listRoles()
+  } catch {
+    ElMessage.error('加载角色失败')
+    rows.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(loadRows)
 </script>

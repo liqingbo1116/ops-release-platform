@@ -143,7 +143,7 @@ type JenkinsPipeline struct {
 	View       string                     `json:"view,omitempty"`
 	ViewURL    string                     `json:"viewUrl,omitempty"`
 	URL        string                     `json:"url,omitempty"`
-	Parameters []JenkinsPipelineParameter `json:"parameters"`
+	Parameters []JenkinsPipelineParameter `json:"parameters,omitempty"`
 }
 
 type Agent struct {
@@ -283,6 +283,7 @@ type ReleaseSourceService struct {
 	PrivateRegistryHost      string            `json:"privateRegistryHost,omitempty"`
 	PrivateRegistryConfirmed bool              `json:"privateRegistryConfirmed"`
 	JenkinsJobName           string            `json:"jenkinsJobName,omitempty"`
+	JenkinsJobURL            string            `json:"jenkinsJobUrl,omitempty"`
 	JenkinsBranch            string            `json:"jenkinsBranch,omitempty"`
 	JenkinsPipelineBound     bool              `json:"jenkinsPipelineBound"`
 	PipelineBoundAt          string            `json:"pipelineBoundAt,omitempty"`
@@ -309,6 +310,7 @@ type ManagedService struct {
 	PrivateRegistryHost      string `json:"privateRegistryHost,omitempty"`
 	PrivateRegistryConfirmed bool   `json:"privateRegistryConfirmed"`
 	JenkinsJobName           string `json:"jenkinsJobName,omitempty"`
+	JenkinsJobURL            string `json:"jenkinsJobUrl,omitempty"`
 	JenkinsBranch            string `json:"jenkinsBranch,omitempty"`
 	JenkinsPipelineBound     bool   `json:"jenkinsPipelineBound"`
 	PipelineBoundAt          string `json:"pipelineBoundAt,omitempty"`
@@ -354,6 +356,7 @@ type ConfirmServiceRegistryInput struct {
 
 type BindServicePipelineInput struct {
 	JenkinsJobName string `json:"jenkinsJobName"`
+	JenkinsJobURL  string `json:"jenkinsJobUrl"`
 	JenkinsBranch  string `json:"jenkinsBranch"`
 }
 
@@ -405,21 +408,27 @@ type AuditSummary struct {
 }
 
 type ReleaseOrder struct {
-	ID                    string `json:"id"`
-	Type                  string `json:"type"`
-	SourceBaselineID      string `json:"sourceBaselineId,omitempty"`
-	ReleaseSource         string `json:"releaseSource,omitempty"`
-	ExecutionMode         string `json:"executionMode,omitempty"`
-	BuildID               string `json:"buildId,omitempty"`
-	BuildStatus           string `json:"buildStatus,omitempty"`
-	BuildURL              string `json:"buildUrl,omitempty"`
-	ImageRepository       string `json:"imageRepository,omitempty"`
-	ImageTag              string `json:"imageTag,omitempty"`
-	ImageDigest           string `json:"imageDigest,omitempty"`
-	TargetEnvironmentName string `json:"targetEnvironmentName"`
-	Status                string `json:"status"`
-	Progress              int    `json:"progress"`
-	AgentName             string `json:"agentName"`
+	ID                    string   `json:"id"`
+	Type                  string   `json:"type"`
+	SourceBaselineID      string   `json:"sourceBaselineId,omitempty"`
+	ReleaseSource         string   `json:"releaseSource,omitempty"`
+	ExecutionMode         string   `json:"executionMode,omitempty"`
+	BuildID               string   `json:"buildId,omitempty"`
+	BuildStatus           string   `json:"buildStatus,omitempty"`
+	BuildURL              string   `json:"buildUrl,omitempty"`
+	JenkinsID             string   `json:"jenkinsId,omitempty"`
+	JenkinsJobName        string   `json:"jenkinsJobName,omitempty"`
+	JenkinsJobURL         string   `json:"jenkinsJobUrl,omitempty"`
+	ImageRepository       string   `json:"imageRepository,omitempty"`
+	ImageTag              string   `json:"imageTag,omitempty"`
+	ImageDigest           string   `json:"imageDigest,omitempty"`
+	TargetEnvironmentID   string   `json:"targetEnvironmentId,omitempty"`
+	TargetEnvironmentName string   `json:"targetEnvironmentName"`
+	Status                string   `json:"status"`
+	Progress              int      `json:"progress"`
+	AgentName             string   `json:"agentName"`
+	ServiceIDs            []string `json:"serviceIds,omitempty"`
+	ServiceNames          []string `json:"serviceNames,omitempty"`
 }
 
 type CreateReleaseOrderInput struct {
@@ -431,6 +440,9 @@ type CreateReleaseOrderInput struct {
 	BuildID              string
 	BuildStatus          string
 	BuildURL             string
+	JenkinsID            string
+	JenkinsJobName       string
+	JenkinsJobURL        string
 	ImageRepository      string
 	ImageTag             string
 	ImageDigest          string
@@ -439,6 +451,8 @@ type CreateReleaseOrderInput struct {
 	Status               string
 	Progress             int
 	SelectedServiceCount int
+	ServiceIDs           []string
+	ServiceNames         []string
 }
 
 type ReleaseDetail struct {
@@ -450,14 +464,20 @@ type ReleaseDetail struct {
 	BuildID               string           `json:"buildId,omitempty"`
 	BuildStatus           string           `json:"buildStatus,omitempty"`
 	BuildURL              string           `json:"buildUrl,omitempty"`
+	JenkinsID             string           `json:"jenkinsId,omitempty"`
+	JenkinsJobName        string           `json:"jenkinsJobName,omitempty"`
+	JenkinsJobURL         string           `json:"jenkinsJobUrl,omitempty"`
 	ImageRepository       string           `json:"imageRepository,omitempty"`
 	ImageTag              string           `json:"imageTag,omitempty"`
 	ImageDigest           string           `json:"imageDigest,omitempty"`
+	TargetEnvironmentID   string           `json:"targetEnvironmentId,omitempty"`
 	TargetEnvironmentName string           `json:"targetEnvironmentName"`
 	Status                string           `json:"status"`
 	Progress              int              `json:"progress"`
 	AgentName             string           `json:"agentName"`
 	AgentTaskID           string           `json:"agentTaskId"`
+	ServiceIDs            []string         `json:"serviceIds,omitempty"`
+	ServiceNames          []string         `json:"serviceNames,omitempty"`
 	Steps                 []ReleaseStep    `json:"steps"`
 	Failures              []ReleaseFailure `json:"failures"`
 	ActionRecords         []ActionRecord   `json:"actionRecords"`

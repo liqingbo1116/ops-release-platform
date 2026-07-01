@@ -61,8 +61,8 @@ backend/
 ## 缓存与任务
 
 - Redis 7
-- MVP 使用 Redis Stream 模拟 Agent 任务下发与执行回传
-- Agent 真接入前，后端提供 mock agent worker
+- Redis 用于任务租约、状态缓存和异步协作，不提供模拟 Agent worker
+- Agent 未真实接入时，相关远程探测与执行能力显示为不可用
 
 ## 部署
 
@@ -72,7 +72,7 @@ backend/
 
 ## 第三方系统策略
 
-MVP 默认使用 mock adapter：
+V1 默认使用真实 adapter：
 
 - JenkinsAdapter
 - HarborAdapter
@@ -81,4 +81,4 @@ MVP 默认使用 mock adapter：
 - ArgoCDAdapter
 - NacosAdapter
 
-真实接入时替换 adapter 实现，不改变上层业务服务接口。
+缺少真实外部系统配置时，adapter 必须返回明确错误，不能生成模拟结果。

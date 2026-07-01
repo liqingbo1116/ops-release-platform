@@ -48,7 +48,7 @@
         </label>
       </div>
       <div class="service-summary">
-        <span>发现 <strong>{{ discoveredServices.length }}</strong></span>
+        <span>已纳管 <strong>{{ managedServices.length }}</strong></span>
         <span>可纳管 <strong>{{ unmanagedServices.length }}</strong></span>
         <span class="pipeline-summary">
           Jenkins view
@@ -61,11 +61,11 @@
       <div class="panel-head">
         <div class="panel-title">
           <strong>已纳管服务</strong>
-          <span>{{ product?.name || '当前产品' }} 下可发版服务</span>
+          <span>已纳管 {{ managedServices.length }} / 可纳管 {{ unmanagedServices.length }}</span>
         </div>
         <div class="service-actions">
           <el-tag size="small" effect="plain">已选择 {{ selectedManagedServices.length }}</el-tag>
-          <el-button size="small" :loading="loading" @click="refreshManagedServices">刷新</el-button>
+          <el-button size="small" :loading="syncingManagedServices" @click="refreshManagedServices">刷新</el-button>
           <el-button type="primary" size="small" plain @click="openAdoptDialog">纳管服务</el-button>
           <el-button
             type="danger"
@@ -96,10 +96,6 @@
           <el-option label="已绑定" value="BOUND" />
           <el-option label="未绑定" value="UNBOUND" />
         </el-select>
-        <el-select v-model="serviceFilters.publishable" clearable placeholder="发版状态">
-          <el-option label="可发版" value="READY" />
-          <el-option label="未就绪" value="NOT_READY" />
-        </el-select>
       </div>
       <div v-if="managedServices.length > 0" class="registry-panel">
         <div>
@@ -128,7 +124,7 @@
       <el-table
         v-else
         ref="managedTableRef"
-        v-loading="loading"
+        v-loading="loading || syncingManagedServices"
         :data="filteredManagedServices"
         class="service-table"
         @selection-change="handleManagedSelectionChange"
@@ -137,7 +133,9 @@
         <el-table-column label="服务" min-width="240">
           <template #default="{ row }">
             <div class="service-name-cell">
-              <strong>{{ row.name }}</strong>
+              <el-button text type="primary" class="service-link" @click="openServiceDetail(row)">
+                {{ row.name }}
+              </el-button>
               <span>{{ row.namespace }} / {{ row.workloadType }} / {{ row.workloadName }}</span>
             </div>
           </template>
@@ -165,41 +163,107 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="版本来源" min-width="220">
-          <template #default="{ row }">
-            <div class="version-source-cell">
-              <el-tooltip :content="versionSourceTip(row)" placement="top">
-                <el-tag size="small" :type="versionSourceTagType(row)" effect="light">
-                  {{ versionSourceLabel(row) }}
-                </el-tag>
-              </el-tooltip>
-              <span>{{ versionSourceMeta(row) }}</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="Pipeline" min-width="190">
-          <template #default="{ row }">
-            <div class="pipeline-cell">
-              <el-tag size="small" :type="pipelineBound(row) ? 'success' : 'warning'" effect="light">
-                {{ pipelineBound(row) ? '已绑定' : '未绑定' }}
-              </el-tag>
-              <span>{{ pipelineName(row) || '首次发版前选择 Pipeline' }}</span>
-              <el-button text type="primary" size="small" @click="openPipelineDialog(row)">
-                {{ pipelineBound(row) ? '更换' : '绑定' }}
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
+	        <el-table-column label="Pipeline" min-width="190">
+	          <template #default="{ row }">
+	            <div class="pipeline-cell">
+	              <el-tooltip :content="pipelineBindingTip(row)" placement="top">
+	                <el-tag size="small" :type="pipelineBindingTagType(row)" effect="light">
+	                  {{ pipelineBindingLabel(row) }}
+	                </el-tag>
+	              </el-tooltip>
+	              <span :class="{ 'is-invalid': pipelineBindingInvalid(row) }">{{ pipelineName(row) || '首次发版前选择 Pipeline' }}</span>
+	              <el-button text type="primary" size="small" @click="openPipelineDialog(row)">
+	                {{ pipelineHasStoredBinding(row) ? '更换' : '绑定' }}
+	              </el-button>
+	            </div>
+	          </template>
+	        </el-table-column>
         <el-table-column label="副本" width="90">
           <template #default="{ row }">{{ row.readyReplicas }}/{{ row.replicas }}</template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="96">
-          <template #default="{ row }">
-            <el-button text type="primary" size="small" @click="openReleaseDialog(row)">发版</el-button>
-          </template>
-        </el-table-column>
+	        <el-table-column label="操作" fixed="right" width="140">
+	          <template #default="{ row }">
+	            <el-button text type="primary" size="small" @click="openServiceDetail(row)">详情</el-button>
+	            <el-button text type="primary" size="small" @click="openReleaseDialog(row)">发版</el-button>
+	          </template>
+	        </el-table-column>
       </el-table>
     </section>
+
+    <el-drawer v-model="serviceDetailVisible" title="服务发版" size="760px" class="service-detail-drawer">
+      <template v-if="activeService">
+        <div class="detail-head">
+          <div>
+            <strong>{{ activeService.name }}</strong>
+            <span>{{ product?.projectName || '未绑定项目' }} / {{ product?.name || '-' }}</span>
+	          </div>
+	          <div class="detail-actions">
+	            <el-button size="small" @click="openPipelineDialog(activeService)">
+	              {{ pipelineHasStoredBinding(activeService) ? '更换 Pipeline' : '绑定 Pipeline' }}
+	            </el-button>
+	            <el-button type="primary" size="small" @click="openReleaseDialog(activeService)">发版</el-button>
+	          </div>
+	        </div>
+        <div class="service-detail-grid">
+          <div><span>命名空间</span><strong>{{ activeService.namespace || '-' }}</strong></div>
+          <div><span>工作负载</span><strong>{{ activeService.workloadType }} / {{ activeService.workloadName }}</strong></div>
+          <div><span>容器</span><strong>{{ containerTypeLabel(activeService.containerType) }} / {{ activeService.containerName }}</strong></div>
+          <div><span>副本</span><strong>{{ activeService.readyReplicas }}/{{ activeService.replicas }}</strong></div>
+          <div class="span-2"><span>镜像</span><strong>{{ activeService.image || '-' }}</strong></div>
+	          <div>
+	            <span>Pipeline</span>
+	            <strong :class="{ 'is-invalid': pipelineBindingInvalid(activeService) }">{{ pipelineName(activeService) || '未绑定' }}</strong>
+	          </div>
+        </div>
+        <div class="history-head">
+          <strong>发版历史</strong>
+          <el-button size="small" :loading="loadingServiceReleases" @click="loadServiceReleaseHistory">刷新</el-button>
+        </div>
+        <el-table
+          v-loading="loadingServiceReleases"
+          :data="serviceReleaseHistory"
+          class="release-history-table"
+          empty-text="暂无发版历史"
+        >
+          <el-table-column label="时间" width="156">
+            <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+          </el-table-column>
+          <el-table-column label="发版单" min-width="150">
+            <template #default="{ row }">
+              <router-link :to="`/releases/${row.id}`">{{ row.id }}</router-link>
+            </template>
+          </el-table-column>
+          <el-table-column label="Jenkins" min-width="190">
+            <template #default="{ row }">
+              <div class="history-jenkins-cell">
+                <el-tag size="small" :type="releaseStatusTagType(row.buildStatus)" effect="light">
+                  {{ releaseStatusLabel(row.buildStatus) }}
+                </el-tag>
+                <a v-if="row.buildUrl" :href="row.buildUrl" target="_blank" rel="noreferrer">
+                  {{ row.buildId || '构建日志' }}
+                </a>
+                <span v-else>{{ row.buildId || '-' }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="目标镜像" min-width="260">
+            <template #default="{ row }">
+              <div class="history-image-cell">
+                <span>{{ releaseImageVersion(row) }}</span>
+                <small>{{ releaseImageTip(row) }}</small>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <el-tag size="small" :type="releaseStatusTagType(row.status)" effect="light">
+                {{ releaseStatusLabel(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
+    </el-drawer>
 
     <el-dialog v-model="adoptDialogVisible" title="纳管服务" width="980px">
       <div class="dialog-table-head">
@@ -313,18 +377,17 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="releaseDialogVisible" title="创建服务发版单" width="620px">
+    <el-dialog v-model="releaseDialogVisible" title="服务发版" width="680px">
       <div class="release-summary">
         <div><span>产品</span><strong>{{ product?.name || '-' }}</strong></div>
         <div><span>服务</span><strong>{{ activeService?.name || '-' }}</strong></div>
         <div><span>Pipeline</span><strong>{{ activeService ? pipelineName(activeService) || '-' : '-' }}</strong></div>
         <div><span>当前镜像</span><strong>{{ activeService?.image || '-' }}</strong></div>
       </div>
-      <el-steps :active="1" finish-status="success" simple>
-        <el-step title="创建发版单" />
-        <el-step title="触发 Jenkins" />
-        <el-step :title="product?.networkMode === 'AGENT' ? 'Agent 后续部署' : '平台确认结果'" />
-      </el-steps>
+      <el-radio-group v-model="releaseMode" class="release-mode-group">
+        <el-radio-button label="JENKINS_JOB">基于 Jenkins 发版</el-radio-button>
+        <el-radio-button label="LOCAL_HARBOR_IMAGE">基于镜像发版</el-radio-button>
+      </el-radio-group>
       <el-alert
         v-if="releaseWarning"
         class="dialog-alert"
@@ -332,24 +395,14 @@
         :closable="false"
         :title="releaseWarning"
       />
-      <div v-else class="release-parameters">
-        <el-alert
-          class="dialog-alert"
-          type="info"
-          :closable="false"
-          title="发版默认通过已绑定 Jenkins Pipeline 构建并推送镜像；远程产品后续会支持选择本地 Harbor 已上传镜像直接发版。"
-        />
+      <div v-if="releaseMode === 'JENKINS_JOB' && !releaseWarning" class="release-parameters">
+        <div class="section-title">发版参数</div>
         <el-form label-width="120px">
-          <el-form-item label="发版分支" required>
-            <el-input v-model="releaseBranch" placeholder="请输入本次发版使用的分支" class="dialog-control" />
-          </el-form-item>
-        </el-form>
-        <div class="section-title">Jenkins 参数</div>
-        <el-form v-if="activePipelineParameters.length > 0" label-width="120px">
           <el-form-item
             v-for="param in activePipelineParameters"
             :key="param.name"
             :label="param.name"
+            :required="param.required"
           >
             <el-input
               v-model="releaseParameters[param.name]"
@@ -361,12 +414,35 @@
             </div>
           </el-form-item>
         </el-form>
-        <el-empty v-else description="当前 Pipeline 无需填写参数" :image-size="56" />
+        <div v-if="activePipelineParameters.length === 0" class="form-tip standalone-tip">
+          当前 Pipeline 未发现参数，确认后将直接触发 Jenkins 构建。
+        </div>
+      </div>
+      <div v-if="releaseMode === 'LOCAL_HARBOR_IMAGE' && !releaseWarning" class="release-parameters">
+        <div class="section-title">选择镜像版本</div>
+        <el-form label-width="120px">
+          <el-form-item label="镜像仓库">
+            <span class="repository-text">{{ activeReleaseSource?.imageRepository || activeService?.imageRepository || '-' }}</span>
+          </el-form-item>
+          <el-form-item label="镜像 tag" required>
+            <el-select v-model="selectedImageTag" filterable placeholder="选择 Harbor 中已存在的镜像 tag" class="dialog-control">
+              <el-option
+                v-for="tag in activeImageTags"
+                :key="`${tag.tag}-${tag.digest || ''}`"
+                :label="imageTagOptionLabel(tag)"
+                :value="tag.tag"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
+        <div class="form-tip standalone-tip">
+          镜像列表来自当前产品绑定的 Harbor。选择后进入发版日志，服务当前镜像以实际 K8s/Agent 上报为准。
+        </div>
       </div>
       <template #footer>
         <el-button @click="releaseDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="creatingRelease" :disabled="Boolean(releaseWarning)" @click="submitRelease">
-          创建并发版
+          触发并查看日志
         </el-button>
       </template>
     </el-dialog>
@@ -374,7 +450,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import {
@@ -385,6 +461,7 @@ import {
   listEnvironments,
   listEnvironmentServices,
   removeEnvironmentServices,
+  syncEnvironmentServices,
   type DiscoveredProductService,
   type EnvironmentInfo,
   type ProductService,
@@ -392,17 +469,29 @@ import {
 import { listAgents, type AgentInfo } from '@/api/agents'
 import { listJenkinsInstances, type JenkinsInstance } from '@/api/integrationResources'
 import { listProjects, type ProjectInfo } from '@/api/projects'
-import { createRelease, listReleaseSources, type JenkinsPipeline, type ReleaseSourceService } from '@/api/releases'
+import {
+  createRelease,
+  listReleaseSources,
+  listServiceReleases,
+  type JenkinsPipeline,
+  type ReleaseImageTag,
+  type ReleaseOrder,
+  type ReleaseSourceService,
+} from '@/api/releases'
 
 const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
+const syncingManagedServices = ref(false)
 const adopting = ref(false)
 const confirmingRegistry = ref(false)
 const removing = ref(false)
 const bindingPipeline = ref(false)
 const creatingRelease = ref(false)
+const releaseSourceLoading = ref(false)
+const releaseSourceError = ref('')
+const loadingServiceReleases = ref(false)
 const errorMessage = ref('')
 const products = ref<EnvironmentInfo[]>([])
 const projects = ref<ProjectInfo[]>([])
@@ -423,18 +512,23 @@ const discoveredTableRef = ref<TableInstance>()
 const adoptDialogVisible = ref(false)
 const pipelineDialogVisible = ref(false)
 const releaseDialogVisible = ref(false)
+const serviceDetailVisible = ref(false)
 const activeService = ref<ProductService | null>(null)
+const serviceReleaseHistory = ref<ReleaseOrder[]>([])
 const pipelineForm = ref({ pipelineKey: '' })
-const releaseBranch = ref('')
 const releaseParameters = ref<Record<string, string>>({})
+const releaseMode = ref<'JENKINS_JOB' | 'LOCAL_HARBOR_IMAGE'>('JENKINS_JOB')
+const selectedImageTag = ref('')
 const serviceFilters = ref({
   keyword: '',
   namespace: '',
   workloadType: '',
   imageSource: '',
   pipeline: '',
-  publishable: '',
 })
+let managedServiceSyncTimer: ReturnType<typeof window.setInterval> | undefined
+let managedServiceInitialSyncTimer: ReturnType<typeof window.setTimeout> | undefined
+const MANAGED_SERVICE_SYNC_INTERVAL_MS = 30000
 
 const standaloneMode = computed(() => route.name === 'services' || route.path === '/services')
 const productId = computed(() => selectedProductId.value || (standaloneMode.value ? '' : String(route.params.id || '')))
@@ -477,14 +571,20 @@ const boundPipelineNames = computed(() => {
   const names = new Map<string, string>()
   for (const service of managedServices.value) {
     const name = pipelineName(service).trim()
-    if (name) names.set(name, service.id)
+    if (!name) continue
+    const pipeline = findProductPipeline(service)
+    if (pipeline) {
+      names.set(pipelineCandidateKey(pipeline), service.id)
+      if (pipeline.url) names.set(pipeline.url.trim(), service.id)
+    }
+    names.set(name, service.id)
   }
   return names
 })
 const availablePipelinesForActiveService = computed(() => {
   const activeServiceId = activeService.value?.id || ''
-  return jenkinsPipelines.value.filter((pipeline) => {
-    const boundServiceId = boundPipelineNames.value.get(pipeline.name)
+  return filterPipelinesForCurrentProduct(jenkinsPipelines.value).filter((pipeline) => {
+    const boundServiceId = boundPipelineNames.value.get(pipelineCandidateKey(pipeline)) || boundPipelineNames.value.get(pipeline.name)
     return !boundServiceId || boundServiceId === activeServiceId
   })
 })
@@ -504,10 +604,15 @@ const pipelineSelectNotice = computed(() => {
   return ''
 })
 const activePipeline = computed(() => {
-  const name = activeService.value ? pipelineName(activeService.value) : ''
-  return jenkinsPipelines.value.find((item) => item.name === name) ?? null
+  return activeService.value ? findProductPipeline(activeService.value) : null
 })
+const activePipelineParametersUnknown = computed(() => Boolean(activePipeline.value && !Array.isArray(activePipeline.value.parameters)))
 const activePipelineParameters = computed(() => activePipeline.value?.parameters ?? [])
+const activeBranchParameter = computed(() =>
+  activePipelineParameters.value.find((param) => isBranchParameterName(param.name)) ?? null,
+)
+const activeReleaseSource = computed(() => (activeService.value ? releaseSourceOf(activeService.value) : undefined))
+const activeImageTags = computed(() => activeReleaseSource.value?.tags ?? [])
 const managedNamespaces = computed(() => uniqueSorted(managedServices.value.map((item) => item.namespace)))
 const managedWorkloadTypes = computed(() => uniqueSorted(managedServices.value.map((item) => item.workloadType)))
 const boundJenkinsInstancePipelineCount = computed(() => {
@@ -533,14 +638,11 @@ const productJenkinsProbeText = computed(() => {
 const filteredManagedServices = computed(() => {
   const keyword = serviceFilters.value.keyword.trim().toLowerCase()
   return managedServices.value.filter((item) => {
-    const releaseSource = releaseSourceOf(item)
     if (serviceFilters.value.namespace && item.namespace !== serviceFilters.value.namespace) return false
     if (serviceFilters.value.workloadType && item.workloadType !== serviceFilters.value.workloadType) return false
     if (serviceFilters.value.imageSource && item.imageSource !== serviceFilters.value.imageSource) return false
     if (serviceFilters.value.pipeline === 'BOUND' && !pipelineBound(item)) return false
     if (serviceFilters.value.pipeline === 'UNBOUND' && pipelineBound(item)) return false
-    if (serviceFilters.value.publishable === 'READY' && !releaseSource?.publishable) return false
-    if (serviceFilters.value.publishable === 'NOT_READY' && releaseSource?.publishable) return false
     if (!keyword) return true
     return [item.name, item.namespace, item.workloadName, item.workloadType, item.containerName, item.image, pipelineName(item)]
       .join(' ')
@@ -556,10 +658,21 @@ const activeAgent = computed(() => {
 })
 const releaseWarning = computed(() => {
   if (!activeService.value) return '请选择要发版的服务'
+  if (product.value?.networkMode === 'AGENT' && !activeAgent.value) return '远程产品需要在线且已绑定当前产品的 Agent'
+  if (releaseMode.value === 'LOCAL_HARBOR_IMAGE') {
+    if (releaseSourceLoading.value) return '正在读取 Harbor 镜像版本'
+    if (releaseSourceError.value) return releaseSourceError.value
+    const source = activeReleaseSource.value
+    if (!source) return '当前服务暂未读取到 Harbor 镜像版本'
+    if (!source.publishable) return source.message || '当前服务没有可供发版的 Harbor 镜像版本'
+    if (activeImageTags.value.length === 0) return '当前镜像仓库未发现可供发版的 tag'
+    if (!selectedImageTag.value) return '请选择要发版的镜像 tag'
+    return ''
+  }
   if (!pipelineBound(activeService.value)) return '服务尚未绑定 Jenkins Pipeline，请先绑定后再发版'
   if (jenkinsPipelines.value.length === 0) return '当前产品没有可用 Jenkins Pipeline，请先刷新 Jenkins 基础资源'
   if (!activePipeline.value) return '当前服务绑定的 Jenkins Pipeline 不在产品可用范围内，请重新绑定'
-  if (product.value?.networkMode === 'AGENT' && !activeAgent.value) return '远程产品需要在线且已绑定当前产品的 Agent'
+  if (activePipelineParametersUnknown.value) return '当前 Pipeline 参数读取失败，请刷新 Jenkins 基础资源或检查 Jenkins 权限'
   return ''
 })
 const registryCandidates = computed(() => {
@@ -585,6 +698,7 @@ const registryPanelText = computed(() => {
 })
 
 async function loadPageData() {
+  if (loading.value) return
   loading.value = true
   errorMessage.value = ''
   selectedManagedServices.value = []
@@ -605,28 +719,27 @@ async function loadPageData() {
       errorMessage.value = '请先创建产品'
       return
     }
-    const [managedItems, discoveredItems, agentItems] = await Promise.all([
+    const [managedItems, agentItems] = await Promise.all([
       listEnvironmentServices(productId.value),
-      listDiscoveredEnvironmentServices(productId.value),
       listAgents(),
     ])
     product.value = products.value.find((item) => item.id === productId.value) ?? null
     managedServices.value = managedItems
-    discoveredServices.value = discoveredItems
+    if (!adoptDialogVisible.value) {
+      discoveredServices.value = []
+    }
     agents.value = agentItems
     jenkinsInstances.value = await listJenkinsInstances()
     const releaseSource = await listProductReleaseSources()
     releaseSourceServices.value = releaseSource.services
-    jenkinsPipelines.value = await resolveProductJenkinsPipelines(
-      releaseSource.jenkinsPipelines ?? [],
-      releaseSource.jenkinsJobs ?? [],
-    )
+    jenkinsPipelines.value = resolveProductJenkinsPipelines(releaseSource.jenkinsPipelines ?? [])
     if (!selectedRegistryHost.value || !registryCandidates.value.includes(selectedRegistryHost.value)) {
       selectedRegistryHost.value = registryCandidates.value[0] ?? ''
     }
     if (!product.value) {
       errorMessage.value = '未找到当前产品，请返回产品管理确认产品是否存在'
     }
+    scheduleManagedServiceInitialSync()
   } catch (error) {
     managedServices.value = []
     discoveredServices.value = []
@@ -640,111 +753,55 @@ async function loadPageData() {
   }
 }
 
+function refreshPageDataWhenVisible() {
+  if (document.visibilityState !== 'visible' || !productId.value || loading.value) return
+  if (product.value?.networkMode !== 'AGENT') return
+  void reloadManagedServices({ silent: true })
+}
+
 async function listProductReleaseSources() {
   if (!productId.value) return { services: [], jenkinsJobs: [], jenkinsPipelines: [] }
+  return listReleaseSources(productId.value, { includeTags: false })
+}
+
+async function loadActiveReleaseSourceTags() {
+  const service = activeService.value
+  if (!service || !productId.value) return
+  releaseSourceLoading.value = true
+  releaseSourceError.value = ''
+  selectedImageTag.value = ''
   try {
-    return await listReleaseSources(productId.value)
-  } catch {
-    return {
-      services: managedServices.value.map((service) => ({
-        serviceId: service.id,
-        serviceName: service.name,
-        namespace: service.namespace,
-        workloadName: service.workloadName,
-        workloadType: service.workloadType,
-        imageRegistry: service.imageRegistry,
-        imageProject: service.imageProject,
-        imageRepository: service.imageRepository,
-        imageTag: service.imageTag,
-        imageSource: service.imageSource,
-        privateRegistryHost: service.privateRegistryHost,
-        privateRegistryConfirmed: Boolean(service.privateRegistryConfirmed),
-        jenkinsJobName: service.jenkinsJobName,
-        jenkinsBranch: service.jenkinsBranch,
-        jenkinsPipelineBound: Boolean(service.jenkinsPipelineBound),
-        pipelineBoundAt: service.pipelineBoundAt,
-        tags: [],
-        publishable: false,
-        message: '版本来源读取失败',
-      })),
-      jenkinsJobs: [],
-      jenkinsPipelines: [],
+    const releaseSource = await listReleaseSources(productId.value, {
+      serviceId: service.id,
+      includeTags: true,
+    })
+    const source = releaseSource.services.find((item) => item.serviceId === service.id)
+    if (!source) {
+      releaseSourceServices.value = releaseSourceServices.value.filter((item) => item.serviceId !== service.id)
+      releaseSourceError.value = '当前服务暂未读取到 Harbor 镜像版本'
+      return
     }
+    releaseSourceServices.value = [
+      ...releaseSourceServices.value.filter((item) => item.serviceId !== service.id),
+      source,
+    ]
+    selectedImageTag.value = source.tags[0]?.tag ?? ''
+  } catch (error) {
+    releaseSourceError.value = error instanceof Error ? error.message : 'Harbor 镜像版本读取失败'
+  } finally {
+    releaseSourceLoading.value = false
   }
 }
 
-async function resolveProductJenkinsPipelines(sourcePipelines: JenkinsPipeline[], sourceJobs: string[]) {
-  const sourceMatched = filterPipelinesForCurrentProduct(sourcePipelines)
-  if (sourceMatched.length > 0) return sourceMatched
-  const jobMatched = filterPipelinesForCurrentProduct(pipelinesFromJobNames(sourceJobs))
-  if (jobMatched.length > 0) return jobMatched
-  try {
-    if (jenkinsInstances.value.length === 0) {
-      jenkinsInstances.value = await listJenkinsInstances()
-    }
-    return pipelinesFromBoundJenkinsInstances()
-  } catch {
-    return []
-  }
-}
-
-function pipelinesFromJobNames(jobNames: string[]) {
-  const defaultView = productJenkinsViewNames.value.length === 1 ? productJenkinsViewNames.value[0] : ''
-  const candidates = new Map<string, JenkinsPipeline>()
-  for (const jobName of jobNames) {
-    const name = jobName.trim()
-    if (!name) continue
-    const pipeline = {
-      name,
-      view: defaultView,
-      parameters: [],
-    }
-    candidates.set(pipelineCandidateKey(pipeline), pipeline)
-  }
-  return [...candidates.values()]
-}
-
-function pipelinesFromBoundJenkinsInstances() {
-  const jenkinsIds = new Set(productJenkinsIds.value)
-  const viewNames = productJenkinsViewNames.value
-  const viewKeys = new Set(viewNames.flatMap(viewKeyCandidates))
-  const candidates = new Map<string, JenkinsPipeline>()
-  for (const instance of jenkinsInstances.value) {
-    if (!jenkinsIds.has(instance.id)) continue
-    let matchedStructuredPipelineCount = 0
-    for (const pipeline of instance.pipelines ?? []) {
-      const normalized = normalizePipelineCandidate(pipeline, viewNames)
-      if (!normalized) continue
-      const candidateKeys = pipelineViewKeyCandidates(normalized)
-      if (viewKeys.size === 0 || candidateKeys.some((key) => viewKeys.has(key))) {
-        candidates.set(pipelineCandidateKey(normalized), normalized)
-        matchedStructuredPipelineCount += 1
-      }
-    }
-    if (matchedStructuredPipelineCount === 0) {
-      for (const job of instance.jobs ?? []) {
-        const name = job.trim()
-        if (!name) continue
-        const pipeline = {
-          name,
-          view: viewNames.length === 1 ? viewNames[0] : '',
-          parameters: [],
-        }
-        candidates.set(pipelineCandidateKey(pipeline), pipeline)
-      }
-    }
-  }
-  return [...candidates.values()].sort((a, b) => {
-    if ((a.view || '') === (b.view || '')) return a.name.localeCompare(b.name)
-    return (a.view || '').localeCompare(b.view || '')
-  })
+function resolveProductJenkinsPipelines(sourcePipelines: JenkinsPipeline[]) {
+  return filterPipelinesForCurrentProduct(sourcePipelines)
 }
 
 function filterPipelinesForCurrentProduct(pipelines: JenkinsPipeline[]) {
   const viewKeys = new Set(productJenkinsViewNames.value.flatMap(viewKeyCandidates))
   const candidates = new Map<string, JenkinsPipeline>()
   for (const pipeline of pipelines) {
-    const normalized = normalizePipelineCandidate(pipeline, productJenkinsViewNames.value)
+    const normalized = normalizePipelineCandidate(pipeline, productJenkinsViewNames.value, viewKeys)
     if (!normalized) continue
     const candidateKeys = pipelineViewKeyCandidates(normalized)
     if (viewKeys.size === 0 || candidateKeys.some((key) => viewKeys.has(key))) {
@@ -757,26 +814,57 @@ function filterPipelinesForCurrentProduct(pipelines: JenkinsPipeline[]) {
   })
 }
 
-function normalizePipelineCandidate(pipeline: JenkinsPipeline, viewNames: string[]) {
+function normalizePipelineCandidate(pipeline: JenkinsPipeline, viewNames: string[], viewKeys: Set<string>) {
   const name = pipeline.name?.trim()
   if (!name) return null
-  const inferredView =
-    pipeline.view?.trim() ||
-    inferViewNameFromValue(pipeline.viewUrl || '') ||
-    inferViewNameFromValue(pipeline.url || '') ||
-    (viewNames.length === 1 ? viewNames[0] : '')
+  const explicitView = pipeline.view?.trim() || ''
+  const explicitViewURL = pipeline.viewUrl?.trim() || ''
+  const explicitURL = pipeline.url?.trim() || ''
+  const hasViewSignal = Boolean(explicitView || explicitViewURL)
+  const matchedView = explicitView || inferViewNameFromValue(explicitViewURL)
+  if (hasViewSignal && viewKeys.size > 0 && !matchedView) return null
+  if (!hasViewSignal && viewKeys.size > 0) return null
+  const inferredView = matchedView || (viewNames.length === 1 ? viewNames[0] : '')
   return {
     ...pipeline,
     name,
     view: inferredView,
-    viewUrl: pipeline.viewUrl?.trim() || '',
-    url: pipeline.url?.trim() || '',
-    parameters: pipeline.parameters ?? [],
+    viewUrl: explicitViewURL,
+    url: explicitURL,
+    parameters: pipeline.parameters,
   }
 }
 
 function pipelineCandidateKey(pipeline: JenkinsPipeline) {
-  return `${pipeline.view || pipeline.viewUrl || ''}\u0000${pipeline.name}`
+  return normalizePipelineUrl(pipeline.url || '') || `${pipeline.view || pipeline.viewUrl || ''}\u0000${pipeline.name}`
+}
+
+function findProductPipeline(row: ProductService) {
+  const trimmed = pipelineName(row).trim()
+  if (!trimmed) return null
+  const jobURL = pipelineUrl(row).trim()
+  const pipelines = filterPipelinesForCurrentProduct(jenkinsPipelines.value)
+  if (jobURL) {
+    const matchedByURL = pipelines.find((item) => samePipelineUrl(item.url || '', jobURL))
+    if (matchedByURL) return matchedByURL
+  }
+  return pipelines.find((item) => item.name === trimmed) ?? null
+}
+
+function samePipelineUrl(left = '', right = '') {
+  const normalizedLeft = normalizePipelineUrl(left)
+  const normalizedRight = normalizePipelineUrl(right)
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight)
+}
+
+function normalizePipelineUrl(value = '') {
+  const trimmed = value.trim().replace(/\/+$/g, '')
+  if (!trimmed) return ''
+  try {
+    return decodeURIComponent(trimmed).replace(/\/+$/g, '')
+  } catch {
+    return trimmed
+  }
 }
 
 function normalizeViewKey(value = '') {
@@ -787,7 +875,6 @@ function pipelineViewKeyCandidates(pipeline: JenkinsPipeline) {
   return uniqueSorted([
     ...viewKeyCandidates(pipeline.view || ''),
     ...viewKeyCandidates(pipeline.viewUrl || ''),
-    ...viewKeyCandidates(pipeline.url || ''),
   ])
 }
 
@@ -919,6 +1006,12 @@ async function openAdoptDialog() {
   }
   selectedDiscoveredServices.value = []
   adoptDialogVisible.value = true
+  try {
+    discoveredServices.value = await listDiscoveredEnvironmentServices(productId.value)
+  } catch (error) {
+    discoveredServices.value = []
+    ElMessage.error(error instanceof Error ? error.message : '服务发现失败')
+  }
   await nextTick()
   discoveredTableRef.value?.clearSelection()
 }
@@ -928,9 +1021,70 @@ async function refreshManagedServices() {
     ElMessage.warning('请先选择产品')
     return
   }
-  await loadPageData()
+  await syncManagedServicesFromRuntime()
   await nextTick()
-  discoveredTableRef.value?.clearSelection()
+  managedTableRef.value?.clearSelection()
+}
+
+async function reloadManagedServices(options: { silent?: boolean } = {}) {
+  if (!productId.value || syncingManagedServices.value) return
+  syncingManagedServices.value = true
+  try {
+    managedServices.value = await listEnvironmentServices(productId.value)
+  } catch (error) {
+    if (!options.silent) {
+      ElMessage.error(error instanceof Error ? error.message : '服务列表刷新失败')
+    }
+  } finally {
+    syncingManagedServices.value = false
+  }
+}
+
+async function syncManagedServicesFromRuntime(options: { silent?: boolean } = {}) {
+  if (!productId.value || syncingManagedServices.value) return
+  syncingManagedServices.value = true
+  try {
+    managedServices.value = await syncEnvironmentServices(productId.value)
+    if (!options.silent) {
+      ElMessage.success('已刷新实际运行镜像状态')
+    }
+  } catch (error) {
+    if (!options.silent) {
+      ElMessage.error(error instanceof Error ? error.message : '服务运行状态刷新失败')
+    }
+  } finally {
+    syncingManagedServices.value = false
+  }
+}
+
+function startManagedServiceSyncTimer() {
+  stopManagedServiceSyncTimer()
+  managedServiceSyncTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible' || !productId.value || loading.value) return
+    if (product.value?.networkMode !== 'AGENT') return
+    void reloadManagedServices({ silent: true })
+  }, MANAGED_SERVICE_SYNC_INTERVAL_MS)
+}
+
+function stopManagedServiceSyncTimer() {
+  if (!managedServiceSyncTimer) return
+  window.clearInterval(managedServiceSyncTimer)
+  managedServiceSyncTimer = undefined
+}
+
+function scheduleManagedServiceInitialSync() {
+  stopManagedServiceInitialSyncTimer()
+  if (!productId.value) return
+  managedServiceInitialSyncTimer = window.setTimeout(() => {
+    if (document.visibilityState !== 'visible' || !productId.value || loading.value) return
+    void syncManagedServicesFromRuntime({ silent: true })
+  }, 500)
+}
+
+function stopManagedServiceInitialSyncTimer() {
+  if (!managedServiceInitialSyncTimer) return
+  window.clearTimeout(managedServiceInitialSyncTimer)
+  managedServiceInitialSyncTimer = undefined
 }
 
 async function adoptSelectedServices() {
@@ -1008,18 +1162,39 @@ async function removeSelectedManagedServices() {
 }
 
 function openPipelineDialog(row: ProductService) {
-  activeService.value = row
-  const currentName = pipelineName(row)
-  const currentPipeline = jenkinsPipelines.value.find((item) => item.name === currentName)
-  pipelineForm.value = {
-    pipelineKey: currentPipeline ? pipelineCandidateKey(currentPipeline) : '',
-  }
+	activeService.value = row
+	const currentPipeline = findProductPipeline(row)
+	pipelineForm.value = {
+		pipelineKey: currentPipeline ? pipelineCandidateKey(currentPipeline) : '',
+	}
   pipelineDialogVisible.value = true
+}
+
+async function openServiceDetail(row: ProductService) {
+  activeService.value = row
+  serviceDetailVisible.value = true
+  await loadServiceReleaseHistory()
+}
+
+async function loadServiceReleaseHistory() {
+  if (!productId.value || !activeService.value) {
+    serviceReleaseHistory.value = []
+    return
+  }
+  loadingServiceReleases.value = true
+  try {
+    serviceReleaseHistory.value = await listServiceReleases(productId.value, activeService.value.id)
+  } catch (error) {
+    serviceReleaseHistory.value = []
+    ElMessage.error(error instanceof Error ? error.message : '服务发版历史加载失败')
+  } finally {
+    loadingServiceReleases.value = false
+  }
 }
 
 async function submitPipelineBinding() {
   if (!activeService.value) return
-  const pipeline = jenkinsPipelines.value.find((item) => pipelineCandidateKey(item) === pipelineForm.value.pipelineKey)
+  const pipeline = availablePipelinesForActiveService.value.find((item) => pipelineCandidateKey(item) === pipelineForm.value.pipelineKey)
   if (!pipeline) {
     ElMessage.warning('请选择 Jenkins Pipeline')
     return
@@ -1029,7 +1204,7 @@ async function submitPipelineBinding() {
   try {
     const updated = await bindEnvironmentServicePipeline(productId.value, activeService.value.id, {
       jenkinsJobName: jobName,
-      jenkinsBranch: pipelineBranch(activeService.value),
+      jenkinsJobUrl: pipeline.url?.trim() || '',
     })
     managedServices.value = managedServices.value.map((item) => (item.id === updated.id ? updated : item))
     activeService.value = updated
@@ -1045,23 +1220,28 @@ async function submitPipelineBinding() {
 
 function openReleaseDialog(row: ProductService) {
   activeService.value = row
-  releaseBranch.value = pipelineBranch(row) || ''
+  releaseMode.value = pipelineBound(row) ? 'JENKINS_JOB' : 'LOCAL_HARBOR_IMAGE'
+  releaseSourceError.value = ''
   releaseParameters.value = {}
   for (const param of activePipelineParameters.value) {
     releaseParameters.value[param.name] = param.defaultValue ?? ''
   }
+  selectedImageTag.value = activeImageTags.value[0]?.tag ?? ''
   releaseDialogVisible.value = true
+  if (releaseMode.value === 'LOCAL_HARBOR_IMAGE') {
+    void loadActiveReleaseSourceTags()
+  }
 }
 
 async function submitRelease() {
   if (!activeService.value || releaseWarning.value) return
-  const branch = releaseBranch.value.trim()
-  if (!branch) {
-    ElMessage.warning('请填写本次发版分支')
+  if (releaseMode.value === 'LOCAL_HARBOR_IMAGE') {
+    await submitImageRelease()
     return
   }
+  const parameters = buildReleaseParameters()
   for (const param of activePipelineParameters.value) {
-    const value = releaseParameters.value[param.name]
+    const value = parameters[param.name]
     if (param.required && (!value || !value.trim())) {
       ElMessage.warning(`请填写 Jenkins 参数：${param.name}`)
       return
@@ -1077,19 +1257,74 @@ async function submitRelease() {
       serviceIds: [activeService.value.id],
       jenkins: {
         jobName: pipelineName(activeService.value),
-        branch,
-        parameters: activePipelineParameters.value.length > 0 ? { ...releaseParameters.value } : undefined,
+        jobUrl: activePipeline.value?.url?.trim() || pipelineUrl(activeService.value),
+        branch: releaseBranchValue(parameters),
+        parameters,
       },
       options: {},
     })
-    ElMessage.success('发版单已创建')
     releaseDialogVisible.value = false
-    router.push(`/releases/${result.id}`)
+    creatingRelease.value = false
+    await router.push({ path: `/releases/${result.id}` })
+    ElMessage.success('已进入发版日志')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '发版单创建失败')
   } finally {
     creatingRelease.value = false
   }
+}
+
+async function submitImageRelease() {
+  if (!activeService.value || !activeReleaseSource.value || !selectedImageTag.value) return
+  const selectedTag = activeImageTags.value.find((item) => item.tag === selectedImageTag.value)
+  creatingRelease.value = true
+  try {
+    const result = await createRelease({
+      type: 'SERVICE_RELEASE',
+      releaseSource: 'LOCAL_HARBOR_IMAGE',
+      targetEnvironmentId: productId.value,
+      agentId: product.value?.networkMode === 'AGENT' ? activeAgent.value?.id || '' : '',
+      serviceIds: [activeService.value.id],
+      image: {
+        repository: activeReleaseSource.value.imageRepository,
+        tag: selectedImageTag.value,
+        digest: selectedTag?.digest || '',
+      },
+      options: {},
+    })
+    releaseDialogVisible.value = false
+    creatingRelease.value = false
+    await router.push({ path: `/releases/${result.id}` })
+    ElMessage.success('已进入发版日志')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '发版失败')
+  } finally {
+    creatingRelease.value = false
+  }
+}
+
+function buildReleaseParameters() {
+  return { ...releaseParameters.value }
+}
+
+function isBranchParameterName(name: string) {
+  return [
+    'branch',
+    'branch_name',
+    'branchname',
+    'git_branch',
+    'gitbranch',
+    'git_branch_name',
+    'gitbranchname',
+    'ref',
+    'git_ref',
+  ].includes(name.trim().toLowerCase())
+}
+
+function releaseBranchValue(parameters: Record<string, string>) {
+  const branchParam = activeBranchParameter.value
+  if (branchParam) return parameters[branchParam.name]?.trim() || ''
+  return activeService.value?.jenkinsBranch?.trim() || ''
 }
 
 function containerTypeLabel(type = '') {
@@ -1137,17 +1372,44 @@ function pipelineName(row: ProductService) {
   return row.jenkinsJobName || releaseSourceOf(row)?.jenkinsJobName || ''
 }
 
-function pipelineBranch(row: ProductService) {
-  return row.jenkinsBranch || releaseSourceOf(row)?.jenkinsBranch || ''
+function pipelineUrl(row: ProductService) {
+  return row.jenkinsJobUrl || releaseSourceOf(row)?.jenkinsJobUrl || ''
+}
+
+function pipelineHasStoredBinding(row: ProductService) {
+  return Boolean(row.jenkinsPipelineBound || pipelineName(row))
 }
 
 function pipelineBound(row: ProductService) {
-  return Boolean(row.jenkinsPipelineBound || pipelineName(row))
+  return pipelineHasStoredBinding(row) && Boolean(findProductPipeline(row))
+}
+
+function pipelineBindingInvalid(row: ProductService) {
+  return pipelineHasStoredBinding(row) && !pipelineBound(row)
+}
+
+function pipelineBindingLabel(row: ProductService) {
+  if (pipelineBound(row)) return '已绑定'
+  if (pipelineBindingInvalid(row)) return '绑定失效'
+  return '未绑定'
+}
+
+function pipelineBindingTagType(row: ProductService): '' | 'success' | 'info' | 'warning' | 'danger' | 'primary' {
+  if (pipelineBound(row)) return 'success'
+  if (pipelineBindingInvalid(row)) return 'danger'
+  return 'warning'
+}
+
+function pipelineBindingTip(row: ProductService) {
+  if (pipelineBound(row)) return '当前 Pipeline 属于产品绑定的 Jenkins view，可以发版'
+  if (pipelineBindingInvalid(row)) return '服务保存了 Pipeline 绑定，但当前产品 Jenkins view 未发现该 Pipeline，请刷新 Jenkins 基础资源或重新绑定'
+  return '服务尚未绑定 Jenkins Pipeline'
 }
 
 function pipelineOptionLabel(pipeline: JenkinsPipeline) {
   const prefix = pipeline.view ? `${pipeline.view} / ` : ''
-  const parameterText = pipeline.parameters.length > 0 ? ` / ${pipeline.parameters.length} 个参数` : ' / 无参数'
+  const parameters = pipeline.parameters
+  const parameterText = Array.isArray(parameters) ? ` / ${parameters.length} 个参数` : ' / 参数待探测'
   return `${prefix}${pipeline.name}${parameterText}`
 }
 
@@ -1164,34 +1426,56 @@ function pipelineParameterTip(param: { required?: boolean; description?: string;
   return parts.join(' / ')
 }
 
-function versionSourceLabel(row: ProductService) {
-  const source = releaseSourceOf(row)
-  if (source?.publishable) return '可发版'
-  if (source?.message) return '不可发版'
-  return '待确认'
+function imageTagOptionLabel(tag: ReleaseImageTag) {
+  const parts = [tag.tag]
+  if (tag.updatedAt) parts.push(formatTime(tag.updatedAt))
+  if (tag.digest) parts.push(tag.digest.slice(0, 18))
+  return parts.join(' / ')
 }
 
-function versionSourceTip(row: ProductService) {
-  const source = releaseSourceOf(row)
-  if (!source) return '版本来源尚未读取'
-  if (source.publishable) return `Harbor 已发现 ${source.tags.length} 个镜像 tag`
-  return source.message || '请先确认私有镜像 registry 与 Harbor project'
+function releaseImageVersion(row: ReleaseOrder) {
+  if (row.imageRepository && row.imageTag) return `${row.imageRepository}:${row.imageTag}`
+  if (row.imageRepository || row.imageTag) return row.imageRepository || row.imageTag || '-'
+  return '待环境确认'
 }
 
-function versionSourceMeta(row: ProductService) {
-  const source = releaseSourceOf(row)
-  if (!source) return '未读取版本来源'
-  if (source.publishable) {
-    return `当前 ${source.imageTag || '无 tag'} / 可选 ${source.tags.length} 个 tag`
+function releaseImageTip(row: ReleaseOrder) {
+  if (row.imageDigest) return row.imageDigest
+  if (row.imageRepository && row.imageTag) return row.releaseSource === 'LOCAL_HARBOR_IMAGE' ? '选择的 Harbor 镜像' : '发版目标镜像'
+  return 'Jenkins 发版后以实际 K8s/Agent 上报为准'
+}
+
+function releaseStatusLabel(status = '') {
+  const normalized = status.trim().toUpperCase()
+  const labels: Record<string, string> = {
+    CREATED: '已创建',
+    RUNNING: '执行中',
+    SUCCESS: '成功',
+    FAILED: '失败',
+    PENDING_IMAGE_SYNC: '等待镜像同步',
+    JENKINS_TRIGGERING: 'Jenkins 触发中',
+    JENKINS_QUEUED: 'Jenkins 排队',
+    QUEUED: '排队',
+    BUILDING: '构建中',
+    ABORTED: '已中止',
   }
-  return source.message || '版本来源未就绪'
+  return labels[normalized] || status || '-'
 }
 
-function versionSourceTagType(row: ProductService): '' | 'success' | 'info' | 'warning' | 'danger' | 'primary' {
-  const source = releaseSourceOf(row)
-  if (source?.publishable) return 'success'
-  if (source?.message) return 'warning'
+function releaseStatusTagType(status = ''): '' | 'success' | 'info' | 'warning' | 'danger' | 'primary' {
+  const normalized = status.trim().toUpperCase()
+  if (['SUCCESS', 'COMPLETED'].includes(normalized)) return 'success'
+  if (['FAILED', 'ABORTED'].includes(normalized)) return 'danger'
+  if (['RUNNING', 'BUILDING', 'JENKINS_TRIGGERING', 'JENKINS_QUEUED', 'QUEUED', 'PENDING_IMAGE_SYNC'].includes(normalized)) return 'warning'
   return 'info'
+}
+
+function formatTime(value = '') {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const pad = (num: number) => String(num).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 function uniqueSorted(values: string[]) {
@@ -1207,7 +1491,31 @@ function scopedValues(row: EnvironmentInfo | null, resourceType: 'K8S' | 'HARBOR
   )
 }
 
-onMounted(loadPageData)
+watch([releaseMode, activeReleaseSource], () => {
+  releaseSourceError.value = ''
+  if (releaseMode.value !== 'LOCAL_HARBOR_IMAGE') return
+  if (activeService.value && activeImageTags.value.length === 0 && !releaseSourceLoading.value) {
+    void loadActiveReleaseSourceTags()
+    return
+  }
+  if (!activeImageTags.value.some((tag) => tag.tag === selectedImageTag.value)) {
+    selectedImageTag.value = activeImageTags.value[0]?.tag ?? ''
+  }
+})
+
+onMounted(() => {
+  void loadPageData()
+  startManagedServiceSyncTimer()
+  window.addEventListener('focus', refreshPageDataWhenVisible)
+  document.addEventListener('visibilitychange', refreshPageDataWhenVisible)
+})
+
+onUnmounted(() => {
+  stopManagedServiceSyncTimer()
+  stopManagedServiceInitialSyncTimer()
+  window.removeEventListener('focus', refreshPageDataWhenVisible)
+  document.removeEventListener('visibilitychange', refreshPageDataWhenVisible)
+})
 </script>
 
 <style scoped>
@@ -1464,6 +1772,14 @@ onMounted(loadPageData)
   font-size: 14px;
 }
 
+.service-link {
+  font-size: 14px;
+  font-weight: 600;
+  height: auto;
+  line-height: 18px;
+  padding: 0;
+}
+
 .service-name-cell span,
 .image-cell span,
 .version-source-cell span {
@@ -1599,6 +1915,105 @@ onMounted(loadPageData)
   margin-bottom: 10px;
 }
 
+.detail-head {
+  align-items: center;
+  border-bottom: 1px solid #edf1f6;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+}
+
+.detail-head > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.detail-head strong {
+  color: #172033;
+  font-size: 18px;
+}
+
+.detail-head span {
+  color: #667085;
+  font-size: 13px;
+}
+
+.detail-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.service-detail-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.service-detail-grid div {
+  background: #f8fafc;
+  border: 1px solid #edf1f6;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.service-detail-grid .span-2 {
+  grid-column: span 2;
+}
+
+.service-detail-grid span {
+  color: #7a8294;
+  font-size: 12px;
+}
+
+.service-detail-grid strong {
+  color: #2f3847;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.history-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.history-head strong {
+  color: #172033;
+  font-size: 15px;
+}
+
+.release-history-table {
+  border: 1px solid #edf1f6;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.history-jenkins-cell {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.history-jenkins-cell a,
+.release-history-table a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
 @media (max-width: 900px) {
   .service-filter,
   .release-summary,
@@ -1644,6 +2059,21 @@ onMounted(loadPageData)
 
   .dialog-context {
     grid-template-columns: 1fr;
+  }
+
+  .detail-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .detail-actions {
+    justify-content: flex-start;
+  }
+
+  .service-detail-grid,
+  .service-detail-grid .span-2 {
+    grid-template-columns: 1fr;
+    grid-column: auto;
   }
 }
 </style>

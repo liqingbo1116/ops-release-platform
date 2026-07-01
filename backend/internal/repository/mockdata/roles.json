@@ -1,6 +1,0 @@
-[
-  {"code":"PLATFORM_ADMIN","name":"平台管理员","description":"管理环境、Agent、用户、角色、发布、部署和系统配置","permissions":["*"]},
-  {"code":"OPS","name":"运维人员","description":"管理环境、执行发布和部署、查看日志","permissions":["environment:write","agent:write","baseline:write","release:write","deploy:write"]},
-  {"code":"DEVELOPER","name":"研发人员","description":"查看环境和镜像，申请发布服务","permissions":["baseline:read","release:create","image:read"]},
-  {"code":"VIEWER","name":"只读用户","description":"查看基线、发布记录和环境状态","permissions":["environment:read","baseline:read","release:read","deploy:read"]}
-]

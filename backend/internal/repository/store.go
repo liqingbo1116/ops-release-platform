@@ -58,10 +58,13 @@ type Store interface {
 	UpsertManagedServices(productID string, services []domain.DiscoveredService) ([]domain.ManagedService, error)
 	RemoveManagedServices(productID string, serviceIDs []string) ([]domain.ManagedService, error)
 	ConfirmManagedServiceRegistry(productID string, registryHost string, harborProjects []string) ([]domain.ManagedService, error)
-	BindManagedServicePipeline(productID string, serviceID string, jobName string, branch string) (domain.ManagedService, bool, error)
+	BindManagedServicePipeline(productID string, serviceID string, jobName string, jobURL string, branch string) (domain.ManagedService, bool, error)
 	CreateReleaseOrder(input domain.CreateReleaseOrderInput) (domain.ReleaseOrder, error)
 	ListReleases(query string) []domain.ReleaseOrder
+	ListServiceReleases(productID string, serviceID string) []domain.ReleaseOrder
 	GetReleaseDetail(id string) (domain.ReleaseDetail, bool)
+	UpdateReleaseBuildStatus(id string, buildID string, buildStatus string, buildURL string, status string, progress int) (domain.ReleaseOrder, bool, error)
+	UpdateReleaseImage(id string, imageRepository string, imageTag string) (domain.ReleaseOrder, bool, error)
 	ListDeployTasks(query string) []domain.DeployTask
 	GetDeployDetail(id string) (domain.DeployDetail, bool)
 	HasEnvironmentAction(environmentID string, action string) bool

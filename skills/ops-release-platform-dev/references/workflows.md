@@ -78,7 +78,6 @@ For real environment integration checks during development, also load the integr
 
 Development integration variables are:
 
-- `INTEGRATION_MODE`
 - `LOCAL_HARBOR_URL`
 - `LOCAL_HARBOR_USERNAME`
 - `LOCAL_HARBOR_PASSWORD`

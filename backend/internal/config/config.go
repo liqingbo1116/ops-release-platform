@@ -6,7 +6,6 @@ type Config struct {
 	Port                     string
 	DatabaseDSN              string
 	RedisAddr                string
-	IntegrationMode          string
 	LocalHarborURL           string
 	LocalHarborUsername      string
 	LocalHarborPassword      string
@@ -28,7 +27,6 @@ func Load() Config {
 		Port:                     port,
 		DatabaseDSN:              os.Getenv("DATABASE_DSN"),
 		RedisAddr:                os.Getenv("REDIS_ADDR"),
-		IntegrationMode:          envWithDefault("INTEGRATION_MODE", "mock"),
 		LocalHarborURL:           os.Getenv("LOCAL_HARBOR_URL"),
 		LocalHarborUsername:      os.Getenv("LOCAL_HARBOR_USERNAME"),
 		LocalHarborPassword:      os.Getenv("LOCAL_HARBOR_PASSWORD"),

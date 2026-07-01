@@ -33,8 +33,8 @@ const router = useRouter()
 const authStore = useAuthStore()
 const loading = ref(false)
 const form = reactive({
-  username: 'admin',
-  password: 'mock',
+  username: '',
+  password: '',
 })
 
 async function submit() {

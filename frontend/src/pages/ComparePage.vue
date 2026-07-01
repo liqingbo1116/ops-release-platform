@@ -56,21 +56,43 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MetricCard from '@/components/MetricCard.vue'
 import ServiceDiffTable from '@/components/ServiceDiffTable.vue'
-import { getBaselineCompare, getBaselineDetail } from '@/api/baselines'
-import { listEnvironments } from '@/api/environments'
-import { baselineMockData } from '@/api/mockData/baseline'
-import { environmentMockData } from '@/api/mockData/environment'
+import { getBaselineCompare, getBaselineDetail, type BaselineDetailItem, type BaselineDiffResult } from '@/api/baselines'
+import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
-const data = ref({ ...baselineMockData.diffResult })
-const baselineDetail = ref({ ...baselineMockData.baselineDetail })
-const environments = ref<typeof environmentMockData.environments>([])
+const emptyDiffResult = (): BaselineDiffResult => ({
+  baselineId: '',
+  sourceBaselineId: '',
+  targetEnvironmentId: '',
+  summary: {
+    consistent: 0,
+    needUpdate: 0,
+    missingInTarget: 0,
+    workloadError: 0,
+    publishable: 0,
+  },
+  items: [],
+})
+const emptyBaselineDetail = (): BaselineDetailItem => ({
+  id: '',
+  name: '',
+  sourceEnvironmentName: '',
+  serviceCount: 0,
+  createdBy: '',
+  createdAt: '',
+  status: 'UNKNOWN',
+  purpose: '',
+  items: [],
+})
+const data = ref<BaselineDiffResult>(emptyDiffResult())
+const baselineDetail = ref<BaselineDetailItem>(emptyBaselineDetail())
+const environments = ref<EnvironmentInfo[]>([])
 const keyword = ref('')
 const statusFilter = ref('ALL')
 const selectedIds = ref<string[]>([])
-const baselineId = computed(() => String(route.query.baselineId || data.value.sourceBaselineId || 'BL-20260607-0001'))
+const baselineId = computed(() => String(route.query.baselineId || data.value.sourceBaselineId || data.value.baselineId || ''))
 const targetEnvironmentId = computed(() => String(route.query.targetEnvironmentId || data.value.targetEnvironmentId || ''))
 const publishableCount = computed(() => data.value.summary.publishable ?? data.value.items.filter((item) => item.publishable).length)
 const baselineSummary = computed(() => `${baselineDetail.value.sourceEnvironmentName} / ${baselineDetail.value.serviceCount} 服务 / ${baselineDetail.value.status}`)
@@ -81,9 +103,18 @@ const targetSummary = computed(() =>
     : `目标环境 ${targetEnvironmentId.value || data.value.targetEnvironmentId}`,
 )
 
+const normalizedItems = computed(() =>
+  data.value.items.map((item) => ({
+    ...item,
+    sourceTag: item.sourceTag ?? '',
+    targetTag: item.targetTag ?? null,
+    strategy: typeof item.strategy === 'string' ? item.strategy : '',
+  })),
+)
+
 const filteredItems = computed(() => {
   const q = keyword.value.trim().toLowerCase()
-  return data.value.items.filter((item) => {
+  return normalizedItems.value.filter((item) => {
     const statusMatched =
       statusFilter.value === 'ALL' ||
       item.diffStatus === statusFilter.value ||
@@ -99,7 +130,7 @@ function selectPublishable() {
 }
 
 function goCreateByMode(mode: 'SERVICE_RELEASE' | 'SERVICE_DEPLOYMENT') {
-  const selectedItems = data.value.items.filter((item) => selectedIds.value.includes(item.serviceId))
+  const selectedItems = normalizedItems.value.filter((item) => selectedIds.value.includes(item.serviceId))
   const expectedStatus = mode === 'SERVICE_DEPLOYMENT' ? 'MISSING_IN_TARGET' : 'NEED_UPDATE'
   const targetItems = selectedItems.filter((item) => item.diffStatus === expectedStatus)
 
@@ -130,11 +161,17 @@ async function loadEnvironments() {
   try {
     environments.value = await listEnvironments()
   } catch {
-    environments.value = [...environmentMockData.environments]
+    ElMessage.error('加载环境列表失败')
+    environments.value = []
   }
 }
 
 async function loadCompare() {
+  if (!baselineId.value) {
+    data.value = emptyDiffResult()
+    baselineDetail.value = emptyBaselineDetail()
+    return
+  }
   loading.value = true
   try {
     const [detail, result] = await Promise.all([
@@ -144,9 +181,9 @@ async function loadCompare() {
     baselineDetail.value = detail
     data.value = result
   } catch {
-    ElMessage.warning('加载差异对比失败，已显示本地示例数据')
-    baselineDetail.value = { ...baselineMockData.baselineDetail }
-    data.value = { ...baselineMockData.diffResult }
+    ElMessage.error('加载差异对比失败')
+    baselineDetail.value = emptyBaselineDetail()
+    data.value = emptyDiffResult()
   } finally {
     loading.value = false
   }

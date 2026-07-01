@@ -69,8 +69,8 @@ func Load(configFile string) (Config, error) {
 	if cfg.Token == "" && cfg.RegisterToken == "" {
 		return Config{}, errors.New("AGENT_TOKEN or AGENT_REGISTER_TOKEN is required")
 	}
-	if cfg.Mode != "remote-probe" && cfg.Mode != "mock" {
-		return Config{}, errors.New("AGENT_MODE only supports remote-probe or mock")
+	if cfg.Mode != "remote-probe" {
+		return Config{}, errors.New("AGENT_MODE only supports remote-probe")
 	}
 	if cfg.MaxTasks != 1 {
 		return Config{}, errors.New("only AGENT_MAX_TASKS=1 is supported in v1")

@@ -31,7 +31,7 @@ cp .env.example agent.conf
 - `AGENT_REGISTER_TOKEN`：Agent 首次注册令牌。
   在平台 Agent 管理页面生成，写入项目环境机器上的 `agent.conf`；该令牌用于建立 Agent 与平台连接，使用一次后失效。
 - `AGENT_MODE`：Agent 执行模式。
-  V1 研发阶段默认 `remote-probe`，只做真实远程资源探测。仅本地协议验证时才可临时使用 `mock`，不要用于真实环境验收。
+  V1 研发阶段固定使用 `remote-probe`，只做真实远程资源探测。运行态不支持 mock 模式。
 - `AGENT_HEALTH_PORT`：Agent 本地健康检查端口。
   默认 `18080`。用于 `curl http://127.0.0.1:<port>/healthz` 或宿主机探活，不要求平台主动访问。
 - `AGENT_POLL_INTERVAL_SECONDS`：任务租约轮询间隔，单位秒。

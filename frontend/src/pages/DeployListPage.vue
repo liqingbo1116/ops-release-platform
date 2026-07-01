@@ -5,7 +5,7 @@
         <h1>服务部署任务</h1>
         <p>面向目标环境缺失服务的首次部署，按来源基线、缺失服务、Agent 执行状态和下一步动作跟踪。</p>
       </div>
-      <el-button type="primary" @click="$router.push('/deploy-tasks/DEP-20260607-MOCK')">查看部署详情</el-button>
+      <el-button type="primary" :loading="loading" @click="loadRows">刷新</el-button>
     </div>
 
     <el-card shadow="never">
@@ -56,12 +56,11 @@
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { listDeployTasks } from '@/api/deployTasks'
-import { deployMockData } from '@/api/mockData/deploy'
+import { listDeployTasks, type DeployTask } from '@/api/deployTasks'
 
 const keyword = ref('')
 const loading = ref(false)
-const rows = ref([...deployMockData.deployTasks])
+const rows = ref<DeployTask[]>([])
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   if (!q) return rows.value
@@ -72,12 +71,12 @@ const filteredRows = computed(() => {
   )
 })
 
-function missingServiceText(item: typeof deployMockData.deployTasks[number]) {
+function missingServiceText(item: DeployTask) {
   const count = item.missingServiceCount ?? item.serviceNames?.length ?? 0
   return count > 0 ? `${count} 个目标缺失服务` : '待确认缺失服务'
 }
 
-function serviceNamesText(item: typeof deployMockData.deployTasks[number]) {
+function serviceNamesText(item: DeployTask) {
   return item.serviceNames?.length ? item.serviceNames.join('、') : '等待差异结果'
 }
 
@@ -93,8 +92,8 @@ async function loadRows() {
   try {
     rows.value = await listDeployTasks()
   } catch {
-    ElMessage.warning('加载部署任务失败，已显示本地示例数据')
-    rows.value = [...deployMockData.deployTasks]
+    ElMessage.error('加载部署任务失败，请检查后端接口或数据库')
+    rows.value = []
   } finally {
     loading.value = false
   }

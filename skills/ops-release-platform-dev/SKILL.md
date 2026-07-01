@@ -60,7 +60,7 @@ Follow this order exactly. Do not skip forward. Do not reintroduce mock for a co
      - real Harbor URL and credential input; HTTP registries must be supported
      - real Jenkins URL and credential input when Jenkins is part of the current acceptance path
      - remote Agent runtime before accepting remote/project resource probing
-     - `.secrets/integration-connections.*` loaded only for development-stage private values when `INTEGRATION_MODE=real`
+     - `.secrets/integration-connections.*` loaded only for development-stage private values when direct local integration checks need extra credentials
    - Gate: if PostgreSQL or Redis is not ready, resource management cannot replace mock and next phase cannot start.
    - Gate: if resource forms still expose `credentialRef`, statuses are user-editable, probe cache is mock/missing, or remote probing bypasses Agent, this phase is not complete.
 2. Environment management

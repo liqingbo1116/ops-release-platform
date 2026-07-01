@@ -7,19 +7,19 @@ Always verify this file against `git status --short --branch`, `git log -1 --one
 ## Done And Pushed
 
 - Task 1: frontend/backend/docker-compose initialization.
-- Task 2: frontend static pages and mock data.
-- Task 3: backend mock REST API.
-- Task 4: mock login, route guard, user/role/permission pages and APIs.
-- Task 5: changelog page and mock API.
-- Task 6: frontend/backend API integration with mock fallback.
+- Task 2: frontend static page prototype.
+- Task 3: backend REST API prototype.
+- Task 4: login, route guard, user/role/permission page and API prototype.
+- Task 5: changelog page and API prototype.
+- Task 6: frontend/backend API integration.
 - Task 7: PostgreSQL/GORM model and migration foundation.
-- Task 8: Redis Stream mock Agent worker.
+- Task 8: Redis Stream Agent task model prototype.
 - Task 9: backend API tests and frontend Vitest tests.
-- Phase 4 mock integration adapter preparation:
+- Phase 4 integration adapter preparation:
   - Jenkins, Registry/Harbor, Kubernetes adapter interfaces.
-  - Mock adapter suite.
-  - Environment connection check through mock Kubernetes and Registry adapters.
-  - `INTEGRATION_MODE=mock` configuration.
+  - Real adapter suite.
+  - Environment connection check through real Kubernetes and Registry adapters.
+  - Runtime integration has no mock/real mode switch; adapters are real-only.
   - Adapter tests.
 - Project skills:
   - `ops-release-platform-dev`
@@ -48,9 +48,9 @@ Latest pushed milestone:
   - 服务与版本来源: initial service discovery, managed service list, image source classification, private registry confirmation, and release-source readiness display are implemented.
 - Next default step:
   - Strengthen the product service list as the main release entry, then implement service-to-Jenkins Pipeline binding, then create release orders from service rows with V1 flow nodes.
-- Completed and pushed mock-first status:
+- Completed and pushed early prototype status:
   - release/deploy detail closure
-  - Agent protocol mock closure
+  - Agent protocol closure
   - service release/deployment boundary closure
   - release list/detail source metadata
   - deploy list missing-service first-deployment view
@@ -261,7 +261,7 @@ Use this section as the current implementation guide after service/version-sourc
      - Agent Linux host
      - outbound connectivity from Agent to platform API
      - repeatable test service
-3. Complete historical mock executor in remote Agent. Locally implemented, but not a current V1 completion gate.
+3. Complete real executor in remote Agent. Historical simulation executor is not a current V1 completion gate and must not be restored.
    - no Jenkins/Harbor/K8s dependency yet
    - Agent leases/pulls release/deploy payloads
    - Agent simulates execution steps and callbacks

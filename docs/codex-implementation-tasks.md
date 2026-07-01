@@ -96,23 +96,22 @@
    - 进入前先准备：
      - 第 1 步 Agent 可远程运行
      - Agent 可访问平台 API
-3. 远程 Agent mock executor
-   - 不接真实 Jenkins/Harbor/K8s
-   - Agent 领取任务后模拟执行发布/部署步骤
-   - 模拟 Jenkins 构建、Harbor 同步、K8s 部署/更新、健康检查
-   - 回传步骤状态、日志、失败原因和最终结果
+3. 远程 Agent 真实探测与执行器
+   - 不提供模拟执行器；外部系统未准备好时本阶段阻塞
+   - Agent 领取任务后必须调用真实 Jenkins、Harbor、K8s 或返回明确阻塞原因
+   - 回传真实步骤状态、日志、失败原因和最终结果
    - 用户视角：
      - 用户可以通过平台提交发布/部署任务
-     - 远程 Agent 实际收到任务并模拟执行
+     - 远程 Agent 实际收到任务并基于真实外部系统执行或返回阻塞
      - 详情页展示远程 Agent 回传的过程和结果
-   - 进入前只需要 Agent 主机和网络连通性
+   - 进入前需要 Agent 主机、网络连通性，以及待验证动作所需的真实外部系统访问
 4. 发布/部署详情与远程 Agent 回调收口
    - 补 `agentTaskId` 关联、状态刷新、日志、失败原因
    - 用户视角：
      - 进入发布详情页可看到状态、步骤、日志、执行记录、发布报告
      - 进入部署详情页可看到状态、步骤、日志、执行记录
      - 失败或阻塞时可操作重试、跳过、人工确认、回滚
-   - 若要真实远程验证，先完成第 1、2、3 步
+   - 远程验证必须先完成第 1、2、3 步
 5. 真实发布链路联调
    - 用户视角：
      - 创建发布时可选择 Jenkins Job 或 Harbor 镜像 tag
@@ -145,47 +144,47 @@
 
 ## 当前进度结论
 
-- 已完成并已推送：
+- 已完成并已推送的早期原型：
   - 工程初始化
-  - 前端页面与 mock 数据
-  - 后端 mock API
-  - 登录/权限 mock
+  - 前端页面原型
+  - 后端 API 原型
+  - 登录/权限原型
   - 更新日志
   - 前后端 API 联调
   - 数据库与迁移基础
-  - Redis Stream mock Agent worker
-  - mock 集成 adapter
+  - Redis Stream Agent 任务模型原型
+  - 集成 adapter 接口预留
 - 当前本地阶段：
   - 平台侧发布/部署详情闭环已完成并推送
-  - 平台侧 Agent 协议 mock-first 实现已完成并推送
-  - 运行态快照与基线生成 mock 链路已完成并推送
-  - 差异结果到服务发布/新增部署的端到端 mock 验证已完成并推送
-  - 失败动作、审计影响范围、环境/Agent 准备状态 mock-first 验证已完成并推送
+  - 平台侧 Agent 协议原型已完成并推送
+  - 运行态快照与基线生成原型链路已完成并推送
+  - 差异结果到服务发布/新增部署的端到端原型验证已完成并推送
+  - 失败动作、审计影响范围、环境/Agent 准备状态原型验证已完成并推送
 - 当前本地未提交阶段：
   - 已补齐独立 Agent 可运行进程：`agent/cmd/agent`
   - 已补齐 Agent 配置读取、健康检查、心跳上报、任务租约领取、回调上报客户端
-  - 已补齐远程 Agent mock executor，先模拟 Jenkins、Harbor、K8s 执行步骤
+  - 已补齐远程 Agent 真实执行器框架；真实动作依赖对应外部系统配置
   - 已补齐 `agent/Dockerfile`、`agent/docker-compose.yml`、`agent/.env.example`
   - 已补齐平台 `/api/agent-tasks/lease` 主动领取/租约接口
   - 已补齐发布/部署任务入队时的 `agentId`、`environmentId`、payload 绑定
   - 已补齐 Agent 租约领取后回调步骤、日志、最终结果的本地回归测试
 - 当前缺口：
   - 独立 Agent 包尚未在真实远程 Linux 主机用 `docker compose` 验证
-  - 尚未完成跨主机网络下的心跳、租约领取、mock 日志、最终结果回传验收
+  - 尚未完成跨主机网络下的心跳、租约领取、真实日志、最终结果回传验收
   - 尚未接入真实 Jenkins、Harbor/Registry、Kubernetes
   - 因此真实远程发版/部署测试仍需等 Agent 远程验证和外部组件准备完成后开始
 - 默认下一步：
   - 先在远程 Linux 主机部署 `agent/docker-compose.yml`
-  - 验证 Agent 只通过出站访问平台 API 完成心跳、任务领取、mock 执行、日志和结果回传
+  - 验证 Agent 只通过出站访问平台 API 完成心跳、任务领取、真实执行或阻塞回报、日志和结果回传
   - 再收口发布/部署详情页对远程 Agent 回调状态的展示
   - Jenkins、Harbor/Registry、Kubernetes 和测试样例准备完成后，再进入真实执行联调
 
-## 已完成的平台侧 mock-first Agent 协议
+## 已完成的平台侧 Agent 协议原型
 
 当前代码已支持：
 
 - Agent 心跳：刷新在线状态、版本、能力、心跳时间
-- 平台侧 mock 任务状态：从内存协议存储读取发布/部署任务状态
+- 平台侧任务状态：从协议存储读取发布/部署任务状态
 - Agent 步骤回传：更新当前步骤和状态
 - Agent 日志回传：追加任务日志
 - Agent 结果回传：更新最终状态并释放 Agent 当前任务
@@ -194,37 +193,37 @@
 
 当前实现已具备本地可运行的独立 Agent、Dockerfile、远程 `docker compose` 模板和 Agent 主动领取/租约链路。下一步必须先把该 Agent 部署到远程 Linux 主机验证出站链路；真实 Jenkins、真实 Harbor、真实 Kubernetes 仍未接入。
 
-## 已完成的运行态快照与基线生成 mock 链路
+## 已废弃的运行态快照与基线生成原型链路
 
 当前代码已支持：
 
-- 从来源环境生成基线时同步生成 mock 运行态服务清单
+- 早期曾从来源环境生成基线时同步生成演示运行态服务清单
 - 基线详情返回快照来源、采集时间、采集模式、快照任务 ID
 - 基线详情页展示运行态快照元数据，便于用户确认基线来自哪个环境和哪次采集
 - 基线对比继续兼容 `NEED_UPDATE`、`MISSING_IN_TARGET`、`WORKLOAD_ERROR`、`CONSISTENT` 分类
 
-真实 Kubernetes 运行态采集尚未接入。环境准备完成前，继续使用 `MOCK_RUNTIME` 模式验证页面和任务流。
+该链路仅保留为历史背景。当前 V1 禁止使用演示运行态替代真实 Kubernetes/Agent 上报数据；真实环境未准备好时应标记阻塞。
 
-## 已验证的差异到任务端到端 mock 链路
+## 已验证的差异到任务端到端原型链路
 
 当前代码已支持并通过本地测试验证：
 
 - 差异页选择 `NEED_UPDATE` 服务后进入创建发布页
 - 差异页选择 `MISSING_IN_TARGET` 服务后进入创建部署页
 - 创建发布/部署任务后跳转详情页并保留 `agentTaskId`
-- 前端纯 mock 模式下也能读取 mock Agent 任务状态、当前步骤和日志
+- 前端通过后端 API 读取 Agent 任务状态、当前步骤和日志
 - 服务发版请求不依赖来源基线
 - 服务部署请求继续携带来源基线，用于确认目标缺失服务范围
 
-真实 Jenkins、Harbor、Kubernetes 未准备完成前，本步骤只验证用户路径和接口契约，不接真实外部组件。
+真实 Jenkins、Harbor、Kubernetes 未准备完成前，本步骤不能作为真实发布/部署完成标准。
 
-## 已完成的失败动作与准备状态 mock-first 验证
+## 已完成的失败动作与准备状态原型验证
 
 当前代码已支持并通过本地测试验证：
 
-- 发布重试会更新 mock Agent task status 为 `retry` / `RUNNING`
-- 发布回滚会更新 mock Agent task status 为 `rollback` / `ROLLED_BACK`
-- 部署步骤重试、跳过、人工确认会同步更新 mock Agent task status
+- 发布重试会更新 Agent task status 为 `retry` / `RUNNING`
+- 发布回滚会更新 Agent task status 为 `rollback` / `ROLLED_BACK`
+- 部署步骤重试、跳过、人工确认会同步更新 Agent task status
 - 发布/部署详情页展示操作者、目标环境、影响服务、结果、失败步骤和最近动作
 - 环境页展示真实联调前的 Agent、Jenkins、Harbor/Registry、Kubernetes 准备项
 - Agent 页展示 V1 默认 Linux + `docker compose` 部署假设，并提示离线 Agent 会阻断远程发布/部署
@@ -257,10 +256,10 @@
 
 ## 总提示词
 
-> 下面这段是历史任务模板，仅作背景参考，不作为当前 V1 执行基线。当前唯一有效顺序以 `docs/development-plan.md` 的“V1 研发主线路径”和 `skills/ops-release-platform-todo/SKILL.md` 的 “V1 Ordered Path” 为准，且必须优先资源管理与真实探测缓存，不能再以 mock adapter 作为阶段完成标准。
+> 下面这段是历史任务模板，仅作背景参考，不作为当前 V1 执行基线。当前唯一有效顺序以 `docs/development-plan.md` 的“V1 研发主线路径”和 `skills/ops-release-platform-todo/SKILL.md` 的 “V1 Ordered Path” 为准。运行态禁止 mock，不能再以 mock adapter、mock repository、页面 fallback 或模拟任务作为阶段完成标准。
 
 ```text
-你正在开发一个企业内部运维发布交付平台。请以 docs/PRD.md 为业务依据，以 design/ops-release-console-v3.html 为视觉和页面结构参考，以 docs/domain-model.md、docs/state-machine.md、docs/api-contract.md、mocks/ 为开发约束。
+你正在开发一个企业内部运维发布交付平台。请以 docs/PRD.md 为业务依据，以 design/ops-release-console-v3.html 为视觉和页面结构参考，以 docs/domain-model.md、docs/state-machine.md、docs/api-contract.md 为开发约束。
 
 技术栈固定：前端 Vue 3 + Vite + TypeScript + Pinia + Vue Router + Element Plus；后端 Go + Gin + GORM；数据库 PostgreSQL；缓存与任务队列 Redis；部署使用 docker-compose。
 ```
@@ -277,10 +276,10 @@
 - `backend` 可以 `go run ./cmd/server`
 - `docker compose up` 可以启动 postgres 和 redis
 
-## 任务 2：前端静态页面工程化
+## 任务 2：前端静态页面工程化（历史模板，已废弃）
 
 ```text
-请根据 design/ops-release-console-v3.html 拆分 Vue 页面和组件。先使用 mocks/ 下的 JSON 数据，不连接后端。实现 Layout、侧边导航、顶部栏、首页、环境管理、Agent 管理、基线列表、基线详情、差异对比、创建发布单、发布详情、部署列表、部署详情。
+请根据 design/ops-release-console-v3.html 拆分 Vue 页面和组件，并直接对接后端 API。实现 Layout、侧边导航、顶部栏、首页、环境管理、Agent 管理、基线列表、基线详情、差异对比、创建发布单、发布详情、部署列表、部署详情。
 ```
 
 重点：
@@ -290,10 +289,10 @@
 - 长表格横向滚动
 - 抽屉展示环境配置、Agent 注册、服务失败详情
 
-## 任务 3：后端 mock API
+## 任务 3：后端 API 原型（历史模板，已废弃）
 
 ```text
-请基于 docs/api-contract.md 实现 Go REST API。数据先从 mocks/ JSON 加载或在后端内置 mock repository。返回统一响应格式。
+请基于 docs/api-contract.md 实现 Go REST API。数据来自数据库、Agent 上报或真实第三方系统 adapter。返回统一响应格式。
 ```
 
 重点接口：
@@ -308,10 +307,10 @@
 - `/api/deploy-tasks`
 - `/api/deploy-tasks/{id}`
 
-## 任务 4：登录与权限 mock
+## 任务 4：登录与权限原型（历史模板，已废弃）
 
 ```text
-请补充登录与基础权限能力。前端实现登录页、路由守卫、顶部栏用户信息、退出登录、用户管理、角色管理、环境权限配置页面。后端实现 mock 登录、当前用户、用户列表、角色列表、权限列表接口。先使用 mock token，不接真实 SSO，不保存真实密码。
+请补充登录与基础权限能力。前端实现登录页、路由守卫、顶部栏用户信息、退出登录、用户管理、角色管理、环境权限配置页面。后端实现登录、当前用户、用户列表、角色列表、权限列表接口；认证数据必须来自真实持久化或明确的认证集成。
 ```
 
 重点：
@@ -320,7 +319,7 @@
 - 登录后能进入工作台
 - 顶部栏展示当前用户和角色
 - 退出登录后清理本地 token
-- 用户、角色、环境权限页面使用 mock 数据
+- 用户、角色、环境权限页面使用后端 API 数据
 - 写操作入口按角色做基础按钮级控制
 
 重点接口：
@@ -332,17 +331,17 @@
 - `GET /api/roles`
 - `GET /api/permissions`
 
-## 任务 5：更新日志页面与 mock API
+## 任务 5：更新日志页面与 API（历史模板，已废弃）
 
 ```text
-请补充更新日志页面，用于记录平台每个小版本上线后的迭代与更新情况。前端在系统管理下增加更新日志菜单和页面，后端提供 mock changelog API。
+请补充更新日志页面，用于记录平台每个小版本上线后的迭代与更新情况。前端在系统管理下增加更新日志菜单和页面，后端提供 changelog API。
 ```
 
 重点：
 
 - 页面展示版本号、上线时间、更新类型、新增功能、修复问题、已知问题、发布人
 - 支持按版本号、更新类型、关键词筛选
-- 数据先来自 `mocks/changelog.json` 或后端 mock repository
+- 数据来自后端 API 和持久化存储
 - 暂不做富文本编辑和审批发布
 
 重点接口：
@@ -352,7 +351,7 @@
 ## 任务 6：前后端联调
 
 ```text
-请把前端 mock JSON 替换为后端 API 调用。保留一个 mock 模式开关，便于没有后端时前端仍可运行。
+请把前端数据来源固定为后端 API 调用。没有后端时前端应显示接口错误，不启用 mock fallback。
 ```
 
 ## 任务 7：数据库模型
@@ -361,10 +360,10 @@
 请根据 docs/domain-model.md 设计 PostgreSQL 表结构和 GORM model，添加数据库迁移。先支持环境、Agent、基线、发布单、部署任务、用户、角色、权限、更新日志、操作日志。
 ```
 
-## 任务 8：任务与 Agent 模拟
+## 任务 8：任务与 Agent 执行链路（历史模板，已废弃）
 
 ```text
-请使用 Redis Stream 实现平台任务队列和 mock Agent worker。创建发布单或部署任务后，mock worker 按步骤更新任务状态并追加日志。
+请实现平台任务队列与真实 Agent 领取/回传链路。创建发布单或部署任务后，由真实 Agent 按步骤执行、更新任务状态并追加日志。
 ```
 
 ## 任务 9：测试和收口

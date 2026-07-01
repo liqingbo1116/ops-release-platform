@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"log"
 
@@ -45,11 +44,8 @@ func (s *Server) Run() error {
 		return fmt.Errorf("redis queue init failed: %w", err)
 	}
 	defer queue.Close()
-	queue.StartMockWorker(context.Background())
-	log.Println("mock agent worker started")
 
 	integrations, err := integration.NewSuite(integration.Config{
-		Mode: s.config.IntegrationMode,
 		Registries: map[string]integration.RegistryConfig{
 			"local": {
 				URL:      s.config.LocalHarborURL,
@@ -76,11 +72,7 @@ func (s *Server) Run() error {
 		return fmt.Errorf("integration init failed: %w", err)
 	}
 
-	mockRepo, err := repository.NewMockRepository()
-	if err != nil {
-		return fmt.Errorf("load mock repository failed: %w", err)
-	}
-	repo := repository.NewDatabaseStore(database, mockRepo)
+	repo := repository.NewDatabaseStore(database)
 	protocolStore := repository.NewDatabaseProtocolStore(database)
 	router := api.NewRouter(repo, queue, protocolStore, integrations)
 	return router.Run(fmt.Sprintf(":%s", s.config.Port))

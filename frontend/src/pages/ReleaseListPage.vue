@@ -2,40 +2,38 @@
   <section class="page">
     <div class="page-head">
       <div>
-        <h1>发布单列表</h1>
-        <p>统一查看服务发版与服务部署任务，按发版来源、部署基线、目标环境和执行状态快速检索。</p>
+        <h1>发版记录</h1>
+        <p>查看服务发版结果、执行状态和日志；新发版请从服务管理进入。</p>
       </div>
-      <el-button type="primary" @click="$router.push('/releases/create')">新建发布单</el-button>
     </div>
 
     <el-card shadow="never">
       <div class="toolbar">
-        <el-input v-model="keyword" placeholder="搜索发布单、发版来源、基线、目标环境、Agent" clearable />
-        <el-button @click="$router.push('/releases/REL-20260607-031')">查看示例详情</el-button>
+        <el-input v-model="keyword" placeholder="搜索记录、服务、产品、Agent" clearable />
       </div>
       <el-table v-loading="loading" :data="filteredRows" class="wide-table">
-        <el-table-column prop="id" label="发布单" min-width="160" />
-        <el-table-column prop="type" label="类型" min-width="150" />
-        <el-table-column label="来源" min-width="220">
+        <el-table-column prop="id" label="记录" min-width="150" />
+        <el-table-column label="服务" min-width="220">
           <template #default="{ row }">
-            <div class="source-cell">
-              <strong>{{ sourceLabel(row) }}</strong>
-              <span>{{ sourceFoot(row) }}</span>
+            <div class="service-cell">
+              <strong>{{ serviceLabel(row) }}</strong>
+              <span>{{ serviceFoot(row) }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="targetEnvironmentName" label="目标环境" min-width="150" />
+        <el-table-column prop="targetEnvironmentName" label="产品" min-width="150" />
         <el-table-column prop="agentName" label="执行 Agent" min-width="170" />
-        <el-table-column label="进度" min-width="160">
-          <template #default="{ row }">
-            <el-progress :percentage="row.progress" :status="row.status === 'PARTIAL_FAILED' ? 'exception' : undefined" />
-          </template>
-        </el-table-column>
         <el-table-column label="状态" min-width="120">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="100">
-          <template #default="{ row }"><el-button link type="primary" @click="$router.push(`/releases/${row.id}`)">查看</el-button></template>
+        <el-table-column label="目标镜像" min-width="240">
+          <template #default="{ row }">{{ imageLabel(row) }}</template>
+        </el-table-column>
+        <el-table-column label="执行" min-width="160">
+          <template #default="{ row }">{{ executionLabel(row) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" fixed="right" width="110">
+          <template #default="{ row }"><el-button link type="primary" @click="$router.push(`/releases/${row.id}`)">查看日志</el-button></template>
         </el-table-column>
       </el-table>
     </el-card>
@@ -45,35 +43,45 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
-import { listReleases } from '@/api/releases'
-import { releaseMockData } from '@/api/mockData/release'
+import { listReleases, type ReleaseOrder } from '@/api/releases'
 import StatusTag from '@/components/StatusTag.vue'
 
 const keyword = ref('')
 const loading = ref(false)
-const rows = ref([...releaseMockData.releases])
+const rows = ref<ReleaseOrder[]>([])
 
 const filteredRows = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   if (!q) return rows.value
   return rows.value.filter((item) =>
-    `${item.id} ${item.type} ${sourceLabel(item)} ${sourceFoot(item)} ${item.targetEnvironmentName} ${item.agentName}`
+    `${item.id} ${serviceLabel(item)} ${serviceFoot(item)} ${item.targetEnvironmentName} ${item.agentName} ${imageLabel(item)} ${executionLabel(item)}`
       .toLowerCase()
       .includes(q),
   )
 })
 
-function sourceLabel(item: typeof releaseMockData.releases[number]) {
-  if (item.type === 'SERVICE_DEPLOYMENT') return item.sourceBaselineId || '来源基线'
-  if (item.releaseSource === 'LOCAL_HARBOR_IMAGE') return '本地 Harbor 镜像'
-  if (item.releaseSource === 'JENKINS_JOB') return 'Jenkins Job'
+function serviceLabel(item: ReleaseOrder) {
+  const names = item.serviceNames?.filter(Boolean) ?? []
+  return names.length > 0 ? names.join('、') : '未记录服务'
+}
+
+function serviceFoot(item: ReleaseOrder) {
+  if (item.releaseSource === 'LOCAL_HARBOR_IMAGE') return '镜像发版'
+  if (item.releaseSource === 'JENKINS_JOB') return 'Jenkins 发版'
+  if (item.type === 'SERVICE_DEPLOYMENT') return '服务部署'
   return '服务发版'
 }
 
-function sourceFoot(item: typeof releaseMockData.releases[number]) {
-  if (item.type === 'SERVICE_DEPLOYMENT') return '缺失服务首次部署'
-  if (item.releaseSource === 'LOCAL_HARBOR_IMAGE') return `${item.imageRepository || '镜像仓库'}:${item.imageTag || '镜像 tag'}`
-  return item.buildId || '等待构建任务'
+function imageLabel(item: ReleaseOrder) {
+  if (item.imageRepository && item.imageTag) return `${item.imageRepository}:${item.imageTag}`
+  if (item.imageRepository || item.imageTag) return item.imageRepository || item.imageTag
+  return '等待环境确认'
+}
+
+function executionLabel(item: ReleaseOrder) {
+  if (item.buildId) return `Jenkins #${item.buildId}`
+  if (item.buildStatus) return item.buildStatus
+  return item.agentName || '待生成任务'
 }
 
 async function loadRows() {
@@ -81,8 +89,8 @@ async function loadRows() {
   try {
     rows.value = await listReleases()
   } catch {
-    ElMessage.warning('加载发布单失败，已显示本地示例数据')
-    rows.value = [...releaseMockData.releases]
+    ElMessage.error('加载发布单失败')
+    rows.value = []
   } finally {
     loading.value = false
   }
@@ -92,13 +100,13 @@ onMounted(loadRows)
 </script>
 
 <style scoped>
-.source-cell {
+.service-cell {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.source-cell span {
+.service-cell span {
   color: var(--el-text-color-secondary);
   font-size: 12px;
 }

@@ -17,16 +17,16 @@
 - `backend/cmd/server`: Gin server entrypoint.
 - `backend/internal/api`: routes, handlers, response envelope, API tests.
 - `backend/internal/app`: server assembly, DB migration, Redis queue, integration suite wiring.
-- `backend/internal/agent`: Redis Stream queue and mock Agent worker.
+- `backend/internal/agent`: Redis Stream queue and Agent task lease/callback handling.
 - `backend/internal/config`: environment variable loading.
 - `backend/internal/domain`: API/domain DTOs.
-- `backend/internal/repository`: mock repository, embedded mock JSON, GORM models and migration.
-- `backend/internal/integration`: third-party adapter interfaces and mock adapters.
+- `backend/internal/repository`: GORM models, migrations, and persistent store implementations.
+- `backend/internal/integration`: third-party adapter interfaces and real adapters.
 - `backend/internal/middleware`: CORS and request middleware.
 
 ## Frontend
 
-- `frontend/src/api`: API clients and mock-mode runtime data access.
+- `frontend/src/api`: backend API clients. Runtime mock fallback is forbidden.
 - `frontend/src/components`: shared UI components.
 - `frontend/src/pages`: route pages.
 - `frontend/src/router`: Vue Router setup and auth guard tests.

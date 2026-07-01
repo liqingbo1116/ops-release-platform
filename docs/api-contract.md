@@ -336,9 +336,9 @@ Response data：
 ```json
 {
   "leased": true,
-  "leaseId": "lease-REL-20260607-MOCK-001",
+  "leaseId": "lease-REL-20260607-031",
   "task": {
-    "id": "REL-20260607-MOCK",
+    "id": "REL-20260607-031",
     "type": "release",
     "action": "jenkins_agent_release",
     "agentId": "agent-project-x",
@@ -351,15 +351,15 @@ Response data：
       }
     ],
     "callback": {
-      "stepUrl": "https://platform.local/api/agent-tasks/REL-20260607-MOCK/steps",
-      "logUrl": "https://platform.local/api/agent-tasks/REL-20260607-MOCK/logs",
-      "resultUrl": "https://platform.local/api/agent-tasks/REL-20260607-MOCK/result"
+      "stepUrl": "https://platform.local/api/agent-tasks/REL-20260607-031/steps",
+      "logUrl": "https://platform.local/api/agent-tasks/REL-20260607-031/logs",
+      "resultUrl": "https://platform.local/api/agent-tasks/REL-20260607-031/result"
     }
   }
 }
 ```
 
-平台不得依赖访问项目环境 Agent endpoint，也不得向 Agent 主动推送任务。项目环境默认平台不可连通，Agent 只支持出站访问平台 API。V1 当前使用 `/api/agent-tasks/lease` 作为任务领取/租约接口；平台侧历史 mock 阶段的 `/api/agents/{id}/tasks/pull` 仅保留兼容，不作为项目环境发版/部署主链路。
+平台不得依赖访问项目环境 Agent endpoint，也不得向 Agent 主动推送任务。项目环境默认平台不可连通，Agent 只支持出站访问平台 API。V1 当前使用 `/api/agent-tasks/lease` 作为任务领取/租约接口；旧实验接口不作为项目环境发版/部署主链路。
 
 ## 基线
 
@@ -388,7 +388,7 @@ Response `data` 重点字段：
   "status": "DRAFT",
   "snapshotSource": "本地生产环境/local-prod",
   "snapshotCollectedAt": "2026-06-09T14:30:00+08:00",
-  "snapshotMode": "MOCK_RUNTIME",
+  "snapshotMode": "REAL_RUNTIME",
   "snapshotTaskId": "snapshot-bl-20260609-0004",
   "items": []
 }
@@ -441,12 +441,12 @@ Response item：
   "status": "JENKINS_QUEUED",
   "progress": 30,
   "agentTaskId": "REL-20260607-031",
-  "buildId": "BUILD-MOCK-20260607",
+  "buildId": "42",
   "buildStatus": "QUEUED",
-  "buildUrl": "https://jenkins.local/job/mock-service-release/1",
+  "buildUrl": "https://jenkins.local/job/user-service-release/1",
   "imageRepository": "harbor.local/project-x/user-service",
   "imageTag": "20260607-a1b2c3",
-  "imageDigest": "sha256:mock-20260607-a1b2c3",
+  "imageDigest": "sha256:9f2c0b6d4a1e7c8b5d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9876543210abcdef12",
   "createdAt": "2026-06-07T13:20:00+08:00"
 }
 ```
@@ -455,11 +455,11 @@ Response item：
 
 创建发布单。
 
-服务发版用于目标环境中已经存在的服务，不基于来源基线创建。平台调用 Jenkins adapter，MVP 阶段使用 mock Jenkins adapter，不直接接真实 Jenkins。
+服务发版用于目标环境中已经存在的服务，不基于来源基线创建。平台调用 Jenkins adapter 真实触发 Jenkins 构建，不提供 mock 构建开关。
 
 服务发版支持两种来源：
 
-- `JENKINS_JOB`：选择与 Jenkins 视图或特征 job 关联后的 Jenkins Job，执行构建 jar/dist、制作镜像并推送到本地 Harbor。
+- `JENKINS_JOB`：选择与产品 Jenkins view 匹配、且已绑定到服务的 Jenkins Pipeline，执行构建 jar/dist、制作镜像并推送到本地 Harbor。缺少产品 Jenkins 绑定、服务 Pipeline 绑定或 Jenkins 触发失败时，接口返回失败，不创建假发布单。
 - `LOCAL_HARBOR_IMAGE`：扫描本地 Harbor 上该服务的镜像版本，选择镜像 tag 发版；该路径不需要选择或触发 Jenkins Job。
 
 上述两种来源最终都需要通过项目环境中运行的 Agent 同步到项目环境，完成项目 Harbor 镜像同步和 workload tag 更新。本地环境默认由平台侧直连链路或现有 GitOps 链路处理，不需要 Agent。
@@ -488,11 +488,11 @@ Response data：
 
 ```json
 {
-  "id": "REL-20260607-MOCK",
+  "id": "REL-20260607-031",
   "status": "JENKINS_QUEUED",
   "executionMode": "JENKINS_AGENT",
-  "agentTaskId": "REL-20260607-MOCK",
-  "buildId": "BUILD-MOCK-20260607",
+  "agentTaskId": "REL-20260607-031",
+  "buildId": "42",
   "buildStatus": "QUEUED",
   "createdAt": "2026-06-07T13:20:00+08:00"
 }
@@ -510,7 +510,7 @@ Response data：
   "image": {
     "repository": "harbor.local/project-x/user-service",
     "tag": "20260607-a1b2c3",
-    "digest": "sha256:mock-20260607-a1b2c3"
+    "digest": "sha256:9f2c0b6d4a1e7c8b5d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9876543210abcdef12"
   }
 }
 ```
@@ -598,13 +598,13 @@ Response data 重点字段：
 
 ## Agent 任务
 
-V1 mock 阶段同时支持内存协议队列和 Redis Stream mock worker。发布/部署创建后会写入内存协议队列；如果 Redis 已配置，也会继续写入 Redis 队列，便于兼容旧 mock worker。
+V1 Agent 任务只记录真实发布/部署任务。发布/部署创建后写入平台任务租约队列，Agent 通过出站 API 领取任务并回传真实执行状态。
 
 ### GET /api/agent-tasks/{id}/status
 
-查询 Agent 任务状态和日志。优先读取内存协议队列中的 Agent 回传状态；若没有命中，再降级读取 Redis Stream mock Agent worker 写入的任务状态和日志。
+查询 Agent 任务状态和日志。状态和日志来自真实 Agent 回传。
 
-当 Redis 未配置时，接口返回 `enabled=false`，前端应降级展示发布/部署详情中的静态日志。
+当任务队列或 Agent 回传不可用时，接口返回明确错误或空状态，前端展示“暂无 Agent 回传”。
 
 Response data：
 
@@ -612,7 +612,7 @@ Response data：
 {
   "enabled": true,
   "status": {
-    "taskId": "REL-20260607-MOCK",
+    "taskId": "REL-20260607-031",
     "type": "release",
     "action": "jenkins_agent_release",
     "status": "SUCCESS",
@@ -621,8 +621,8 @@ Response data：
     "updatedAt": "2026-06-09T14:32:00+08:00"
   },
   "logs": [
-    "sync image mock log",
-    "release mock flow finished"
+    "remote harbor replication started",
+    "workload image updated successfully"
   ]
 }
 ```
@@ -648,7 +648,7 @@ Request：
 
 ```json
 {
-  "line": "sync image mock log"
+  "line": "remote harbor replication started"
 }
 ```
 
@@ -661,7 +661,7 @@ Request：
 ```json
 {
   "status": "SUCCESS",
-  "message": "release mock flow finished"
+  "message": "workload image updated successfully"
 }
 ```
 
@@ -728,10 +728,10 @@ Response data：
 
 ```json
 {
-  "id": "DEP-20260607-MOCK",
+  "id": "DEP-20260607-004",
   "status": "PENDING",
   "executionMode": "AGENT",
-  "agentTaskId": "DEP-20260607-MOCK",
+  "agentTaskId": "DEP-20260607-004",
   "createdAt": "2026-06-07T13:20:00+08:00"
 }
 ```

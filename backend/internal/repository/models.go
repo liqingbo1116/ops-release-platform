@@ -51,6 +51,7 @@ type ServiceModel struct {
 	PrivateRegistryHost      string `gorm:"size:256"`
 	PrivateRegistryConfirmed bool
 	JenkinsJobName           string `gorm:"size:256"`
+	JenkinsJobURL            string `gorm:"size:512"`
 	JenkinsBranch            string `gorm:"size:128"`
 	PipelineBoundAt          *time.Time
 	Replicas                 int
@@ -253,11 +254,16 @@ type ReleaseOrderModel struct {
 	BuildID              string    `gorm:"size:128"`
 	BuildStatus          string    `gorm:"size:64"`
 	BuildURL             string    `gorm:"size:512"`
+	JenkinsID            string    `gorm:"size:64;index"`
+	JenkinsJobName       string    `gorm:"size:256"`
+	JenkinsJobURL        string    `gorm:"size:512"`
 	ImageRepository      string    `gorm:"size:512"`
 	ImageTag             string    `gorm:"size:128"`
 	ImageDigest          string    `gorm:"size:128"`
 	TargetEnvironmentID  string    `gorm:"size:64;index;not null"`
 	AgentID              string    `gorm:"size:64;index"`
+	ServiceIDs           string    `gorm:"type:text"`
+	ServiceNames         string    `gorm:"type:text"`
 	Status               string    `gorm:"size:32;index;not null"`
 	Progress             int       `gorm:"not null"`
 	SelectedServiceCount int       `gorm:"not null"`

@@ -93,6 +93,7 @@ export type ProductService = {
   privateRegistryHost?: string
   privateRegistryConfirmed?: boolean
   jenkinsJobName?: string
+  jenkinsJobUrl?: string
   jenkinsBranch?: string
   jenkinsPipelineBound?: boolean
   pipelineBoundAt?: string
@@ -174,6 +175,10 @@ export async function listEnvironmentServices(id: string): Promise<ProductServic
   return result.items
 }
 
+export async function syncEnvironmentServices(id: string): Promise<ProductService[]> {
+  return postData<ProductService[]>(`/api/environments/${id}/services/sync-runtime`)
+}
+
 export async function listDiscoveredEnvironmentServices(id: string): Promise<DiscoveredProductService[]> {
   const result = await getData<PageResult<DiscoveredProductService>>(
     `/api/environments/${id}/discovered-services?pageSize=500`,
@@ -202,7 +207,7 @@ export async function confirmEnvironmentServiceRegistry(
 export async function bindEnvironmentServicePipeline(
   id: string,
   serviceId: string,
-  payload: { jenkinsJobName: string; jenkinsBranch: string },
+  payload: { jenkinsJobName: string; jenkinsJobUrl?: string; jenkinsBranch?: string },
 ): Promise<ProductService> {
   return postData<ProductService>(`/api/environments/${id}/services/${serviceId}/pipeline`, payload)
 }

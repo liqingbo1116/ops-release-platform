@@ -3,38 +3,25 @@
     <el-card v-for="entry in items" :key="entry.id" shadow="never" class="changelog-card">
       <div class="changelog-head">
         <div>
-          <div class="changelog-version">{{ entry.version }} · {{ entry.title }}</div>
-          <div class="changelog-meta">{{ entry.releasedAt }} / {{ entry.operator }}</div>
+          <div class="changelog-version">{{ entry.title }}</div>
+          <div class="changelog-meta">{{ entry.createdAt }} / {{ entry.author || '未知' }}</div>
         </div>
         <el-tag :type="typeMap[entry.type] ?? 'info'" round>{{ labelMap[entry.type] ?? entry.type }}</el-tag>
       </div>
 
-      <div class="changelog-section">
-        <strong>新增功能</strong>
-        <ul>
-          <li v-for="item in entry.features" :key="item">{{ item }}</li>
-        </ul>
+      <div v-if="entry.description" class="changelog-section">
+        {{ entry.description }}
       </div>
-      <div v-if="entry.fixes.length" class="changelog-section">
-        <strong>修复问题</strong>
-        <ul>
-          <li v-for="item in entry.fixes" :key="item">{{ item }}</li>
-        </ul>
-      </div>
-      <div v-if="entry.knownIssues.length" class="changelog-section">
-        <strong>已知问题</strong>
-        <ul>
-          <li v-for="item in entry.knownIssues" :key="item">{{ item }}</li>
-        </ul>
+      <div v-if="entry.tags?.length" class="changelog-tags">
+        <el-tag v-for="tag in entry.tags" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
       </div>
     </el-card>
+    <el-empty v-if="!items.length" description="暂无更新日志" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { changelogMockData } from '@/api/mockData/changelog'
-
-type ChangelogEntry = (typeof changelogMockData.changelog)[number]
+import type { ChangelogEntry } from '@/api/changelog'
 
 defineProps<{
   items: ChangelogEntry[]
@@ -54,3 +41,39 @@ const labelMap: Record<string, string> = {
   SECURITY: '安全',
 }
 </script>
+
+<style scoped>
+.changelog-list {
+  display: grid;
+  gap: 12px;
+}
+
+.changelog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.changelog-version {
+  font-weight: 700;
+}
+
+.changelog-meta {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.changelog-section {
+  margin-top: 12px;
+  color: var(--el-text-color-regular);
+}
+
+.changelog-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+</style>

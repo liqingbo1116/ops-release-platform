@@ -1,7 +1,6 @@
 package api
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -52,10 +51,12 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol agent.Protoco
 	api.POST("/environments/:id/remote-probe", handler.ProbeEnvironment)
 	api.GET("/environments/:id/discovered-services", handler.ListDiscoveredEnvironmentServices)
 	api.GET("/environments/:id/services", handler.ListEnvironmentServices)
+	api.POST("/environments/:id/services/sync-runtime", handler.SyncEnvironmentServicesFromRuntime)
 	api.POST("/environments/:id/services/adopt", handler.AdoptEnvironmentServices)
 	api.POST("/environments/:id/services/remove", handler.RemoveEnvironmentServices)
 	api.POST("/environments/:id/services/confirm-registry", handler.ConfirmEnvironmentServiceRegistry)
 	api.POST("/environments/:id/services/:serviceId/pipeline", handler.BindEnvironmentServicePipeline)
+	api.GET("/environments/:id/services/:serviceId/releases", handler.ListEnvironmentServiceReleases)
 	api.GET("/kubernetes-clusters", handler.ListKubernetesClusters)
 	api.POST("/kubernetes-clusters", handler.CreateKubernetesCluster)
 	api.PUT("/kubernetes-clusters/:id", handler.UpdateKubernetesCluster)
@@ -108,12 +109,8 @@ func NewRouter(repo repository.Store, queue *agent.Queue, protocol agent.Protoco
 }
 
 func BuildRepository(db *gorm.DB) repository.Store {
-	mockRepo, err := repository.NewMockRepository()
-	if err != nil {
-		log.Fatalf("load mock repository: %v", err)
-	}
 	if db == nil {
-		return mockRepo
+		panic("database is required")
 	}
-	return repository.NewDatabaseStore(db, mockRepo)
+	return repository.NewDatabaseStore(db)
 }

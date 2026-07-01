@@ -1,26 +1,41 @@
-import { userMockData } from './mockData/user'
-import { getData, type PageResult, useMockApi } from './client'
+import { getData, type PageResult } from './client'
+
+export type UserInfo = {
+  id: string
+  username: string
+  displayName: string
+  roles: string[]
+  status: string
+  lastLoginAt?: string
+}
+
+export type RoleInfo = {
+  id: string
+  name: string
+  description?: string
+  permissions?: string[]
+}
+
+export type EnvironmentPermission = {
+  id: string
+  roleId: string
+  roleName: string
+  environmentId: string
+  environmentName: string
+  actions: string[]
+}
 
 export async function listUsers() {
-  if (!useMockApi) {
-    const result = await getData<PageResult<typeof userMockData.users[number]>>('/api/users')
-    return result.items
-  }
-  return Promise.resolve(userMockData.users)
+  const result = await getData<PageResult<UserInfo>>('/api/users')
+  return result.items
 }
 
 export async function listRoles() {
-  if (!useMockApi) {
-    const result = await getData<PageResult<typeof userMockData.roles[number]>>('/api/roles')
-    return result.items
-  }
-  return Promise.resolve(userMockData.roles)
+  const result = await getData<PageResult<RoleInfo>>('/api/roles')
+  return result.items
 }
 
 export async function listPermissions() {
-  if (!useMockApi) {
-    const result = await getData<PageResult<typeof userMockData.permissions[number]>>('/api/permissions')
-    return result.items
-  }
-  return Promise.resolve(userMockData.permissions)
+  const result = await getData<PageResult<EnvironmentPermission>>('/api/permissions')
+  return result.items
 }

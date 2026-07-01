@@ -69,19 +69,17 @@
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { createBaseline, listBaselines, lockBaseline } from '@/api/baselines'
-import { listEnvironments } from '@/api/environments'
+import { createBaseline, listBaselines, lockBaseline, type BaselineListItem } from '@/api/baselines'
+import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import StatusTag from '@/components/StatusTag.vue'
-import { baselineMockData } from '@/api/mockData/baseline'
-import { environmentMockData } from '@/api/mockData/environment'
 import { formatDateTime } from '@/utils/format'
 
 const router = useRouter()
 const keyword = ref('')
 const loading = ref(false)
-const rows = ref([...baselineMockData.baselines])
-const environments = ref([...environmentMockData.environments])
-const selectedRows = ref<typeof baselineMockData.baselines>([])
+const rows = ref<BaselineListItem[]>([])
+const environments = ref<EnvironmentInfo[]>([])
+const selectedRows = ref<BaselineListItem[]>([])
 const createDialogVisible = ref(false)
 const creating = ref(false)
 const createForm = ref({
@@ -98,7 +96,7 @@ const filteredRows = computed(() => {
   )
 })
 
-function handleSelectionChange(selection: typeof baselineMockData.baselines) {
+function handleSelectionChange(selection: BaselineListItem[]) {
   selectedRows.value = selection
 }
 
@@ -157,7 +155,8 @@ async function loadEnvironments() {
   try {
     environments.value = await listEnvironments()
   } catch {
-    environments.value = [...environmentMockData.environments]
+    ElMessage.error('加载环境列表失败')
+    environments.value = []
   }
 }
 
@@ -166,8 +165,8 @@ async function loadRows() {
   try {
     rows.value = await listBaselines()
   } catch {
-    ElMessage.warning('加载基线列表失败，已显示本地示例数据')
-    rows.value = [...baselineMockData.baselines]
+    ElMessage.error('加载基线列表失败')
+    rows.value = []
   } finally {
     loading.value = false
   }

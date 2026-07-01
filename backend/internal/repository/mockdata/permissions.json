@@ -1,6 +1,0 @@
-[
-  {"environmentId":"env-local-prod","environmentName":"本地生产环境","roleCode":"PLATFORM_ADMIN","scope":"ALL","actions":["read","write","deploy","release"]},
-  {"environmentId":"env-project-x-prod","environmentName":"项目 X 生产","roleCode":"OPS","scope":"PROJECT","actions":["read","deploy","release"]},
-  {"environmentId":"env-project-x-prod","environmentName":"项目 X 生产","roleCode":"DEVELOPER","scope":"PROJECT","actions":["read","release:create"]},
-  {"environmentId":"env-project-z-prod","environmentName":"项目 Z 生产","roleCode":"VIEWER","scope":"PROJECT","actions":["read"]}
-]

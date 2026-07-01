@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,25 +29,697 @@ var ErrNotImplemented = errors.New("integration operation is not implemented")
 func NewRealSuite(cfg Config, timeout time.Duration) (Suite, error) {
 	registries := compactRegistries(cfg.Registries)
 	clusters := compactClusters(cfg.Clusters)
-	if len(registries) == 0 || len(clusters) == 0 {
-		return Suite{}, ErrMissingRealConfig
-	}
 	client := &http.Client{Timeout: timeout}
-	return Suite{
-		Jenkins:    UnsupportedJenkinsAdapter{},
-		Registry:   RealRegistryAdapter{configs: registries, client: client},
-		Kubernetes: RealKubernetesAdapter{configs: clusters, timeout: timeout},
+	suite := Suite{
+		Jenkins:    RealJenkinsAdapter{client: client},
+		Registry:   UnsupportedRegistryAdapter{},
+		Kubernetes: UnsupportedKubernetesAdapter{},
+	}
+	if len(registries) > 0 {
+		suite.Registry = RealRegistryAdapter{configs: registries, client: client}
+	}
+	if len(clusters) > 0 {
+		suite.Kubernetes = RealKubernetesAdapter{configs: clusters, timeout: timeout}
+	}
+	return suite, nil
+}
+
+func NewRealJenkinsAdapter(timeout time.Duration) JenkinsAdapter {
+	return RealJenkinsAdapter{client: &http.Client{Timeout: timeout}}
+}
+
+type RealJenkinsAdapter struct {
+	client *http.Client
+}
+
+type UnsupportedRegistryAdapter struct{}
+
+func (UnsupportedRegistryAdapter) CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error) {
+	if err := ctx.Err(); err != nil {
+		return IntegrationCheck{}, err
+	}
+	return IntegrationCheck{}, ErrMissingRealConfig
+}
+
+func (UnsupportedRegistryAdapter) ListImageTags(ctx context.Context, environment domain.Environment, repository string) ([]ImageInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, ErrMissingRealConfig
+}
+
+func (UnsupportedRegistryAdapter) GetImage(ctx context.Context, image string, tag string) (ImageInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return ImageInfo{}, err
+	}
+	return ImageInfo{}, ErrMissingRealConfig
+}
+
+func (UnsupportedRegistryAdapter) SyncImage(ctx context.Context, req SyncImageRequest) (SyncImageResult, error) {
+	if err := ctx.Err(); err != nil {
+		return SyncImageResult{}, err
+	}
+	return SyncImageResult{}, ErrMissingRealConfig
+}
+
+type UnsupportedKubernetesAdapter struct{}
+
+func (UnsupportedKubernetesAdapter) CheckConnection(ctx context.Context, environment domain.Environment) (IntegrationCheck, error) {
+	if err := ctx.Err(); err != nil {
+		return IntegrationCheck{}, err
+	}
+	return IntegrationCheck{}, ErrMissingRealConfig
+}
+
+func (UnsupportedKubernetesAdapter) ListWorkloads(ctx context.Context, environment domain.Environment) ([]Workload, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, ErrMissingRealConfig
+}
+
+func (UnsupportedKubernetesAdapter) SetImage(ctx context.Context, environmentID string, req SetImageRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return ErrMissingRealConfig
+}
+
+func (UnsupportedKubernetesAdapter) GetRolloutStatus(ctx context.Context, environmentID string, workload string) (RolloutStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return RolloutStatus{}, err
+	}
+	return RolloutStatus{}, ErrMissingRealConfig
+}
+
+func (a RealJenkinsAdapter) TriggerBuild(ctx context.Context, req BuildRequest) (BuildResult, error) {
+	client := a.clientWithCookieJar(req.InsecureSkipTLSVerify)
+	jobURL, err := jenkinsJobURL(req.JenkinsURL, req.JobName, req.JobURL)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	params := compactBuildParameters(req.Parameters)
+	endpoint := strings.TrimRight(jobURL, "/") + "/build"
+	endpointType := "build"
+	var body io.Reader
+	if req.Parameterized || len(params) > 0 {
+		values := url.Values{}
+		for key, value := range params {
+			values.Set(key, value)
+		}
+		endpoint = strings.TrimRight(jobURL, "/") + "/buildWithParameters"
+		endpointType = "buildWithParameters"
+		body = strings.NewReader(values.Encode())
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	if req.Parameterized || len(params) > 0 {
+		httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	applyJenkinsAuth(httpReq, req.Username, req.Token)
+	crumbApplied := false
+	if crumb, ok := a.jenkinsCrumb(ctx, client, req, jobURL); ok {
+		httpReq.Header.Set(crumb.Field, crumb.Value)
+		for _, cookie := range crumb.Cookies {
+			httpReq.AddCookie(cookie)
+		}
+		crumbApplied = true
+	}
+	httpReq.Header.Set("Referer", jobURL)
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return BuildResult{}, jenkinsTriggerStatusError(resp.StatusCode, endpointType, endpoint, firstNonEmpty(strings.TrimSpace(req.JobName), jobURL), crumbApplied, sortedMapKeys(params), respBody)
+	}
+	location := strings.TrimSpace(resp.Header.Get("Location"))
+	result := BuildResult{Status: "QUEUED", URL: location}
+	if location == "" {
+		result.BuildID = "queued"
+		result.URL = jobURL
+		return result, nil
+	}
+	if queueID := jenkinsQueueID(location); queueID != "" {
+		result.BuildID = "queue:" + queueID
+	}
+	if executable := a.pollJenkinsQueue(ctx, client, req.Username, req.Token, location); executable.Number != "" {
+		result.BuildID = executable.Number
+		result.Status = "BUILDING"
+		result.URL = executable.URL
+	}
+	if result.BuildID == "" {
+		result.BuildID = location
+	}
+	return result, nil
+}
+
+func (a RealJenkinsAdapter) GetJobParameters(ctx context.Context, req JobParametersRequest) ([]domain.JenkinsPipelineParameter, error) {
+	client := a.clientWithCookieJar(req.InsecureSkipTLSVerify)
+	jobURL, err := jenkinsJobURL(req.JenkinsURL, req.JobName, req.JobURL)
+	if err != nil {
+		return nil, err
+	}
+	tree := "property[parameterDefinitions[name,type,description,defaultParameterValue[value]]]"
+	endpoint := strings.TrimRight(jobURL, "/") + "/api/json?tree=" + url.QueryEscape(tree)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	applyJenkinsAuth(httpReq, req.Username, req.Token)
+	if crumb, ok := a.jenkinsCrumb(ctx, client, BuildRequest{
+		JenkinsURL:            req.JenkinsURL,
+		Username:              req.Username,
+		Token:                 req.Token,
+		InsecureSkipTLSVerify: req.InsecureSkipTLSVerify,
+	}, jobURL); ok {
+		httpReq.Header.Set(crumb.Field, crumb.Value)
+		for _, cookie := range crumb.Cookies {
+			httpReq.AddCookie(cookie)
+		}
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("jenkins job parameters returned %d: %s", resp.StatusCode, compactHTTPErrorBody(body))
+	}
+	var payload struct {
+		Property []jenkinsJobPropertyResponse `json:"property"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	return jenkinsParametersFromProperties(payload.Property), nil
+}
+
+func (a RealJenkinsAdapter) GetBuildStatus(ctx context.Context, req BuildStatusRequest) (BuildStatus, error) {
+	client := a.clientFor(req.InsecureSkipTLSVerify)
+	if queueURL := jenkinsQueueURL(req); queueURL != "" {
+		status, ready, err := a.jenkinsQueueStatus(ctx, client, req.Username, req.Token, queueURL, req.LogLineLimit)
+		if err != nil {
+			return BuildStatus{}, err
+		}
+		if !ready {
+			return status, nil
+		}
+		req.BuildID = status.BuildID
+		req.BuildURL = status.URL
+	}
+	buildURL, err := jenkinsBuildURL(req)
+	if err != nil {
+		return BuildStatus{}, err
+	}
+	apiURL := strings.TrimRight(buildURL, "/") + "/api/json"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return BuildStatus{}, err
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	applyJenkinsAuth(httpReq, req.Username, req.Token)
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return BuildStatus{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return BuildStatus{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return BuildStatus{}, fmt.Errorf("jenkins build status returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		ID        string `json:"id"`
+		Number    int    `json:"number"`
+		Building  bool   `json:"building"`
+		Result    string `json:"result"`
+		Timestamp int64  `json:"timestamp"`
+		Duration  int64  `json:"duration"`
+		URL       string `json:"url"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return BuildStatus{}, err
+	}
+	status := strings.TrimSpace(payload.Result)
+	if status == "" && payload.Building {
+		status = "BUILDING"
+	}
+	if status == "" {
+		status = "QUEUED"
+	}
+	buildID := strings.TrimSpace(payload.ID)
+	if buildID == "" && payload.Number > 0 {
+		buildID = fmt.Sprint(payload.Number)
+	}
+	if buildID == "" {
+		buildID = strings.TrimSpace(req.BuildID)
+	}
+	finalURL := firstNonEmpty(strings.TrimSpace(payload.URL), buildURL)
+	logURL := strings.TrimRight(finalURL, "/") + "/console"
+	logs := a.jenkinsConsoleLogs(ctx, client, req.Username, req.Token, finalURL, req.LogLineLimit)
+	return BuildStatus{
+		BuildID:    buildID,
+		Status:     status,
+		StartedAt:  formatJenkinsMillis(payload.Timestamp),
+		FinishedAt: formatJenkinsFinishedAt(payload.Timestamp, payload.Duration, payload.Building),
+		LogURL:     logURL,
+		URL:        finalURL,
+		Logs:       logs,
 	}, nil
 }
 
-type UnsupportedJenkinsAdapter struct{}
-
-func (UnsupportedJenkinsAdapter) TriggerBuild(ctx context.Context, req BuildRequest) (BuildResult, error) {
-	return BuildResult{}, ErrNotImplemented
+func compactHTTPErrorBody(body []byte) string {
+	message := strings.TrimSpace(string(body))
+	if message == "" {
+		return "empty response"
+	}
+	message = strings.ReplaceAll(message, "\r\n", "\n")
+	lines := strings.Split(message, "\n")
+	compact := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		compact = append(compact, trimmed)
+		if len(compact) >= 3 {
+			break
+		}
+	}
+	message = strings.Join(compact, " ")
+	if len(message) > 500 {
+		return message[:500] + "..."
+	}
+	return message
 }
 
-func (UnsupportedJenkinsAdapter) GetBuildStatus(ctx context.Context, buildID string) (BuildStatus, error) {
-	return BuildStatus{}, ErrNotImplemented
+type jenkinsCrumbResponse struct {
+	Field   string `json:"crumbRequestField"`
+	Value   string `json:"crumb"`
+	Cookies []*http.Cookie
+}
+
+type jenkinsExecutable struct {
+	Number string
+	URL    string
+}
+
+func (a RealJenkinsAdapter) clientFor(insecure bool) *http.Client {
+	if !insecure && a.client != nil {
+		return a.client
+	}
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
+		},
+	}
+}
+
+func (a RealJenkinsAdapter) clientWithCookieJar(insecure bool) *http.Client {
+	base := a.clientFor(insecure)
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{
+		Timeout:   base.Timeout,
+		Transport: base.Transport,
+		Jar:       jar,
+	}
+}
+
+func (a RealJenkinsAdapter) jenkinsCrumb(ctx context.Context, client *http.Client, req BuildRequest, jobURL string) (jenkinsCrumbResponse, bool) {
+	endpoints := []string{}
+	if endpoint, err := jenkinsRootEndpoint(jobURL, "/crumbIssuer/api/json"); err == nil {
+		endpoints = append(endpoints, endpoint)
+	}
+	if endpoint, err := appendURLPath(req.JenkinsURL, "/crumbIssuer/api/json"); err == nil {
+		endpoints = append(endpoints, endpoint)
+	}
+	for _, endpoint := range compactStringList(endpoints) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			continue
+		}
+		httpReq.Header.Set("Accept", "application/json")
+		applyJenkinsAuth(httpReq, req.Username, req.Token)
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+			_ = resp.Body.Close()
+			continue
+		}
+		var crumb jenkinsCrumbResponse
+		err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&crumb)
+		crumb.Cookies = resp.Cookies()
+		_ = resp.Body.Close()
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(crumb.Field) != "" && strings.TrimSpace(crumb.Value) != "" {
+			return crumb, true
+		}
+	}
+	return jenkinsCrumbResponse{}, false
+}
+
+func (a RealJenkinsAdapter) pollJenkinsQueue(ctx context.Context, client *http.Client, username string, token string, queueURL string) jenkinsExecutable {
+	endpoint := strings.TrimRight(queueURL, "/") + "/api/json"
+	for attempt := 0; attempt < 8; attempt++ {
+		select {
+		case <-ctx.Done():
+			return jenkinsExecutable{}
+		case <-time.After(time.Duration(attempt+1) * 500 * time.Millisecond):
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return jenkinsExecutable{}
+		}
+		httpReq.Header.Set("Accept", "application/json")
+		applyJenkinsAuth(httpReq, username, token)
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			continue
+		}
+		var payload struct {
+			Executable struct {
+				Number int    `json:"number"`
+				URL    string `json:"url"`
+			} `json:"executable"`
+		}
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload)
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 || decodeErr != nil {
+			continue
+		}
+		if payload.Executable.Number > 0 && strings.TrimSpace(payload.Executable.URL) != "" {
+			return jenkinsExecutable{Number: fmt.Sprint(payload.Executable.Number), URL: strings.TrimSpace(payload.Executable.URL)}
+		}
+	}
+	return jenkinsExecutable{}
+}
+
+func (a RealJenkinsAdapter) jenkinsQueueStatus(ctx context.Context, client *http.Client, username string, token string, queueURL string, limit int) (BuildStatus, bool, error) {
+	endpoint := strings.TrimRight(queueURL, "/") + "/api/json"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return BuildStatus{}, false, err
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	applyJenkinsAuth(httpReq, username, token)
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return BuildStatus{}, false, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return BuildStatus{}, false, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return BuildStatus{}, false, fmt.Errorf("jenkins queue status returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		ID         int    `json:"id"`
+		Why        string `json:"why"`
+		Executable struct {
+			Number int    `json:"number"`
+			URL    string `json:"url"`
+		} `json:"executable"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return BuildStatus{}, false, err
+	}
+	if payload.Executable.Number > 0 && strings.TrimSpace(payload.Executable.URL) != "" {
+		return BuildStatus{
+			BuildID: fmt.Sprint(payload.Executable.Number),
+			Status:  "BUILDING",
+			URL:     strings.TrimSpace(payload.Executable.URL),
+			LogURL:  strings.TrimRight(strings.TrimSpace(payload.Executable.URL), "/") + "/console",
+			Logs:    a.jenkinsConsoleLogs(ctx, client, username, token, payload.Executable.URL, limit),
+		}, true, nil
+	}
+	buildID := "queued"
+	if payload.ID > 0 {
+		buildID = "queue:" + fmt.Sprint(payload.ID)
+	}
+	message := strings.TrimSpace(payload.Why)
+	if message == "" {
+		message = "Jenkins 构建仍在队列中"
+	}
+	return BuildStatus{
+		BuildID: buildID,
+		Status:  "QUEUED",
+		URL:     strings.TrimRight(queueURL, "/"),
+		Logs:    []string{message},
+	}, false, nil
+}
+
+func (a RealJenkinsAdapter) jenkinsConsoleLogs(ctx context.Context, client *http.Client, username string, token string, buildURL string, limit int) []string {
+	endpoint := strings.TrimRight(buildURL, "/") + "/consoleText"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return []string{}
+	}
+	applyJenkinsAuth(httpReq, username, token)
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return []string{}
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return []string{}
+	}
+	return tailLines(string(body), limit)
+}
+
+func applyJenkinsAuth(req *http.Request, username string, token string) {
+	if strings.TrimSpace(username) != "" || strings.TrimSpace(token) != "" {
+		req.SetBasicAuth(username, token)
+	}
+}
+
+func compactBuildParameters(values map[string]string) map[string]string {
+	result := make(map[string]string)
+	for key, value := range values {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" {
+			continue
+		}
+		result[trimmedKey] = value
+	}
+	return result
+}
+
+func sortedMapKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func compactStringList(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func isJenkinsBranchParameter(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "branch", "branch_name", "branchname", "git_branch", "gitbranch", "git_branch_name", "gitbranchname", "ref", "git_ref":
+		return true
+	default:
+		return false
+	}
+}
+
+func jenkinsTriggerStatusError(status int, endpointType string, endpoint string, job string, crumbApplied bool, parameterNames []string, body []byte) error {
+	response := compactHTTPErrorBody(body)
+	endpointURL := sanitizeJenkinsErrorURL(endpoint)
+	params := strings.Join(parameterNames, ",")
+	if params == "" {
+		params = "none"
+	}
+	if status == http.StatusForbidden {
+		return fmt.Errorf(
+			"Jenkins 返回 403：请检查 Jenkins 用户/API Token 是否有该 Pipeline 的 Build 权限、是否允许远程触发构建，或 Jenkins CSRF Crumb 配置；endpoint=%s url=%s job=%s crumb=%t params=%s response=%s",
+			endpointType,
+			endpointURL,
+			job,
+			crumbApplied,
+			params,
+			response,
+		)
+	}
+	return fmt.Errorf(
+		"jenkins trigger returned status %d: endpoint=%s url=%s job=%s crumb=%t params=%s response=%s",
+		status,
+		endpointType,
+		endpointURL,
+		job,
+		crumbApplied,
+		params,
+		response,
+	)
+}
+
+func jenkinsRootEndpoint(raw string, path string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("jenkins url is invalid")
+	}
+	parsed.Path = path
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func sanitizeJenkinsErrorURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimSpace(raw)
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func jenkinsJobURL(baseURL string, jobName string, jobURL string) (string, error) {
+	if trimmed := strings.TrimSpace(jobURL); trimmed != "" {
+		return strings.TrimRight(trimmed, "/"), nil
+	}
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	job := strings.TrimSpace(jobName)
+	if base == "" || job == "" {
+		return "", fmt.Errorf("jenkins url and job name are required")
+	}
+	parts := strings.Split(job, "/")
+	escaped := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			escaped = append(escaped, "job", url.PathEscape(trimmed))
+		}
+	}
+	if len(escaped) == 0 {
+		return "", fmt.Errorf("jenkins job name is required")
+	}
+	return base + "/" + strings.Join(escaped, "/"), nil
+}
+
+func jenkinsBuildURL(req BuildStatusRequest) (string, error) {
+	if trimmed := strings.TrimSpace(req.BuildURL); trimmed != "" && !strings.HasPrefix(trimmed, "queue:") {
+		if strings.Contains(trimmed, "/queue/item/") {
+			return "", fmt.Errorf("jenkins executable build is not ready")
+		}
+		return strings.TrimRight(trimmed, "/"), nil
+	}
+	buildID := strings.TrimSpace(req.BuildID)
+	if strings.HasPrefix(buildID, "queue:") || buildID == "" || buildID == "queued" {
+		return "", fmt.Errorf("jenkins executable build is not ready")
+	}
+	jobURL, err := jenkinsJobURL(req.JenkinsURL, req.JobName, req.JobURL)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(jobURL, "/") + "/" + url.PathEscape(buildID), nil
+}
+
+func jenkinsQueueURL(req BuildStatusRequest) string {
+	if trimmed := strings.TrimRight(strings.TrimSpace(req.BuildURL), "/"); strings.Contains(trimmed, "/queue/item/") {
+		return trimmed
+	}
+	if buildID := strings.TrimSpace(req.BuildID); strings.HasPrefix(buildID, "queue:") {
+		queueID := strings.TrimSpace(strings.TrimPrefix(buildID, "queue:"))
+		if queueID == "" {
+			return ""
+		}
+		base := strings.TrimRight(strings.TrimSpace(req.JenkinsURL), "/")
+		if base == "" {
+			if jobURL := strings.TrimSpace(req.JobURL); jobURL != "" {
+				parsed, err := url.Parse(jobURL)
+				if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+					base = parsed.Scheme + "://" + parsed.Host
+				}
+			}
+		}
+		if base == "" {
+			return ""
+		}
+		return base + "/queue/item/" + url.PathEscape(queueID)
+	}
+	return ""
+}
+
+func jenkinsQueueID(location string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(location), "/")
+	index := strings.LastIndex(trimmed, "/")
+	if index < 0 || index == len(trimmed)-1 {
+		return ""
+	}
+	value := trimmed[index+1:]
+	if _, err := strconv.Atoi(value); err != nil {
+		return ""
+	}
+	return value
+}
+
+func formatJenkinsMillis(value int64) string {
+	if value <= 0 {
+		return ""
+	}
+	return time.UnixMilli(value).Format(time.RFC3339)
+}
+
+func formatJenkinsFinishedAt(start int64, duration int64, building bool) string {
+	if start <= 0 || duration <= 0 || building {
+		return ""
+	}
+	return time.UnixMilli(start + duration).Format(time.RFC3339)
+}
+
+func tailLines(text string, limit int) []string {
+	if limit <= 0 {
+		limit = 200
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	return lines
 }
 
 type RealRegistryAdapter struct {
@@ -460,6 +1135,61 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+type jenkinsJobPropertyResponse struct {
+	ParameterDefinitions []jenkinsParameterDefinitionResponse `json:"parameterDefinitions"`
+}
+
+type jenkinsParameterDefinitionResponse struct {
+	Name                  string `json:"name"`
+	Type                  string `json:"type"`
+	Description           string `json:"description"`
+	DefaultParameterValue *struct {
+		Value any `json:"value"`
+	} `json:"defaultParameterValue"`
+}
+
+func jenkinsParametersFromProperties(properties []jenkinsJobPropertyResponse) []domain.JenkinsPipelineParameter {
+	parameters := make([]domain.JenkinsPipelineParameter, 0)
+	for _, property := range properties {
+		for _, definition := range property.ParameterDefinitions {
+			name := strings.TrimSpace(definition.Name)
+			if name == "" {
+				continue
+			}
+			defaultValue := ""
+			if definition.DefaultParameterValue != nil {
+				defaultValue = jenkinsDefaultParameterValue(definition.DefaultParameterValue.Value)
+			}
+			parameters = append(parameters, domain.JenkinsPipelineParameter{
+				Name:         name,
+				Type:         strings.TrimSpace(definition.Type),
+				DefaultValue: defaultValue,
+				Description:  strings.TrimSpace(definition.Description),
+				Required:     definition.DefaultParameterValue == nil,
+			})
+		}
+	}
+	return parameters
+}
+
+func jenkinsDefaultParameterValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	case float64:
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", typed), "0"), ".")
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 type harborArtifact struct {

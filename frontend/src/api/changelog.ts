@@ -1,10 +1,16 @@
-import { changelogMockData } from './mockData/changelog'
-import { getData, type PageResult, useMockApi } from './client'
+import { getData, type PageResult } from './client'
+
+export type ChangelogEntry = {
+  id: string
+  title: string
+  type: string
+  description?: string
+  author?: string
+  createdAt: string
+  tags?: string[]
+}
 
 export async function listChangelog() {
-  if (!useMockApi) {
-    const result = await getData<PageResult<typeof changelogMockData.changelog[number]>>('/api/changelog')
-    return result.items
-  }
-  return Promise.resolve(changelogMockData.changelog)
+  const result = await getData<PageResult<ChangelogEntry>>('/api/changelog')
+  return result.items
 }
